@@ -600,7 +600,9 @@ enum vulkan_device_extension_bits {
 	VULKAN_DEVICE_DISPLAY_CONTROL = 4096,
 	VULKAN_DEVICE_INCREMENTAL_PRESENT = 8192,
 	VULKAN_DEVICE_VIDEO_DECODE_H265 = 16384,
-	VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1 = 32768
+	VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1 = 32768,
+	VULKAN_DEVICE_VIDEO_ENCODE_QUEUE = 65536,
+	VULKAN_DEVICE_VIDEO_ENCODE_H264 = 131072
 };
 
 /*
@@ -686,6 +688,7 @@ struct vulkan_context {
 	 */
 	VkBool32 video_h264;
 	VkBool32 video_h265;
+	VkBool32 video_encode_h264;
 	/*
 	 * The native renderer's promise that GPU_COMMAND runs a transaction at
 	 * once on the caller's thread, its replies written when the call

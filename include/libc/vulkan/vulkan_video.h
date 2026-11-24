@@ -7,7 +7,7 @@
 
 /*
  * This file is a derived work of the Khronos Vulkan-Headers
- * (Vulkan Video H.264 and H.265 decode and synchronization2).
+ * (Vulkan Video H.264 and H.265 decode, H.264 encode and synchronization2).
  * The Vulkan API declarations it contains are:
  * Copyright 2015-2025 The Khronos Group Inc.
  *
@@ -21,6 +21,7 @@
 
 #include "vulkan_core.h"
 #include "vk_video/vulkan_video_codec_h264std_decode.h"
+#include "vk_video/vulkan_video_codec_h264std_encode.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -632,6 +633,206 @@ VKAPI_ATTR void VKAPI_CALL vkCmdDecodeVideoKHR(
 #endif
 
 
+// VK_KHR_video_encode_h264 is a preprocessor guard. Do not pass it to API calls.
+#define VK_KHR_video_encode_h264 1
+#include "vk_video/vulkan_video_codec_h264std.h"
+#include "vk_video/vulkan_video_codec_h264std_encode.h"
+#define VK_KHR_VIDEO_ENCODE_H264_SPEC_VERSION 14
+#define VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME "VK_KHR_video_encode_h264"
+
+typedef enum VkVideoEncodeH264CapabilityFlagBitsKHR {
+    VK_VIDEO_ENCODE_H264_CAPABILITY_HRD_COMPLIANCE_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_PREDICTION_WEIGHT_TABLE_GENERATED_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_ROW_UNALIGNED_SLICE_BIT_KHR = 0x00000004,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_DIFFERENT_SLICE_TYPE_BIT_KHR = 0x00000008,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_B_FRAME_IN_L0_LIST_BIT_KHR = 0x00000010,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_B_FRAME_IN_L1_LIST_BIT_KHR = 0x00000020,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_PER_PICTURE_TYPE_MIN_MAX_QP_BIT_KHR = 0x00000040,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_PER_SLICE_CONSTANT_QP_BIT_KHR = 0x00000080,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_GENERATE_PREFIX_NALU_BIT_KHR = 0x00000100,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_MB_QP_DIFF_WRAPAROUND_BIT_KHR = 0x00000200,
+    VK_VIDEO_ENCODE_H264_CAPABILITY_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeH264CapabilityFlagBitsKHR;
+typedef VkFlags VkVideoEncodeH264CapabilityFlagsKHR;
+
+typedef enum VkVideoEncodeH264StdFlagBitsKHR {
+    VK_VIDEO_ENCODE_H264_STD_SEPARATE_COLOR_PLANE_FLAG_SET_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_H264_STD_QPPRIME_Y_ZERO_TRANSFORM_BYPASS_FLAG_SET_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_H264_STD_SCALING_MATRIX_PRESENT_FLAG_SET_BIT_KHR = 0x00000004,
+    VK_VIDEO_ENCODE_H264_STD_CHROMA_QP_INDEX_OFFSET_BIT_KHR = 0x00000008,
+    VK_VIDEO_ENCODE_H264_STD_SECOND_CHROMA_QP_INDEX_OFFSET_BIT_KHR = 0x00000010,
+    VK_VIDEO_ENCODE_H264_STD_PIC_INIT_QP_MINUS26_BIT_KHR = 0x00000020,
+    VK_VIDEO_ENCODE_H264_STD_WEIGHTED_PRED_FLAG_SET_BIT_KHR = 0x00000040,
+    VK_VIDEO_ENCODE_H264_STD_WEIGHTED_BIPRED_IDC_EXPLICIT_BIT_KHR = 0x00000080,
+    VK_VIDEO_ENCODE_H264_STD_WEIGHTED_BIPRED_IDC_IMPLICIT_BIT_KHR = 0x00000100,
+    VK_VIDEO_ENCODE_H264_STD_TRANSFORM_8X8_MODE_FLAG_SET_BIT_KHR = 0x00000200,
+    VK_VIDEO_ENCODE_H264_STD_DIRECT_SPATIAL_MV_PRED_FLAG_UNSET_BIT_KHR = 0x00000400,
+    VK_VIDEO_ENCODE_H264_STD_ENTROPY_CODING_MODE_FLAG_UNSET_BIT_KHR = 0x00000800,
+    VK_VIDEO_ENCODE_H264_STD_ENTROPY_CODING_MODE_FLAG_SET_BIT_KHR = 0x00001000,
+    VK_VIDEO_ENCODE_H264_STD_DIRECT_8X8_INFERENCE_FLAG_UNSET_BIT_KHR = 0x00002000,
+    VK_VIDEO_ENCODE_H264_STD_CONSTRAINED_INTRA_PRED_FLAG_SET_BIT_KHR = 0x00004000,
+    VK_VIDEO_ENCODE_H264_STD_DEBLOCKING_FILTER_DISABLED_BIT_KHR = 0x00008000,
+    VK_VIDEO_ENCODE_H264_STD_DEBLOCKING_FILTER_ENABLED_BIT_KHR = 0x00010000,
+    VK_VIDEO_ENCODE_H264_STD_DEBLOCKING_FILTER_PARTIAL_BIT_KHR = 0x00020000,
+    VK_VIDEO_ENCODE_H264_STD_SLICE_QP_DELTA_BIT_KHR = 0x00080000,
+    VK_VIDEO_ENCODE_H264_STD_DIFFERENT_SLICE_QP_DELTA_BIT_KHR = 0x00100000,
+    VK_VIDEO_ENCODE_H264_STD_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeH264StdFlagBitsKHR;
+typedef VkFlags VkVideoEncodeH264StdFlagsKHR;
+
+typedef enum VkVideoEncodeH264RateControlFlagBitsKHR {
+    VK_VIDEO_ENCODE_H264_RATE_CONTROL_ATTEMPT_HRD_COMPLIANCE_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_H264_RATE_CONTROL_REGULAR_GOP_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_H264_RATE_CONTROL_REFERENCE_PATTERN_FLAT_BIT_KHR = 0x00000004,
+    VK_VIDEO_ENCODE_H264_RATE_CONTROL_REFERENCE_PATTERN_DYADIC_BIT_KHR = 0x00000008,
+    VK_VIDEO_ENCODE_H264_RATE_CONTROL_TEMPORAL_LAYER_PATTERN_DYADIC_BIT_KHR = 0x00000010,
+    VK_VIDEO_ENCODE_H264_RATE_CONTROL_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeH264RateControlFlagBitsKHR;
+typedef VkFlags VkVideoEncodeH264RateControlFlagsKHR;
+typedef struct VkVideoEncodeH264CapabilitiesKHR {
+    VkStructureType                        sType;
+    void*                                  pNext;
+    VkVideoEncodeH264CapabilityFlagsKHR    flags;
+    StdVideoH264LevelIdc                   maxLevelIdc;
+    uint32_t                               maxSliceCount;
+    uint32_t                               maxPPictureL0ReferenceCount;
+    uint32_t                               maxBPictureL0ReferenceCount;
+    uint32_t                               maxL1ReferenceCount;
+    uint32_t                               maxTemporalLayerCount;
+    VkBool32                               expectDyadicTemporalLayerPattern;
+    int32_t                                minQp;
+    int32_t                                maxQp;
+    VkBool32                               prefersGopRemainingFrames;
+    VkBool32                               requiresGopRemainingFrames;
+    VkVideoEncodeH264StdFlagsKHR           stdSyntaxFlags;
+} VkVideoEncodeH264CapabilitiesKHR;
+
+typedef struct VkVideoEncodeH264QpKHR {
+    int32_t    qpI;
+    int32_t    qpP;
+    int32_t    qpB;
+} VkVideoEncodeH264QpKHR;
+
+typedef struct VkVideoEncodeH264QualityLevelPropertiesKHR {
+    VkStructureType                         sType;
+    void*                                   pNext;
+    VkVideoEncodeH264RateControlFlagsKHR    preferredRateControlFlags;
+    uint32_t                                preferredGopFrameCount;
+    uint32_t                                preferredIdrPeriod;
+    uint32_t                                preferredConsecutiveBFrameCount;
+    uint32_t                                preferredTemporalLayerCount;
+    VkVideoEncodeH264QpKHR                  preferredConstantQp;
+    uint32_t                                preferredMaxL0ReferenceCount;
+    uint32_t                                preferredMaxL1ReferenceCount;
+    VkBool32                                preferredStdEntropyCodingModeFlag;
+} VkVideoEncodeH264QualityLevelPropertiesKHR;
+
+typedef struct VkVideoEncodeH264SessionCreateInfoKHR {
+    VkStructureType         sType;
+    const void*             pNext;
+    VkBool32                useMaxLevelIdc;
+    StdVideoH264LevelIdc    maxLevelIdc;
+} VkVideoEncodeH264SessionCreateInfoKHR;
+
+typedef struct VkVideoEncodeH264SessionParametersAddInfoKHR {
+    VkStructureType                            sType;
+    const void*                                pNext;
+    uint32_t                                   stdSPSCount;
+    const StdVideoH264SequenceParameterSet*    pStdSPSs;
+    uint32_t                                   stdPPSCount;
+    const StdVideoH264PictureParameterSet*     pStdPPSs;
+} VkVideoEncodeH264SessionParametersAddInfoKHR;
+
+typedef struct VkVideoEncodeH264SessionParametersCreateInfoKHR {
+    VkStructureType                                        sType;
+    const void*                                            pNext;
+    uint32_t                                               maxStdSPSCount;
+    uint32_t                                               maxStdPPSCount;
+    const VkVideoEncodeH264SessionParametersAddInfoKHR*    pParametersAddInfo;
+} VkVideoEncodeH264SessionParametersCreateInfoKHR;
+
+typedef struct VkVideoEncodeH264SessionParametersGetInfoKHR {
+    VkStructureType    sType;
+    const void*        pNext;
+    VkBool32           writeStdSPS;
+    VkBool32           writeStdPPS;
+    uint32_t           stdSPSId;
+    uint32_t           stdPPSId;
+} VkVideoEncodeH264SessionParametersGetInfoKHR;
+
+typedef struct VkVideoEncodeH264SessionParametersFeedbackInfoKHR {
+    VkStructureType    sType;
+    void*              pNext;
+    VkBool32           hasStdSPSOverrides;
+    VkBool32           hasStdPPSOverrides;
+} VkVideoEncodeH264SessionParametersFeedbackInfoKHR;
+
+typedef struct VkVideoEncodeH264NaluSliceInfoKHR {
+    VkStructureType                         sType;
+    const void*                             pNext;
+    int32_t                                 constantQp;
+    const StdVideoEncodeH264SliceHeader*    pStdSliceHeader;
+} VkVideoEncodeH264NaluSliceInfoKHR;
+
+typedef struct VkVideoEncodeH264PictureInfoKHR {
+    VkStructureType                             sType;
+    const void*                                 pNext;
+    uint32_t                                    naluSliceEntryCount;
+    const VkVideoEncodeH264NaluSliceInfoKHR*    pNaluSliceEntries;
+    const StdVideoEncodeH264PictureInfo*        pStdPictureInfo;
+    VkBool32                                    generatePrefixNalu;
+} VkVideoEncodeH264PictureInfoKHR;
+
+typedef struct VkVideoEncodeH264DpbSlotInfoKHR {
+    VkStructureType                           sType;
+    const void*                               pNext;
+    const StdVideoEncodeH264ReferenceInfo*    pStdReferenceInfo;
+} VkVideoEncodeH264DpbSlotInfoKHR;
+
+typedef struct VkVideoEncodeH264ProfileInfoKHR {
+    VkStructureType           sType;
+    const void*               pNext;
+    StdVideoH264ProfileIdc    stdProfileIdc;
+} VkVideoEncodeH264ProfileInfoKHR;
+
+typedef struct VkVideoEncodeH264RateControlInfoKHR {
+    VkStructureType                         sType;
+    const void*                             pNext;
+    VkVideoEncodeH264RateControlFlagsKHR    flags;
+    uint32_t                                gopFrameCount;
+    uint32_t                                idrPeriod;
+    uint32_t                                consecutiveBFrameCount;
+    uint32_t                                temporalLayerCount;
+} VkVideoEncodeH264RateControlInfoKHR;
+
+typedef struct VkVideoEncodeH264FrameSizeKHR {
+    uint32_t    frameISize;
+    uint32_t    framePSize;
+    uint32_t    frameBSize;
+} VkVideoEncodeH264FrameSizeKHR;
+
+typedef struct VkVideoEncodeH264RateControlLayerInfoKHR {
+    VkStructureType                  sType;
+    const void*                      pNext;
+    VkBool32                         useMinQp;
+    VkVideoEncodeH264QpKHR           minQp;
+    VkBool32                         useMaxQp;
+    VkVideoEncodeH264QpKHR           maxQp;
+    VkBool32                         useMaxFrameSize;
+    VkVideoEncodeH264FrameSizeKHR    maxFrameSize;
+} VkVideoEncodeH264RateControlLayerInfoKHR;
+
+typedef struct VkVideoEncodeH264GopRemainingFrameInfoKHR {
+    VkStructureType    sType;
+    const void*        pNext;
+    VkBool32           useGopRemainingFrames;
+    uint32_t           gopRemainingI;
+    uint32_t           gopRemainingP;
+    uint32_t           gopRemainingB;
+} VkVideoEncodeH264GopRemainingFrameInfoKHR;
+
+
+
 // VK_KHR_video_decode_h264 is a preprocessor guard. Do not pass it to API calls.
 #define VK_KHR_video_decode_h264 1
 #include "vk_video/vulkan_video_codec_h264std_decode.h"
@@ -745,6 +946,187 @@ typedef struct VkVideoDecodeH265DpbSlotInfoKHR {
 
 
 
+// VK_KHR_video_encode_queue is a preprocessor guard. Do not pass it to API calls.
+#define VK_KHR_video_encode_queue 1
+#define VK_KHR_VIDEO_ENCODE_QUEUE_SPEC_VERSION 12
+#define VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME "VK_KHR_video_encode_queue"
+
+typedef enum VkVideoEncodeTuningModeKHR {
+    VK_VIDEO_ENCODE_TUNING_MODE_DEFAULT_KHR = 0,
+    VK_VIDEO_ENCODE_TUNING_MODE_HIGH_QUALITY_KHR = 1,
+    VK_VIDEO_ENCODE_TUNING_MODE_LOW_LATENCY_KHR = 2,
+    VK_VIDEO_ENCODE_TUNING_MODE_ULTRA_LOW_LATENCY_KHR = 3,
+    VK_VIDEO_ENCODE_TUNING_MODE_LOSSLESS_KHR = 4,
+    VK_VIDEO_ENCODE_TUNING_MODE_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeTuningModeKHR;
+
+typedef enum VkVideoEncodeFlagBitsKHR {
+    VK_VIDEO_ENCODE_WITH_QUANTIZATION_DELTA_MAP_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_WITH_EMPHASIS_MAP_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeFlagBitsKHR;
+typedef VkFlags VkVideoEncodeFlagsKHR;
+
+typedef enum VkVideoEncodeCapabilityFlagBitsKHR {
+    VK_VIDEO_ENCODE_CAPABILITY_PRECEDING_EXTERNALLY_ENCODED_BYTES_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_CAPABILITY_INSUFFICIENT_BITSTREAM_BUFFER_RANGE_DETECTION_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_CAPABILITY_QUANTIZATION_DELTA_MAP_BIT_KHR = 0x00000004,
+    VK_VIDEO_ENCODE_CAPABILITY_EMPHASIS_MAP_BIT_KHR = 0x00000008,
+    VK_VIDEO_ENCODE_CAPABILITY_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeCapabilityFlagBitsKHR;
+typedef VkFlags VkVideoEncodeCapabilityFlagsKHR;
+
+typedef enum VkVideoEncodeRateControlModeFlagBitsKHR {
+    VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DEFAULT_KHR = 0,
+    VK_VIDEO_ENCODE_RATE_CONTROL_MODE_DISABLED_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_RATE_CONTROL_MODE_CBR_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_RATE_CONTROL_MODE_VBR_BIT_KHR = 0x00000004,
+    VK_VIDEO_ENCODE_RATE_CONTROL_MODE_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeRateControlModeFlagBitsKHR;
+typedef VkFlags VkVideoEncodeRateControlModeFlagsKHR;
+
+typedef enum VkVideoEncodeFeedbackFlagBitsKHR {
+    VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BUFFER_OFFSET_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_BYTES_WRITTEN_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_FEEDBACK_BITSTREAM_HAS_OVERRIDES_BIT_KHR = 0x00000004,
+    VK_VIDEO_ENCODE_FEEDBACK_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeFeedbackFlagBitsKHR;
+typedef VkFlags VkVideoEncodeFeedbackFlagsKHR;
+
+typedef enum VkVideoEncodeUsageFlagBitsKHR {
+    VK_VIDEO_ENCODE_USAGE_DEFAULT_KHR = 0,
+    VK_VIDEO_ENCODE_USAGE_TRANSCODING_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_USAGE_STREAMING_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_USAGE_RECORDING_BIT_KHR = 0x00000004,
+    VK_VIDEO_ENCODE_USAGE_CONFERENCING_BIT_KHR = 0x00000008,
+    VK_VIDEO_ENCODE_USAGE_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeUsageFlagBitsKHR;
+typedef VkFlags VkVideoEncodeUsageFlagsKHR;
+
+typedef enum VkVideoEncodeContentFlagBitsKHR {
+    VK_VIDEO_ENCODE_CONTENT_DEFAULT_KHR = 0,
+    VK_VIDEO_ENCODE_CONTENT_CAMERA_BIT_KHR = 0x00000001,
+    VK_VIDEO_ENCODE_CONTENT_DESKTOP_BIT_KHR = 0x00000002,
+    VK_VIDEO_ENCODE_CONTENT_RENDERED_BIT_KHR = 0x00000004,
+    VK_VIDEO_ENCODE_CONTENT_FLAG_BITS_MAX_ENUM_KHR = 0x7FFFFFFF
+} VkVideoEncodeContentFlagBitsKHR;
+typedef VkFlags VkVideoEncodeContentFlagsKHR;
+typedef VkFlags VkVideoEncodeRateControlFlagsKHR;
+typedef struct VkVideoEncodeInfoKHR {
+    VkStructureType                       sType;
+    const void*                           pNext;
+    VkVideoEncodeFlagsKHR                 flags;
+    VkBuffer                              dstBuffer;
+    VkDeviceSize                          dstBufferOffset;
+    VkDeviceSize                          dstBufferRange;
+    VkVideoPictureResourceInfoKHR         srcPictureResource;
+    const VkVideoReferenceSlotInfoKHR*    pSetupReferenceSlot;
+    uint32_t                              referenceSlotCount;
+    const VkVideoReferenceSlotInfoKHR*    pReferenceSlots;
+    uint32_t                              precedingExternallyEncodedBytes;
+} VkVideoEncodeInfoKHR;
+
+typedef struct VkVideoEncodeCapabilitiesKHR {
+    VkStructureType                         sType;
+    void*                                   pNext;
+    VkVideoEncodeCapabilityFlagsKHR         flags;
+    VkVideoEncodeRateControlModeFlagsKHR    rateControlModes;
+    uint32_t                                maxRateControlLayers;
+    uint64_t                                maxBitrate;
+    uint32_t                                maxQualityLevels;
+    VkExtent2D                              encodeInputPictureGranularity;
+    VkVideoEncodeFeedbackFlagsKHR           supportedEncodeFeedbackFlags;
+} VkVideoEncodeCapabilitiesKHR;
+
+typedef struct VkQueryPoolVideoEncodeFeedbackCreateInfoKHR {
+    VkStructureType                  sType;
+    const void*                      pNext;
+    VkVideoEncodeFeedbackFlagsKHR    encodeFeedbackFlags;
+} VkQueryPoolVideoEncodeFeedbackCreateInfoKHR;
+
+typedef struct VkVideoEncodeUsageInfoKHR {
+    VkStructureType                 sType;
+    const void*                     pNext;
+    VkVideoEncodeUsageFlagsKHR      videoUsageHints;
+    VkVideoEncodeContentFlagsKHR    videoContentHints;
+    VkVideoEncodeTuningModeKHR      tuningMode;
+} VkVideoEncodeUsageInfoKHR;
+
+typedef struct VkVideoEncodeRateControlLayerInfoKHR {
+    VkStructureType    sType;
+    const void*        pNext;
+    uint64_t           averageBitrate;
+    uint64_t           maxBitrate;
+    uint32_t           frameRateNumerator;
+    uint32_t           frameRateDenominator;
+} VkVideoEncodeRateControlLayerInfoKHR;
+
+typedef struct VkVideoEncodeRateControlInfoKHR {
+    VkStructureType                                sType;
+    const void*                                    pNext;
+    VkVideoEncodeRateControlFlagsKHR               flags;
+    VkVideoEncodeRateControlModeFlagBitsKHR        rateControlMode;
+    uint32_t                                       layerCount;
+    const VkVideoEncodeRateControlLayerInfoKHR*    pLayers;
+    uint32_t                                       virtualBufferSizeInMs;
+    uint32_t                                       initialVirtualBufferSizeInMs;
+} VkVideoEncodeRateControlInfoKHR;
+
+typedef struct VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR {
+    VkStructureType                 sType;
+    const void*                     pNext;
+    const VkVideoProfileInfoKHR*    pVideoProfile;
+    uint32_t                        qualityLevel;
+} VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR;
+
+typedef struct VkVideoEncodeQualityLevelPropertiesKHR {
+    VkStructureType                            sType;
+    void*                                      pNext;
+    VkVideoEncodeRateControlModeFlagBitsKHR    preferredRateControlMode;
+    uint32_t                                   preferredRateControlLayerCount;
+} VkVideoEncodeQualityLevelPropertiesKHR;
+
+typedef struct VkVideoEncodeQualityLevelInfoKHR {
+    VkStructureType    sType;
+    const void*        pNext;
+    uint32_t           qualityLevel;
+} VkVideoEncodeQualityLevelInfoKHR;
+
+typedef struct VkVideoEncodeSessionParametersGetInfoKHR {
+    VkStructureType                sType;
+    const void*                    pNext;
+    VkVideoSessionParametersKHR    videoSessionParameters;
+} VkVideoEncodeSessionParametersGetInfoKHR;
+
+typedef struct VkVideoEncodeSessionParametersFeedbackInfoKHR {
+    VkStructureType    sType;
+    void*              pNext;
+    VkBool32           hasOverrides;
+} VkVideoEncodeSessionParametersFeedbackInfoKHR;
+
+typedef VkResult (VKAPI_PTR *PFN_vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR)(VkPhysicalDevice physicalDevice, const VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR* pQualityLevelInfo, VkVideoEncodeQualityLevelPropertiesKHR* pQualityLevelProperties);
+typedef VkResult (VKAPI_PTR *PFN_vkGetEncodedVideoSessionParametersKHR)(VkDevice device, const VkVideoEncodeSessionParametersGetInfoKHR* pVideoSessionParametersInfo, VkVideoEncodeSessionParametersFeedbackInfoKHR* pFeedbackInfo, size_t* pDataSize, void* pData);
+typedef void (VKAPI_PTR *PFN_vkCmdEncodeVideoKHR)(VkCommandBuffer commandBuffer, const VkVideoEncodeInfoKHR* pEncodeInfo);
+
+#ifndef VK_NO_PROTOTYPES
+VKAPI_ATTR VkResult VKAPI_CALL vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR(
+    VkPhysicalDevice                            physicalDevice,
+    const VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR* pQualityLevelInfo,
+    VkVideoEncodeQualityLevelPropertiesKHR*     pQualityLevelProperties);
+
+VKAPI_ATTR VkResult VKAPI_CALL vkGetEncodedVideoSessionParametersKHR(
+    VkDevice                                    device,
+    const VkVideoEncodeSessionParametersGetInfoKHR* pVideoSessionParametersInfo,
+    VkVideoEncodeSessionParametersFeedbackInfoKHR* pFeedbackInfo,
+    size_t*                                     pDataSize,
+    void*                                       pData);
+
+VKAPI_ATTR void VKAPI_CALL vkCmdEncodeVideoKHR(
+    VkCommandBuffer                             commandBuffer,
+    const VkVideoEncodeInfoKHR*                 pEncodeInfo);
+#endif
+
+
 // VK_KHR_synchronization2 is a preprocessor guard. Do not pass it to API calls.
 #define VK_KHR_synchronization2 1
 #define VK_KHR_SYNCHRONIZATION_2_SPEC_VERSION 1
@@ -819,6 +1201,44 @@ VKAPI_ATTR VkResult VKAPI_CALL vkQueueSubmit2KHR(
 #endif
 
 
+
+/* Video encode enumerants from Vulkan 1.4.309 absent from the 1.3.269 core header. */
+#ifndef VK_KHR_video_encode_queue_ENUMS
+#define VK_KHR_video_encode_queue_ENUMS 1
+static const VkResult VK_ERROR_INVALID_VIDEO_STD_PARAMETERS_KHR = (VkResult)(-1000299000);
+static const VkQueryType VK_QUERY_TYPE_VIDEO_ENCODE_FEEDBACK_KHR = (VkQueryType)1000299000;
+static const VkFormatFeatureFlagBits VK_FORMAT_FEATURE_VIDEO_ENCODE_INPUT_BIT_KHR = (VkFormatFeatureFlagBits)0x08000000;
+static const VkFormatFeatureFlagBits VK_FORMAT_FEATURE_VIDEO_ENCODE_DPB_BIT_KHR = (VkFormatFeatureFlagBits)0x10000000;
+static const VkImageUsageFlagBits VK_IMAGE_USAGE_VIDEO_ENCODE_DST_BIT_KHR = (VkImageUsageFlagBits)0x00002000;
+static const VkImageUsageFlagBits VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR = (VkImageUsageFlagBits)0x00004000;
+static const VkImageUsageFlagBits VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR = (VkImageUsageFlagBits)0x00008000;
+static const VkQueueFlagBits VK_QUEUE_VIDEO_ENCODE_BIT_KHR = (VkQueueFlagBits)0x00000040;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_INFO_KHR = (VkStructureType)1000299000;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_RATE_CONTROL_INFO_KHR = (VkStructureType)1000299001;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_RATE_CONTROL_LAYER_INFO_KHR = (VkStructureType)1000299002;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_CAPABILITIES_KHR = (VkStructureType)1000299003;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_USAGE_INFO_KHR = (VkStructureType)1000299004;
+static const VkStructureType VK_STRUCTURE_TYPE_QUERY_POOL_VIDEO_ENCODE_FEEDBACK_CREATE_INFO_KHR = (VkStructureType)1000299005;
+static const VkStructureType VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VIDEO_ENCODE_QUALITY_LEVEL_INFO_KHR = (VkStructureType)1000299006;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_QUALITY_LEVEL_PROPERTIES_KHR = (VkStructureType)1000299007;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_QUALITY_LEVEL_INFO_KHR = (VkStructureType)1000299008;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_SESSION_PARAMETERS_GET_INFO_KHR = (VkStructureType)1000299009;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_SESSION_PARAMETERS_FEEDBACK_INFO_KHR = (VkStructureType)1000299010;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_CAPABILITIES_KHR = (VkStructureType)1000038000;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_CREATE_INFO_KHR = (VkStructureType)1000038001;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_ADD_INFO_KHR = (VkStructureType)1000038002;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PICTURE_INFO_KHR = (VkStructureType)1000038003;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_DPB_SLOT_INFO_KHR = (VkStructureType)1000038004;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_NALU_SLICE_INFO_KHR = (VkStructureType)1000038005;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_GOP_REMAINING_FRAME_INFO_KHR = (VkStructureType)1000038006;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_PROFILE_INFO_KHR = (VkStructureType)1000038007;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_RATE_CONTROL_INFO_KHR = (VkStructureType)1000038008;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_RATE_CONTROL_LAYER_INFO_KHR = (VkStructureType)1000038009;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_CREATE_INFO_KHR = (VkStructureType)1000038010;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_QUALITY_LEVEL_PROPERTIES_KHR = (VkStructureType)1000038011;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_GET_INFO_KHR = (VkStructureType)1000038012;
+static const VkStructureType VK_STRUCTURE_TYPE_VIDEO_ENCODE_H264_SESSION_PARAMETERS_FEEDBACK_INFO_KHR = (VkStructureType)1000038013;
+#endif
 
 #ifdef __cplusplus
 }

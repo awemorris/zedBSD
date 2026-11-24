@@ -2137,7 +2137,41 @@ enum gpu_op {
 	 * the buffer is submitted on the video decode queue family.
 	 * Order: inside a coding scope (GPU_OP_CMD_BEGIN_VIDEO_CODING).
 	 */
-	GPU_OP_CMD_DECODE_VIDEO = 0x1000d
+	GPU_OP_CMD_DECODE_VIDEO = 0x1000d,
+
+	/*
+	 * vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR: reads the
+	 * quality level properties of one video encode profile.
+	 * Arguments: [physical device][u64 1][VkPhysicalDeviceVideoEncodeQualityLevelInfoKHR
+	 * and chain][u64 1][the output structure headers to fill].
+	 * Reply: [number][VkResult][u64 1][the filled structures].
+	 * Sent by: libvulkan/video.c:
+	 * vkGetPhysicalDeviceVideoEncodeQualityLevelPropertiesKHR.
+	 */
+	GPU_OP_GET_PHYSICAL_DEVICE_VIDEO_ENCODE_QUALITY_LEVEL_PROPERTIES = 0x1000e,
+
+	/*
+	 * vkGetEncodedVideoSessionParametersKHR: reads the encoded parameter
+	 * sets (such as H.264 SPS and PPS Annex-B NAL units) of a session
+	 * parameters object.
+	 * Arguments: [device][u64 1][VkVideoEncodeSessionParametersGetInfoKHR
+	 * and chain][u64 1][VkVideoEncodeSessionParametersFeedbackInfoKHR and
+	 * chain][u64 size][u32 dataPresent].
+	 * Reply: [number][VkResult][u64 1][feedback][u64 written][bytes].
+	 * Sent by: libvulkan/video.c: vkGetEncodedVideoSessionParametersKHR.
+	 */
+	GPU_OP_GET_ENCODED_VIDEO_SESSION_PARAMETERS = 0x1000f,
+
+	/*
+	 * vkCmdEncodeVideoKHR, recorded (no reply): encodes one picture.
+	 * Arguments: [u64 1][VkVideoEncodeInfoKHR and chain]: the flags, the
+	 * destination bitstream buffer, offset and range, the source picture,
+	 * the optional setup slot, the reference slots, and in the chain the
+	 * H.264 picture and rate-control information.
+	 * Sent by: libvulkan/video.c: vkCmdEncodeVideoKHR.
+	 * Order: inside a coding scope (GPU_OP_CMD_BEGIN_VIDEO_CODING).
+	 */
+	GPU_OP_CMD_ENCODE_VIDEO = 0x10010
 };
 
 #endif

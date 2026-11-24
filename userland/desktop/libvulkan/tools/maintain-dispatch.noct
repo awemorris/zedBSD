@@ -39,6 +39,7 @@ func main(args) {
         if (line == "#define VK_KHR_dedicated_allocation 1") { extension = "VULKAN_DEVICE_DEDICATED_ALLOCATION"; }
         if (line == "#define VK_KHR_video_queue 1") { extension = "VULKAN_DEVICE_VIDEO_QUEUE"; }
         if (line == "#define VK_KHR_video_decode_queue 1") { extension = "VULKAN_DEVICE_VIDEO_DECODE_QUEUE"; }
+        if (line == "#define VK_KHR_video_encode_queue 1") { extension = "VULKAN_DEVICE_VIDEO_ENCODE_QUEUE"; }
         if (line == "#define VK_KHR_synchronization2 1") { extension = "VULKAN_DEVICE_SYNCHRONIZATION2"; }
         if (line == "#define VK_KHR_get_surface_capabilities2 1") { extension = "VULKAN_INSTANCE_SURFACE_CAPABILITIES2"; }
         if (line == "#define VK_EXT_swapchain_maintenance1 1") { extension = "VULKAN_DEVICE_SWAPCHAIN_MAINTENANCE1"; }
@@ -64,8 +65,8 @@ func main(args) {
         manifest = manifest + name + "\t" + scope + "\t" + extension + "\t" + version + "\n";
         count = count + 1;
     }
-    if (count != 245) { System.error("expected 245 public command records, got " + count); }
+    if (count != 248) { System.error("expected 248 public command records, got " + count); }
     FileUtil.writeText(args[1] + "/dispatch-table.inc", table);
     FileUtil.writeText(args[1] + "/api-commands.tsv", manifest);
-    print("maintained 245 dispatch records");
+    print("maintained 248 dispatch records");
 }

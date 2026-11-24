@@ -610,6 +610,16 @@ vkEnumerateDeviceExtensionProperties(
 		available[count].specVersion = VK_KHR_VIDEO_DECODE_H265_SPEC_VERSION;
 		count++;
 	}
+	if (physical->supported_extensions & VULKAN_DEVICE_VIDEO_ENCODE_QUEUE) {
+		strcpy(available[count].extensionName, VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME);
+		available[count].specVersion = VK_KHR_VIDEO_ENCODE_QUEUE_SPEC_VERSION;
+		count++;
+	}
+	if (physical->supported_extensions & VULKAN_DEVICE_VIDEO_ENCODE_H264) {
+		strcpy(available[count].extensionName, VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME);
+		available[count].specVersion = VK_KHR_VIDEO_ENCODE_H264_SPEC_VERSION;
+		count++;
+	}
 
 	/* Preserves truncation without claiming unsupported host extensions exist locally. */
 	status = enumerate_extensions(available, count, pPropertyCount, pProperties);
@@ -1887,6 +1897,7 @@ physical_load_video(
 	VkBool32 present;
 	VkBool32 h264;
 	VkBool32 h265;
+	VkBool32 encode_h264;
 	uint32_t count;
 	uint32_t index;
 	uint32_t operations;
@@ -1898,6 +1909,8 @@ physical_load_video(
 		promised |= VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR;
 	if (physical->object.context->video_h265)
 		promised |= VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR;
+	if (physical->object.context->video_encode_h264)
+		promised |= VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR;
 	if (promised == 0)
 		return VK_SUCCESS;
 
@@ -1926,23 +1939,30 @@ physical_load_video(
 	 */
 	h264 = VK_FALSE;
 	h265 = VK_FALSE;
+	encode_h264 = VK_FALSE;
 	for (index = 0;
 	     index < count && reader.error == VK_SUCCESS;
 	     index++) {
-		/* Reads the family's word and keeps the promised decode operations. */
+		/* Reads the family's word and keeps the promised video operations. */
 		operations = vulkan_read_u32(&reader);
 		operations &= promised;
 
 		/* A family without the video decode flag cannot run a decode. */
 		if ((physical->queue_families[index].queueFlags & VK_QUEUE_VIDEO_DECODE_BIT_KHR) == 0)
-			operations = 0;
+			operations &= ~(uint32_t)(VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR | VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR);
 
-		/* A family that decodes a codec is what that codec's extension stands for. */
+		/* A family without the video encode flag cannot run an encode. */
+		if ((physical->queue_families[index].queueFlags & VK_QUEUE_VIDEO_ENCODE_BIT_KHR) == 0)
+			operations &= ~(uint32_t)VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR;
+
+		/* A family that codes a codec is what that codec's extension stands for. */
 		physical->queue_video_operations[index] = operations;
 		if ((operations & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) != 0)
 			h264 = VK_TRUE;
 		if ((operations & VK_VIDEO_CODEC_OPERATION_DECODE_H265_BIT_KHR) != 0)
 			h265 = VK_TRUE;
+		if ((operations & VK_VIDEO_CODEC_OPERATION_ENCODE_H264_BIT_KHR) != 0)
+			encode_h264 = VK_TRUE;
 	}
 
 	/* A malformed answer fails the physical device rather than hiding its video family. */
@@ -1951,31 +1971,36 @@ physical_load_video(
 		return status;
 
 	/*
-	 * The renderer promised video decode but no family decodes a promised
+	 * The renderer promised video coding but no family performs a promised
 	 * codec.  The extensions stay unnamed and the video flags of every
 	 * family are withheld, as on a renderer without the promise.
 	 */
-	if (!h264 && !h265) {
+	if (!h264 && !h265 && !encode_h264) {
 		for (index = 0; index < physical->queue_family_count; index++) {
 			/* Keeps the graphics, compute and transfer flags of the same family. */
 			physical->queue_families[index].queueFlags &= ~(VkQueueFlags)VULKAN_VIDEO_QUEUE_FLAGS;
 		}
 
-		/* Succeeded: the physical device has no video decode. */
+		/* Succeeded: the physical device has no video coding. */
 		return VK_SUCCESS;
 	}
 
 	/*
-	 * Names the video decode extensions and synchronization2, the barrier
+	 * Names the video extensions and synchronization2, the barrier
 	 * form they are written against (translated in this library).
 	 */
 	physical->supported_extensions |= VULKAN_DEVICE_SYNCHRONIZATION2;
 	physical->supported_extensions |= VULKAN_DEVICE_VIDEO_QUEUE;
-	physical->supported_extensions |= VULKAN_DEVICE_VIDEO_DECODE_QUEUE;
+	if (h264 || h265)
+		physical->supported_extensions |= VULKAN_DEVICE_VIDEO_DECODE_QUEUE;
 	if (h264)
 		physical->supported_extensions |= VULKAN_DEVICE_VIDEO_DECODE_H264;
 	if (h265)
 		physical->supported_extensions |= VULKAN_DEVICE_VIDEO_DECODE_H265;
+	if (encode_h264) {
+		physical->supported_extensions |= VULKAN_DEVICE_VIDEO_ENCODE_QUEUE;
+		physical->supported_extensions |= VULKAN_DEVICE_VIDEO_ENCODE_H264;
+	}
 
 	/* Succeeded: the families that decode each codec are known. */
 	return VK_SUCCESS;
@@ -1986,8 +2011,10 @@ static VkBool32
 physical_video_promised(
 	const struct VkPhysicalDevice_T *physical)
 {
-	/* Either codec's bit in the native word is a promise of the video queue flags and features. */
-	if (physical->object.context->video_h264 || physical->object.context->video_h265)
+	/* Any codec's bit in the native word is a promise of the video queue flags and features. */
+	if (physical->object.context->video_h264 ||
+	    physical->object.context->video_h265 ||
+	    physical->object.context->video_encode_h264)
 		return VK_TRUE;
 
 	/* No promise: the backend's video flags and features name nothing usable. */

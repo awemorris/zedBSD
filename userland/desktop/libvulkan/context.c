@@ -42,6 +42,7 @@
 #define VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H265 4U
 #define VULKAN_NATIVE_CAPSET_CORE11_QUERIES 8U
 #define VULKAN_NATIVE_CAPSET_CORE12_QUERIES 16U
+#define VULKAN_NATIVE_CAPSET_VIDEO_ENCODE_H264 32U
 
 /*
  * How many context mutexes the calling thread holds through
@@ -261,6 +262,9 @@ vulkan_context_open(
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_VIDEO_DECODE_H265) != 0)
 			context->video_h265 = VK_TRUE;
+		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
+		    (native_flags & VULKAN_NATIVE_CAPSET_VIDEO_ENCODE_H264) != 0)
+			context->video_encode_h264 = VK_TRUE;
 		if (native_magic == VULKAN_NATIVE_CAPSET_MAGIC &&
 		    (native_flags & VULKAN_NATIVE_CAPSET_CORE11_QUERIES) == 0)
 			context->core11_queries = VK_FALSE;

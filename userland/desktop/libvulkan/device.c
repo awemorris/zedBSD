@@ -394,6 +394,16 @@ device_validate(
 			bits |= VULKAN_DEVICE_VIDEO_DECODE_H265;
 			continue;
 		}
+		match = strcmp(info->ppEnabledExtensionNames[index], VK_KHR_VIDEO_ENCODE_QUEUE_EXTENSION_NAME);
+		if (match == 0) {
+			bits |= VULKAN_DEVICE_VIDEO_ENCODE_QUEUE;
+			continue;
+		}
+		match = strcmp(info->ppEnabledExtensionNames[index], VK_KHR_VIDEO_ENCODE_H264_EXTENSION_NAME);
+		if (match == 0) {
+			bits |= VULKAN_DEVICE_VIDEO_ENCODE_H264;
+			continue;
+		}
 
 		/* Selects the changed rectangles a present may name (the Wayland commit's damage, BUG-221). */
 		match = strcmp(info->ppEnabledExtensionNames[index], VK_KHR_INCREMENTAL_PRESENT_EXTENSION_NAME);
@@ -483,6 +493,10 @@ device_validate(
 	if ((bits & VULKAN_DEVICE_VIDEO_DECODE_H264) && !(bits & VULKAN_DEVICE_VIDEO_DECODE_QUEUE))
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
 	if ((bits & VULKAN_DEVICE_VIDEO_DECODE_H265) && !(bits & VULKAN_DEVICE_VIDEO_DECODE_QUEUE))
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	if ((bits & VULKAN_DEVICE_VIDEO_ENCODE_QUEUE) && !(bits & VULKAN_DEVICE_VIDEO_QUEUE))
+		return VK_ERROR_EXTENSION_NOT_PRESENT;
+	if ((bits & VULKAN_DEVICE_VIDEO_ENCODE_H264) && !(bits & VULKAN_DEVICE_VIDEO_ENCODE_QUEUE))
 		return VK_ERROR_EXTENSION_NOT_PRESENT;
 
 	/* Counts actual requested queues without imposing a library object-array ceiling. */
