@@ -2687,7 +2687,10 @@ thread_events(
 			thread_passphrase(link, &event);
 			break;
 		case SSH_ENGINE_AUTHENTICATED:
-			/* The port forwardings start once the user is in. */
+			/* The port forwardings start once the user is in, and SFTP may open. */
+			kl_mutex_lock(&session->lock);
+			session->sftp_ready = 1;
+			kl_mutex_unlock(&session->lock);
 			thread_forward_start(link);
 			break;
 		case SSH_ENGINE_DATA:
@@ -2720,6 +2723,11 @@ thread_events(
 				x11_host_closed(&link->x11_host, event.channel);
 			break;
 		case SSH_ENGINE_EXIT:
+			/* Main session ended; no new SFTP subsystem may open on it. */
+			kl_mutex_lock(&session->lock);
+			session->sftp_ready = 0;
+			kl_mutex_unlock(&session->lock);
+
 			/* The shell ended while X clients stay: the connection waits for them. */
 			if (link->x11 && x11_host_open_count(&link->x11_host) != 0)
 				session_say(session, "\r\nThe shell ended; the connection stays open while X clients run (close the tab to end them).\r\n");
@@ -3204,6 +3212,9 @@ thread_closed(
 	/* The end. */
 	link->closed = 1;
 	link->error = event->error;
+	kl_mutex_lock(&link->session->lock);
+	link->session->sftp_ready = 0;
+	kl_mutex_unlock(&link->session->lock);
 
 	/* Why, for a failure. */
 	switch (event->error) {

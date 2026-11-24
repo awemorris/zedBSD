@@ -167,6 +167,11 @@ struct mikuterm_session {
 	/* The SFTP channel relay shared with the SFTP worker and tab (NULL until opened). */
 	struct sftp_link *sftp_link;
 
+	/* Whether the SSH session is authenticated and its main channel is open, and the active/pending SFTP view tab. */
+	int sftp_ready;
+	struct terminal_connection *sftp_view;
+	struct terminal_connection *sftp_pending_tab;
+
 	/*
 	 * The X windows' tabs the thread opened that the run has not taken
 	 * yet (the tab's next post says they are there), oldest first; each

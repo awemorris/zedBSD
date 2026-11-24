@@ -154,7 +154,7 @@ mikuterm_conf_defaults(
 	conf->x11_primary = 0;
 
 	/* SFTP: disabled by default until its UI is present; preserve modification times and show hidden entries. */
-	conf->sftp = 0;
+	conf->sftp = 1;
 	conf->sftp_preserve_times = 1;
 	conf->sftp_show_hidden = 1;
 }
