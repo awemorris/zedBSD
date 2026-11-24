@@ -186,7 +186,8 @@ enum terminal_action {
 	TERMINAL_ACTION_FORGET_PASSPHRASES,
 	TERMINAL_ACTION_SETTINGS,
 	TERMINAL_ACTION_COPY_ON_SELECT,
-	TERMINAL_ACTION_OPEN_SFTP
+	TERMINAL_ACTION_OPEN_SFTP,
+	TERMINAL_ACTION_OPEN_VI
 };
 
 /*
@@ -796,6 +797,7 @@ struct terminal_window {
 	int settings_item;
 	int new_window_item;
 	int open_sftp_item;
+	int open_vi_item;
 	int refuse_terminal_drop;
 
 	/*

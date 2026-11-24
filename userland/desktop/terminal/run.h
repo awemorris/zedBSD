@@ -102,6 +102,8 @@ struct terminal_run_options {
 	int open_sftp_menu;
 	int (*can_open_sftp)(void *data, const struct terminal_connection *connection);
 	int (*open_sftp)(void *data, struct terminal_connection *connection);
+	int open_vi_menu;
+	int (*open_vi)(void *data, struct terminal_window *window, unsigned columns, unsigned rows, const char *path, char *title, size_t size, struct terminal_connection **connection);
 	int (*confirm_close)(void *data, struct terminal_window *window, struct terminal_connection *connection);
 	void *data;
 };

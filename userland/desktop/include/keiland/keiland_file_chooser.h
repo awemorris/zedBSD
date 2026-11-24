@@ -20,6 +20,7 @@ extern "C" {
 
 struct wl_display;
 struct xdg_toplevel;
+struct kl_window;
 
 /*
  * The file chooser (libkeiland's own file chooser of KL_VERSION 12, moved
@@ -118,6 +119,14 @@ struct kl_file_chooser *kl_file_chooser_open(struct wl_display *display, struct 
  * Closes a chooser; one still open closes without telling.
  */
 void kl_file_chooser_destroy(struct kl_file_chooser *chooser);
+
+/*
+ * Shows a modal file-open dialog owned by owner (may be NULL) and writes
+ * the selected UTF-8 path into path (up to size bytes).
+ *
+ * Returns 0 on selection, ECANCELED when cancelled, or an errno value.
+ */
+int kl_file_open_dialog(struct kl_window *owner, char *path, size_t size);
 
 #ifdef __cplusplus
 }

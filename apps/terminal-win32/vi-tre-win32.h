@@ -26,6 +26,7 @@
 int vi_tre_mbtowc(wchar_t *pwc, const char *s, size_t n);
 
 #ifdef VI_TRE_BUILD
+#undef NDEBUG
 #ifndef CHARCLASS_NAME_MAX
 #define CHARCLASS_NAME_MAX 2048
 #endif
