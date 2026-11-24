@@ -1921,6 +1921,7 @@ run_tab_connection_open(
 	struct terminal_screen *screen;
 	struct run_tab *tab;
 
+	/* Rejects when no connection was provided or the window is full. */
 	if (connection == NULL || run_tab_count == TERMINAL_TABS) {
 		if (connection != NULL)
 			connection->ops->close(connection);
@@ -1929,6 +1930,7 @@ run_tab_connection_open(
 		return 0;
 	}
 
+	/* Allocates the tab's terminal screen. */
 	screen = malloc(sizeof(*screen));
 	if (screen == NULL) {
 		connection->ops->close(connection);
@@ -1936,9 +1938,11 @@ run_tab_connection_open(
 		return -1;
 	}
 
+	/* Initializes the grid and registers the tab. */
 	terminal_screen_init(screen, run->columns, run->rows);
 	terminal_screen_set_ambiguous_wide(screen, run->ambiguous_wide);
 
+	/* Populates the tab slot with its title. */
 	tab = &run_tabs[run_tab_count];
 	memset(tab, 0, sizeof(*tab));
 	tab->screen = screen;
@@ -1951,6 +1955,7 @@ run_tab_connection_open(
 	run_tab_next++;
 	run_tab_count++;
 
+	/* Notifies the connection of its size and activates the new tab. */
 	run_tell_size(run, connection);
 	run_tab_switch(run, run_tab_count - 1U);
 	printf("ZTERM TAB new run=%s id=%u count=%u\n", options->token, tab->id, run_tab_count);
@@ -1972,6 +1977,7 @@ run_open_vi_tab(
 	char vi_title[TERMINAL_TITLE];
 	int vi_err;
 
+	/* Invokes the program's vi opener and opens the resulting tab. */
 	vi_conn = NULL;
 	vi_title[0] = '\0';
 	vi_err = options->open_vi(options->data, &run_window, run->columns, run->rows,

@@ -601,6 +601,12 @@ read_sequence(
 	size_t length;
 	int status;
 	int key;
+#ifdef _WIN32
+	unsigned long rows;
+	unsigned long cols;
+	char *end_rows;
+	char *end_cols;
+#endif
 
 	/* The sequence is named with its introducer first. */
 	sequence[0] = introducer;
@@ -628,11 +634,7 @@ read_sequence(
 	if (terminal->pipe_mode && length >= 7U && length < TERMINAL_SEQUENCE_LENGTH &&
 	    sequence[0] == '[' && sequence[1] == '8' && sequence[2] == ';' &&
 	    sequence[length - 1U] == 't') {
-		unsigned long rows;
-		unsigned long cols;
-		char *end_rows;
-		char *end_cols;
-
+		/* Parses the row and column counts from the sequence. */
 		sequence[length] = '\0';
 		rows = strtoul((const char *)(sequence + 3), &end_rows, 10);
 		if (end_rows != NULL && *end_rows == ';') {

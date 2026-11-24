@@ -211,6 +211,7 @@ static int main_page_exists(void *data, const char *path);
 static int main_page_check(void *data, const char *text, size_t size, char *report, size_t capacity);
 static int main_page_named(void *data, const char *name, size_t size);
 static int main_page_editor(void *data, struct terminal_window *window, const char *path);
+static int main_open_vi(void *data, struct terminal_window *window, unsigned columns, unsigned rows, const char *path, char *title, size_t size, struct terminal_connection **connection);
 static int main_page_write(const char *path, int flags, mode_t mode, const void *bytes, size_t size);
 static void main_page_directory(void);
 static const char *main_value(const char *argument, const char *name);
@@ -285,6 +286,7 @@ main(
 	}
 
 	/* The program's own answers to the run. */
+	run.open_vi = main_open_vi;
 	run.new_window = main_new_window;
 	run.ended = main_ended;
 	run.data = &options;
@@ -591,6 +593,7 @@ main_page_init(
 	main_page.program.exists = main_page_exists;
 	main_page.program.check = main_page_check;
 	main_page.program.open_editor = main_page_editor;
+	main_page.program.has_vi = 1;
 	main_page.program.items = main_items;
 	main_page.program.item_count = sizeof(main_items) / sizeof(main_items[0]);
 	main_page.program.item_get = main_item_get;
@@ -1324,6 +1327,59 @@ main_page_editor(
 	printf("ZTERM SETTINGS editor-started %s\n", MAIN_EDITOR);
 	fflush(stdout);
 	return 0;
+}
+
+/* Opens path directly in vi -- <path> on a new pseudo-terminal tab without a shell. */
+static int
+main_open_vi(
+	void *data,
+	struct terminal_window *window,
+	unsigned columns,
+	unsigned rows,
+	const char *path,
+	char *title,
+	size_t size,
+	struct terminal_connection **connection)
+{
+	const char *arguments[4];
+	const char *term_name;
+	struct kl_app *app;
+	int ambiguous_wide;
+
+	/* Rejects an empty path. */
+	(void)data;
+	if (path == NULL || path[0] == '\0')
+		return ECANCELED;
+
+	/* Builds vi -- <path> without invoking a shell. */
+	arguments[0] = "vi";
+	arguments[1] = "--";
+	arguments[2] = path;
+	arguments[3] = NULL;
+
+	/* Selects the active TERM and ambiguous-width setting. */
+	term_name = "xterm";
+	if (main_page.connector != NULL)
+		term_name = main_page.connector->term;
+	ambiguous_wide = 0;
+	if (window != NULL)
+		ambiguous_wide = window->menu_state.ambiguous_wide;
+	app = NULL;
+	if (window != NULL)
+		app = window->app;
+
+	/* Starts vi directly on a pseudo-terminal tab. */
+	return terminal_process_open_argv(
+		app,
+		arguments,
+		term_name,
+		ambiguous_wide,
+		columns,
+		rows,
+		"vi",
+		title,
+		size,
+		connection);
 }
 
 /*

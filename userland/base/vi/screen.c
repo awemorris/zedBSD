@@ -621,11 +621,20 @@ code_width(
 	unsigned long code)
 {
 #ifdef _WIN32
+	int combining;
+	int wide;
+
 	if (code < 0x20UL || (code >= 0x7fUL && code <= 0x9fUL))
 		return -1;
-	if (terminal_width_combining((uint32_t)code))
+
+	/* Combining marks take zero columns. */
+	combining = terminal_width_combining((uint32_t)code);
+	if (combining)
 		return 0;
-	if (terminal_width_wide((uint32_t)code, ambiguous_wide_enabled()))
+
+	/* Wide and Ambiguous characters follow the terminal's width table. */
+	wide = terminal_width_wide((uint32_t)code, ambiguous_wide_enabled());
+	if (wide)
 		return 2;
 	return 1;
 #else

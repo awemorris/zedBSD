@@ -156,6 +156,7 @@ vi_signal_pending(
 		return 1;
 	}
 
+	/* Handles a pending resize from the console or parent pipe. */
 	if (editor->terminal.resize_pending) {
 		editor->terminal.resize_pending = 0;
 		vi_terminal_measure(&editor->terminal);
@@ -163,6 +164,7 @@ vi_signal_pending(
 		vi_screen_invalidate(editor);
 	}
 
+	/* Continues waiting for the next key. */
 	return 0;
 #else
 	int error;

@@ -78,12 +78,15 @@ conn_read(struct terminal_connection *c, unsigned char *buf, size_t sz)
 	struct mock_conn *mc = (struct mock_conn *)c;
 	size_t take = mc->output_len;
 
+	/* Clamps the read size and copies any buffered mock output. */
 	if (take > sz)
 		take = sz;
 	if (take > 0U) {
 		memcpy(buf, mc->output, take);
 		mc->output_len -= take;
 	}
+
+	/* Returns the byte count transferred. */
 	return take;
 }
 
@@ -101,6 +104,7 @@ conn_resize(struct terminal_connection *c, unsigned cols, unsigned rows, unsigne
 {
 	struct mock_conn *mc = (struct mock_conn *)c;
 
+	/* Updates the recorded mock terminal dimensions. */
 	(void)w;
 	(void)h;
 	mc->cols = cols;
@@ -122,6 +126,7 @@ conn_event(struct terminal_connection *c, const struct kl_app_event *ev)
 	struct mock_conn *mc = (struct mock_conn *)c;
 	unsigned r = 0U;
 
+	/* Signals a pending tab when posted from the test loop. */
 	if (ev->kind == KL_APP_POST && mc->pending_tab != NULL)
 		r |= TERMINAL_READY_TAB;
 	return r;
@@ -133,6 +138,7 @@ conn_pending(const struct terminal_connection *c)
 	struct mock_conn *mc = (struct mock_conn *)c;
 	unsigned r = 0U;
 
+	/* Reports any queued output or pending tab readiness. */
 	if (mc->output_len > 0U)
 		r |= TERMINAL_READY_OUTPUT;
 	if (mc->pending_tab != NULL)
@@ -145,6 +151,7 @@ conn_close(struct terminal_connection *c)
 {
 	struct mock_conn *mc = (struct mock_conn *)c;
 
+	/* Marks the mock connection as closed. */
 	mc->closed = 1;
 }
 
@@ -154,6 +161,7 @@ conn_take(struct terminal_connection *c)
 	struct mock_conn *mc = (struct mock_conn *)c;
 	struct terminal_connection *ret = mc->pending_tab;
 
+	/* Hands off and clears the pending tab connection. */
 	mc->pending_tab = NULL;
 	return ret;
 }
@@ -170,6 +178,7 @@ mock_open(void *data, struct kl_app *app, uint32_t id, unsigned cols, unsigned r
 	(void)data;
 	(void)app;
 	(void)id;
+	/* Updates the recorded mock terminal dimensions. */
 	(void)w;
 	(void)h;
 	root_conn = calloc(1U, sizeof(*root_conn));
@@ -193,6 +202,8 @@ mock_open_vi(void *data, struct terminal_window *window, unsigned cols, unsigned
 		open_vi_cancel_next = 0;
 		return ECANCELED;
 	}
+
+	/* Allocates and populates the mock vi connection. */
 	vi_conn_obj = calloc(1U, sizeof(*vi_conn_obj));
 	vi_conn_obj->base.ops = &mock_conn_ops;
 	vi_conn_obj->cols = cols;
@@ -226,6 +237,8 @@ int kl_app_take(struct kl_app *a, struct kl_app_event *e)
 		step_pos++;
 		return 1;
 	}
+
+	/* Delivers the next scripted window input event. */
 	if (steps[step_pos].is_event) {
 		e->kind = KL_APP_WINDOW;
 		e->window = &mock_win_obj;
@@ -233,6 +246,8 @@ int kl_app_take(struct kl_app *a, struct kl_app_event *e)
 		step_pos++;
 		return 1;
 	}
+
+	/* Advances past idle steps. */
 	step_pos++;
 	return 0;
 }
@@ -271,6 +286,7 @@ int kl_window_fullscreen(const struct kl_window *w) { (void)w; return 0; }
 int kl_window_set_menu(struct kl_window *w, const struct kl_menu_entry *e, size_t c)
 {
 	size_t i;
+	/* Updates the recorded mock terminal dimensions. */
 	(void)w;
 	if (e == NULL || c == 0U)
 		return 0;
@@ -284,6 +300,8 @@ int kl_window_set_menu(struct kl_window *w, const struct kl_menu_entry *e, size_
 			menu_open_vi_key = e[i].keysym;
 		}
 	}
+
+	/* Menu update succeeds. */
 	return 0;
 }
 int kl_window_set_action_state(struct kl_window *w, uint32_t a, unsigned s) { (void)w; (void)a; (void)s; return 0; }
@@ -315,6 +333,7 @@ int terminal_font_resize(struct terminal_font *f, unsigned px) { (void)f; (void)
 void terminal_font_close(struct terminal_font *f) { (void)f; }
 int terminal_display_open(struct terminal_display **d, struct terminal_window *w, struct terminal_font *f)
 {
+	/* Updates the recorded mock terminal dimensions. */
 	(void)w; (void)f;
 	*d = &mock_disp_obj;
 	return 0;
@@ -341,6 +360,7 @@ size_t terminal_page_copy_text(char *t, size_t s) { (void)t; (void)s; return 0U;
 int terminal_page_copy_emptied(void) { return 0; }
 int terminal_page_draw(struct terminal_window *w, const struct terminal_page_state *st, uint32_t width, uint32_t height, const uint32_t **px)
 {
+	/* Updates the recorded mock terminal dimensions. */
 	(void)w; (void)st; (void)width; (void)height; (void)px;
 	return 0;
 }
@@ -365,6 +385,7 @@ main(void)
 	struct terminal_run_result result;
 	int status;
 
+	/* Initializes the mock connector. */
 	memset(&connector, 0, sizeof(connector));
 	connector.open = mock_open;
 	connector.operation = "mock_open";
@@ -379,12 +400,14 @@ main(void)
 	options.connector = &connector;
 	options.open_vi_menu = 0;
 
+	/* Scripts a single close event to verify hidden menu state. */
 	step_count = 1U;
 	step_pos = 0U;
 	memset(steps, 0, sizeof(steps));
 	steps[0].is_event = 1;
 	steps[0].event.kind = KL_WINDOW_CLOSE;
 
+	/* Runs the terminal loop and checks open_vi_menu = 0. */
 	status = terminal_run(&options, &result);
 	CHECK(status == 0);
 	CHECK(menu_has_open_vi == 0);
@@ -396,6 +419,7 @@ main(void)
 	open_vi_calls = 0;
 	open_vi_cancel_next = 1;
 
+	/* Scripts cancel, open vi, ready tab, and close events. */
 	step_count = 4U;
 	step_pos = 0U;
 	memset(steps, 0, sizeof(steps));
@@ -409,6 +433,7 @@ main(void)
 	steps[3].is_event = 1;
 	steps[3].event.kind = KL_WINDOW_CLOSE;
 
+	/* Runs the terminal loop and validates open_vi and tab handoff. */
 	status = terminal_run(&options, &result);
 	CHECK(status == 0);
 	CHECK(menu_has_open_vi == 1);
@@ -418,15 +443,19 @@ main(void)
 	CHECK(vi_conn_obj != NULL && vi_conn_obj->closed == 1);
 	CHECK(take_conn_obj != NULL && take_conn_obj->closed == 1);
 
+	/* Frees remaining mock allocations. */
 	free(root_conn);
 	free(vi_conn_obj);
 	free(take_conn_obj);
 
+	/* Reports test totals and exit status. */
 	printf("checks %d, failures %d\n", checks, failures);
 	if (failures != 0) {
 		printf("terminal-open-vi-host-test: FAIL\n");
 		return 1;
 	}
+
+	/* All checks passed. */
 	printf("terminal-open-vi-host-test: PASS\n");
 	return 0;
 }

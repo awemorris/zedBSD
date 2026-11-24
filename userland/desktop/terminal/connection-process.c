@@ -96,12 +96,7 @@ process_open(
 	struct terminal_connection **connection)
 {
 	struct terminal_process_connector *connector;
-	const char *environment[3];
-	char term[TERMINAL_TERM_MAX + 5U];
-	struct process_connection *made;
-	struct kl_process_options process_options;
 	const char *arguments[4];
-	int error;
 
 	(void)width;
 	(void)height;
@@ -116,11 +111,47 @@ process_open(
 		arguments[3] = NULL;
 	}
 
-	/* The terminal's type and ambiguous-width setting in the shell's environment. */
-	(void)snprintf(term, sizeof(term), "TERM=%s", connector->term);
+	/* Sets the default shell tab title and opens the process. */
+	(void)snprintf(title, size, "Shell %u", id);
+	return terminal_process_open_argv(app, arguments, connector->term, connector->ambiguous_wide,
+	    columns, rows, NULL, title, size, connection);
+}
+
+/*
+ * Starts an arbitrary argv directly on a pseudo-terminal without a shell.
+ */
+int
+terminal_process_open_argv(
+	struct kl_app *app,
+	const char *const *argv,
+	const char *term_name,
+	int ambiguous_wide,
+	unsigned columns,
+	unsigned rows,
+	const char *tab_title,
+	char *title,
+	size_t size,
+	struct terminal_connection **connection)
+{
+	const char *environment[3];
+	const char *effective_term;
+	char term[TERMINAL_TERM_MAX + 5U];
+	struct process_connection *made;
+	struct kl_process_options process_options;
+	int error;
+
+	/* Validates required arguments. */
+	if (app == NULL || argv == NULL || argv[0] == NULL || connection == NULL)
+		return EINVAL;
+
+	/* The terminal's type and ambiguous-width setting in the process environment. */
+	effective_term = PROCESS_TERM;
+	if (term_name != NULL && term_name[0] != '\0')
+		effective_term = term_name;
+	(void)snprintf(term, sizeof(term), "TERM=%s", effective_term);
 	environment[0] = term;
 	environment[1] = NULL;
-	if (connector->ambiguous_wide) {
+	if (ambiguous_wide) {
 		environment[1] = "ZEDBSD_AMBIGUOUS_WIDE=1";
 		environment[2] = NULL;
 	}
@@ -132,7 +163,7 @@ process_open(
 
 	/* On a terminal of the grid's size. */
 	memset(&process_options, 0, sizeof(process_options));
-	process_options.argv = arguments;
+	process_options.argv = argv;
 	process_options.environment = environment;
 	process_options.streams = KL_PROCESS_TERMINAL;
 	process_options.columns = columns;
@@ -143,10 +174,11 @@ process_open(
 		return error;
 	}
 
-	/* The tab's first title, until the shell sets one. */
-	(void)snprintf(title, size, "Shell %u", id);
+	/* Records an explicit tab title when provided. */
+	if (tab_title != NULL && tab_title[0] != '\0')
+		(void)snprintf(title, size, "%s", tab_title);
 
-	/* Succeeded: the shell runs. */
+	/* Succeeded: the process runs. */
 	made->connection.ops = &process_ops;
 	*connection = &made->connection;
 	return 0;
