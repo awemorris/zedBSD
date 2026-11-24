@@ -73,6 +73,9 @@ struct wp_viewporter;
 struct wp_viewport;
 struct wp_fractional_scale_manager_v1;
 struct wp_fractional_scale_v1;
+struct zxdg_decoration_manager_v1;
+struct zxdg_toplevel_decoration_v1;
+struct keiui_xkb;
 struct kl_window;
 
 /*
@@ -336,6 +339,11 @@ struct kl_window {
 	struct wl_surface *surface;
 	struct xdg_surface *role;
 	struct xdg_toplevel *toplevel;
+	struct zxdg_decoration_manager_v1 *decoration_manager;
+	struct zxdg_toplevel_decoration_v1 *decoration;
+
+	/* Keymap state from libxkbcommon when the compositor sends an XKB keymap. */
+	struct keiui_xkb *xkb;
 
 	/* The desktop's surface role instead of a toplevel (KL_VERSION 46, Files' desktop; NULL for a window), and its place on the screen. */
 	struct kl_desktop *desktop;
