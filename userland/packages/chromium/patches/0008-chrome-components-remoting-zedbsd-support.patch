@@ -1390,6 +1390,17 @@
 -  enable_compose = is_mac || is_win || is_linux || is_chromeos
 +  enable_compose = is_mac || is_win || is_linux || is_chromeos || is_zedbsd
  }
+--- a/components/content_settings/core/browser/website_settings_registry.cc
++++ b/components/content_settings/core/browser/website_settings_registry.cc
+@@ -66,7 +66,7 @@
+ #if BUILDFLAG(IS_WIN)
+   if (!(platform & PLATFORM_WINDOWS))
+     return nullptr;
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   if (!(platform & PLATFORM_LINUX))
+     return nullptr;
+ #elif BUILDFLAG(IS_MAC)
 --- a/components/crash/core/common/BUILD.gn
 +++ b/components/crash/core/common/BUILD.gn
 @@ -8,7 +8,7 @@
@@ -1401,6 +1412,26 @@
  }
  
  group("common") {
+--- a/components/embedder_support/user_agent_utils.cc
++++ b/components/embedder_support/user_agent_utils.cc
+@@ -260,7 +260,7 @@
+   return "";
+ #elif BUILDFLAG(IS_MAC)
+   return "Macintosh; ";
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   return "X11; ";  // strange, but that's what Firefox uses
+ #elif BUILDFLAG(IS_ANDROID)
+   return "Linux; ";
+@@ -300,7 +300,7 @@
+   return "Windows NT 10.0; Win64; x64";
+ #elif BUILDFLAG(IS_FUCHSIA)
+   return "Fuchsia";
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   return "X11; Linux x86_64";
+ #elif BUILDFLAG(IS_IOS)
+   if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET) {
 --- a/components/enterprise/buildflags/buildflags.gni
 +++ b/components/enterprise/buildflags/buildflags.gni
 @@ -10,25 +10,25 @@
@@ -1445,6 +1476,46 @@
 +  enable_on_device_translation =
 +      is_mac || is_win || is_linux || is_chromeos || is_zedbsd
  }
+--- a/components/policy/core/common/cloud/cloud_policy_util.cc
++++ b/components/policy/core/common/cloud/cloud_policy_util.cc
+@@ -138,7 +138,7 @@
+     return result;
+   }
+   return std::string();
+-#elif BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+   return std::string();
+ #elif BUILDFLAG(IS_CHROMEOS)
+   NOTREACHED();
+@@ -149,7 +149,7 @@
+ 
+ std::string GetOSVersion() {
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_APPLE) || \
+-    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   return base::SysInfo::OperatingSystemVersion();
+ #elif BUILDFLAG(IS_WIN)
+   base::win::OSInfo::VersionNumber version_number =
+--- a/components/policy/tools/generate_policy_source.gni
++++ b/components/policy/tools/generate_policy_source.gni
+@@ -54,12 +54,16 @@
+       chrome_settings_proto_path,
+       cloud_policy_proto_path,
+     ]
++    policy_target_platform = target_os
++    if (is_zedbsd) {
++      policy_target_platform = "linux"
++    }
+     args = [
+       # Input information.
+       "--chrome-version-major=" + chrome_version_major,
+       "--policy-templates-file=" +
+           rebase_path(policy_templates_generated_json_path, root_build_dir),
+-      "--target-platform=" + target_os,
++      "--target-platform=" + policy_target_platform,
+     ]
+     if (!chunking) {
+       args += [ "--no-chunking" ]
 --- a/components/record_replay/content/renderer/BUILD.gn
 +++ b/components/record_replay/content/renderer/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -1488,6 +1559,28 @@
 +      is_android || is_chromeos || is_ios || is_linux || is_mac || is_win ||
 +      is_zedbsd
  }
+--- a/components/sync_device_info/local_device_info_util.cc
++++ b/components/sync_device_info/local_device_info_util.cc
+@@ -114,7 +114,7 @@
+ DeviceInfo::OsType GetLocalDeviceOSType() {
+ #if BUILDFLAG(IS_CHROMEOS)
+   return DeviceInfo::OsType::kChromeOsAsh;
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   return DeviceInfo::OsType::kLinux;
+ #elif BUILDFLAG(IS_ANDROID)
+   return DeviceInfo::OsType::kAndroid;
+--- a/components/trusted_vault/trusted_vault_connection_impl.cc
++++ b/components/trusted_vault/trusted_vault_connection_impl.cc
+@@ -105,7 +105,7 @@
+   // currently used or even built on all platforms.
+ #if BUILDFLAG(IS_CHROMEOS)
+   return trusted_vault_pb::PhysicalDeviceMetadata::DEVICE_TYPE_CHROMEOS;
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   return trusted_vault_pb::PhysicalDeviceMetadata::DEVICE_TYPE_LINUX;
+ #elif BUILDFLAG(IS_ANDROID)
+   return trusted_vault_pb::PhysicalDeviceMetadata::DEVICE_TYPE_ANDROID;
 --- a/components/update_client/update_query_params.cc
 +++ b/components/update_client/update_query_params.cc
 @@ -33,7 +33,7 @@
@@ -1526,6 +1619,18 @@
    } else {
      platform = current_os
    }
+--- a/components/variations/service/variations_service.cc
++++ b/components/variations/service/variations_service.cc
+@@ -158,7 +158,8 @@
+   return "android";
+ #elif BUILDFLAG(IS_FUCHSIA)
+   return "fuchsia";
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD) || BUILDFLAG(IS_SOLARIS)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_BSD) || BUILDFLAG(IS_SOLARIS) || \
++    BUILDFLAG(IS_ZEDBSD)
+   // Default BSD and SOLARIS to Linux to not break those builds, although these
+   // platforms are not officially supported by Chrome.
+   return "linux";
 --- a/components/webapps/isolated_web_apps/BUILD.gn
 +++ b/components/webapps/isolated_web_apps/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -1548,3 +1653,14 @@
         "components/webapps/isolated_web_apps are no-op on Android or iOS.")
  
  source_set("test_support") {
+--- a/components/webui/flags/flags_state.cc
++++ b/components/webui/flags/flags_state.cc
+@@ -794,7 +794,7 @@
+   return kOsWin;
+ #elif BUILDFLAG(IS_CHROMEOS)
+   return kOsCrOS;
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_ZEDBSD)
+   return kOsLinux;
+ #elif BUILDFLAG(IS_ANDROID)
+   return kOsAndroid;

@@ -196,26 +196,23 @@
  
    # The headers are parsed with v8_base_without_compiler's flags.
    _metagen_flags_target = ":v8_base_without_compiler"
-@@ -2690,6 +2701,18 @@
+@@ -2690,6 +2701,15 @@
          args += [ "--extra-flag=$flag" ]
        }
      }
 +
 +    if (is_zedbsd) {
 +      # libclang does not know zedBSD: it is told the macros that zedBSD's
-+      # clang defines for the target, and the clang builtin include dir.
++      # clang defines for the target.
 +      args += [
 +        "--extra-flag=-D__ZEDBSD__=1",
 +        "--extra-flag=-D__unix__=1",
-+        "--extra-flag=-isystem",
-+        "--extra-flag=" +
-+            rebase_path("$_metagen_clang_resource_dir/include", root_build_dir),
 +      ]
 +    }
    }
  }
  
-@@ -7974,6 +7997,11 @@
+@@ -7974,6 +7994,11 @@
        "src/base/debug/stack_trace_zos.cc",
        "src/base/platform/platform-zos.cc",
      ]
@@ -420,6 +417,17 @@
  #include <sys/syscall.h>
  #endif
  
+@@ -318,6 +318,10 @@
+   zx_handle_t profiled_thread_ = ZX_HANDLE_INVALID;
+ };
+ 
++#elif V8_OS_ZEDBSD
++
++class Sampler::PlatformData {};
++
+ #endif  // USE_SIGNALS
+ 
+ #if defined(USE_SIGNALS)
 --- a/v8/src/libsampler/sampler.h
 +++ b/v8/src/libsampler/sampler.h
 @@ -13,7 +13,7 @@
@@ -446,3 +454,14 @@
                "--format=json"
            ],
            cwd=source_root,
+--- a/v8/tools/metagen/metagen.py
++++ b/v8/tools/metagen/metagen.py
+@@ -357,6 +357,8 @@
+   # The driver places builtin headers after libc++ and before the SDK.
+   # In cl-mode, libc++ must arrive as -I to precede the resource dir.
+   flags.append(f"-resource-dir={resource_dir}")
++  if any("zedbsd" in f for f in raw_flags):
++    flags.extend(["-isystem", os.path.join(resource_dir, "include")])
+ 
+   verbose_print(f"Harvesting class hierarchy from "
+                 f"{os.path.relpath(driver_path, v8_root)} ({flags_source})...")
