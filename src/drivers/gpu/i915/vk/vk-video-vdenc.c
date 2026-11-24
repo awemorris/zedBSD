@@ -49,13 +49,11 @@ static void vdenc_emit_mfx_fqm(struct i915_gfx_batch *batch);
 static void vdenc_emit_mfx_avc_img(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
 static void vdenc_emit_mfx_ref_idx(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
 static void vdenc_emit_vdenc_pipe_mode(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
-static void vdenc_emit_vdenc_surface(struct i915_gfx_batch *batch, uint32_t opcode, const struct i915_video_vdenc_encode *enc);
+static void vdenc_emit_vdenc_surface(struct i915_gfx_batch *batch, uint32_t opcode, uint32_t dwords, const struct i915_video_vdenc_encode *enc);
 static void vdenc_emit_vdenc_bufs(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
 static void vdenc_emit_vdenc_const_qpt(struct i915_gfx_batch *batch);
+static void vdenc_emit_vdenc_weights_offsets(struct i915_gfx_batch *batch);
 static void vdenc_emit_vdenc_img(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
-static void vdenc_emit_vdenc_cost(struct i915_gfx_batch *batch, int32_t qp);
-static void vdenc_emit_vdenc_cmd1(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
-static void vdenc_emit_vdenc_cmd2(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
 static void vdenc_emit_pak_insert_slice(struct i915_gfx_batch *batch, const uint8_t *hdr, size_t hdr_bits);
 static void vdenc_emit_mfx_slice(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
 static void vdenc_emit_vdenc_walker(struct i915_gfx_batch *batch, const struct i915_video_vdenc_encode *enc);
@@ -321,6 +319,11 @@ drv_i915_video_vdenc_pack_slice_header(
 
 	if (bw.overflow)
 		return -1;
+	if (bw.bit_pos > 0U) {
+		if (bw.byte_pos >= bw.cap)
+			return -1;
+		bw.data[bw.byte_pos] = bw.cur;
+	}
 
 	*out_bits = 40U + bw.byte_pos * 8U + bw.bit_pos;
 	return 0;
@@ -360,23 +363,24 @@ drv_i915_video_vdenc_build(
 
 	/* VDEnc pipeline setup. */
 	vdenc_emit_vdenc_pipe_mode(batch, enc);
-	vdenc_emit_vdenc_surface(batch, GEN12_VIDEO_VDENC_SRC_SURFACE_STATE, enc);
-	vdenc_emit_vdenc_surface(batch, GEN12_VIDEO_VDENC_REF_SURFACE_STATE, enc);
-	vdenc_emit_vdenc_surface(batch, GEN12_VIDEO_VDENC_DS_REF_SURFACE_STATE, enc);
+	vdenc_emit_vdenc_surface(batch, GEN12_VIDEO_VDENC_SRC_SURFACE_STATE,
+				 GEN12_VIDEO_VDENC_SRC_SURFACE_STATE_DWORDS, enc);
+	vdenc_emit_vdenc_surface(batch, GEN12_VIDEO_VDENC_REF_SURFACE_STATE,
+				 GEN12_VIDEO_VDENC_REF_SURFACE_STATE_DWORDS, enc);
+	vdenc_emit_vdenc_surface(batch, GEN12_VIDEO_VDENC_DS_REF_SURFACE_STATE,
+				 GEN12_VIDEO_VDENC_DS_REF_SURFACE_STATE_DWORDS, enc);
 	vdenc_emit_vdenc_bufs(batch, enc);
 	vdenc_emit_vdenc_const_qpt(batch);
 	vdenc_emit_vdenc_img(batch, enc);
-	vdenc_emit_vdenc_cost(batch, enc->slice.qp);
-	vdenc_emit_vdenc_cmd1(batch, enc);
-	vdenc_emit_vdenc_cmd2(batch, enc);
 
-	/* Pack and insert the slice header inline via MFX_PAK_INSERT_OBJECT. */
+	/* MFX slice state, inline slice header, weights/offsets, VDEnc walker trigger, pipeline flush, and bytecount readback. */
+	vdenc_emit_mfx_slice(batch, enc);
+
 	slice_bits = 0U;
 	if (drv_i915_video_vdenc_pack_slice_header(enc, slice_hdr, sizeof(slice_hdr), &slice_bits) == 0)
 		vdenc_emit_pak_insert_slice(batch, slice_hdr, slice_bits);
 
-	/* MFX slice state, VDEnc walker trigger, pipeline flush, and bytecount readback. */
-	vdenc_emit_mfx_slice(batch, enc);
+	vdenc_emit_vdenc_weights_offsets(batch);
 	vdenc_emit_vdenc_walker(batch, enc);
 	vdenc_emit_tail(batch, enc);
 }
@@ -558,14 +562,19 @@ vdenc_emit_head(
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_MFX_WAIT | GEN12_VIDEO_MFX_WAIT_SYNC);
 
-	/* MFX_PIPE_MODE_SELECT: Standard AVC (2), Codec Select Encode (1), Post-Deblock + StreamOut + VDEnc. */
+	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_CONTROL_STATE,
+						      GEN12_VIDEO_VDENC_CONTROL_STATE_DWORDS));
+	drv_i915_batch_emit(batch, 1U << 1);
+
+	/* MFX_PIPE_MODE_SELECT: Standard AVC (2), Codec Select Encode (1), FrameStats (6), Post-Deblock (9), VDEnc (13), LongFormat (17). */
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_MFX_PIPE_MODE_SELECT,
 						      GEN12_VIDEO_MFX_PIPE_MODE_SELECT_DWORDS));
 	drv_i915_batch_emit(batch, GEN12_VIDEO_MODE_STANDARD_AVC |
 				   GEN12_VIDEO_MODE_CODEC_ENCODE |
+				   (1U << 6) |
 				   GEN12_VIDEO_MODE_POST_DEBLOCKING |
-				   GEN12_VIDEO_MODE_STREAM_OUT |
-				   GEN12_VIDEO_MODE_VDENC);
+				   GEN12_VIDEO_MODE_VDENC |
+				   (1U << 17));
 	vdenc_emit_zeros(batch, GEN12_VIDEO_MFX_PIPE_MODE_SELECT_DWORDS - 2U);
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_MFX_WAIT | GEN12_VIDEO_MFX_WAIT_SYNC);
@@ -617,7 +626,7 @@ vdenc_emit_mfx_bufs(
 		if (index < enc->reference_count)
 			ref_addr = enc->references[index].picture;
 		else
-			ref_addr = enc->reconstructed;
+			ref_addr = 0U;
 		vdenc_emit_addr(batch, ref_addr);
 	}
 	drv_i915_batch_emit(batch, enc->mocs & GEN12_VIDEO_ATTRIBUTES_MOCS_MASK);
@@ -635,13 +644,11 @@ vdenc_emit_mfx_ind_obj(
 {
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_MFX_IND_OBJ_BASE_ADDR_STATE,
 						      GEN12_VIDEO_MFX_IND_OBJ_BASE_ADDR_STATE_DWORDS));
-	/* Object 0..2 (indirect bitstream/MV/IT coeff unused): 15 zero dwords. */
-	vdenc_emit_zeros(batch, 15U);
-	/* Object 3 (dwords 16..20): Indirect PAK-BSE Output Object base, attrs, upper bound. */
+	/* Object 0..3 (indirect bitstream/MV/IT coeff/DBLK unused): 20 zero dwords. */
+	vdenc_emit_zeros(batch, 20U);
+	/* Object 4 (dwords 21..25): MFC Indirect PAK-BSE Output Object base, attrs, upper bound. */
 	vdenc_emit_buf(batch, enc->bitstream_base, enc->mocs);
 	vdenc_emit_addr(batch, enc->bitstream_end);
-	/* Object 4 (dwords 21..25): unused. */
-	vdenc_emit_zeros(batch, 5U);
 }
 
 static void
@@ -699,17 +706,17 @@ vdenc_emit_mfx_avc_img(
 	uint32_t height_mbs;
 	uint32_t dw3;
 	uint32_t dw4;
-	uint32_t dw13;
-	uint32_t dw14;
-	uint32_t l0_active;
 
 	width_mbs = enc->sps->pic_width_in_mbs_minus1 + 1U;
 	height_mbs = enc->sps->pic_height_in_map_units_minus1 + 1U;
 
-	dw3 = (((uint32_t)enc->pps->chroma_qp_index_offset & GEN12_VIDEO_IMG_QP_OFFSET_MASK) << GEN12_VIDEO_IMG_CHROMA_OFFSET_SHIFT) |
+	dw3 = (1U << 13) |
+	      (((uint32_t)enc->pps->chroma_qp_index_offset & GEN12_VIDEO_IMG_QP_OFFSET_MASK) << GEN12_VIDEO_IMG_CHROMA_OFFSET_SHIFT) |
 	      (((uint32_t)enc->pps->second_chroma_qp_index_offset & GEN12_VIDEO_IMG_QP_OFFSET_MASK) << GEN12_VIDEO_IMG_SECOND_CHROMA_SHIFT);
 
 	dw4 = GEN12_VIDEO_IMG_FRAME_MB_ONLY |
+	      (1U << 8) |
+	      (1U << 12) |
 	      (1U << GEN12_VIDEO_IMG_CHROMA_FORMAT_SHIFT);
 	if ((enc->pps->flags & I915_VIDEO_PPS_TRANSFORM_8X8) != 0U)
 		dw4 |= GEN12_VIDEO_IMG_TRANSFORM_8X8;
@@ -722,17 +729,6 @@ vdenc_emit_mfx_avc_img(
 	if ((enc->pps->flags & I915_VIDEO_PPS_CABAC) != 0U)
 		dw4 |= GEN12_VIDEO_IMG_CABAC;
 
-	l0_active = (enc->slice.slice_type == I915_VIDEO_SLICE_P) ? (enc->slice.num_ref_idx_l0_active_minus1 + 1U) : 0U;
-	dw13 = ((uint32_t)enc->slice.qp & GEN12_VIDEO_IMG_QP_MASK) |
-	       (l0_active << GEN12_VIDEO_IMG_L0_SHIFT) |
-	       (enc->sps->max_num_ref_frames << GEN12_VIDEO_IMG_REFERENCES_SHIFT);
-
-	dw14 = (enc->sps->pic_order_cnt_type << GEN12_VIDEO_IMG_POC_TYPE_SHIFT) |
-	       (enc->sps->log2_max_frame_num_minus4 << GEN12_VIDEO_IMG_LOG2_FRAME_NUM_SHIFT) |
-	       (enc->sps->log2_max_pic_order_cnt_lsb_minus4 << GEN12_VIDEO_IMG_LOG2_POC_LSB_SHIFT);
-	if ((enc->pps->flags & I915_VIDEO_PPS_DEBLOCKING_CONTROL) != 0U)
-		dw14 |= GEN12_VIDEO_IMG_DEBLOCKING_CONTROL;
-
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_MFX_AVC_IMG_STATE,
 						      GEN12_VIDEO_MFX_AVC_IMG_STATE_DWORDS));
 	drv_i915_batch_emit(batch, width_mbs * height_mbs);
@@ -740,12 +736,9 @@ vdenc_emit_mfx_avc_img(
 				   ((enc->sps->pic_height_in_map_units_minus1 & 0xffU) << GEN12_VIDEO_IMG_HEIGHT_SHIFT));
 	drv_i915_batch_emit(batch, dw3);
 	drv_i915_batch_emit(batch, dw4);
-	drv_i915_batch_emit(batch, GEN12_VIDEO_IMG_TRELLIS_CHROMA_DISABLE);
-	vdenc_emit_zeros(batch, 7U);
-	drv_i915_batch_emit(batch, dw13);
-	drv_i915_batch_emit(batch, dw14);
-	drv_i915_batch_emit(batch, (enc->frame_num & 0xffffU) << GEN12_VIDEO_IMG_FRAME_NUM_SHIFT);
-	vdenc_emit_zeros(batch, GEN12_VIDEO_MFX_AVC_IMG_STATE_DWORDS - 16U);
+	drv_i915_batch_emit(batch, 0x8fU | GEN12_VIDEO_IMG_TRELLIS_CHROMA_DISABLE);
+	drv_i915_batch_emit(batch, 0x0fff0fffU);
+	vdenc_emit_zeros(batch, GEN12_VIDEO_MFX_AVC_IMG_STATE_DWORDS - 7U);
 }
 
 static void
@@ -773,35 +766,36 @@ vdenc_emit_vdenc_pipe_mode(
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_MFX_WAIT | GEN12_VIDEO_MFX_WAIT_SYNC);
 
-	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_CONTROL_STATE,
-						      GEN12_VIDEO_VDENC_CONTROL_STATE_DWORDS));
-	drv_i915_batch_emit(batch, 1U);
-
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_PIPE_MODE_SELECT,
 						      GEN12_VIDEO_VDENC_PIPE_MODE_SELECT_DWORDS));
-	/* Standard Select = AVC (2), Frame Statistics / StreamIn disabled for CQP. */
-	drv_i915_batch_emit(batch, GEN12_VIDEO_MODE_STANDARD_AVC);
-	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_PIPE_MODE_SELECT_DWORDS - 2U);
+	/* DW1: Standard Select = AVC (2), FrameStats (5), TLB Prefetch (7), DS 8x/4x write disable (10,11), Output Range (17). */
+	drv_i915_batch_emit(batch, GEN12_VIDEO_MODE_STANDARD_AVC | (1U << 5) | (1U << 7) |
+				   (1U << 10) | (1U << 11) | (1U << 17));
+	drv_i915_batch_emit(batch, 0x002b030aU);
+	drv_i915_batch_emit(batch, 0x07000303U);
+	drv_i915_batch_emit(batch, 0U);
+	drv_i915_batch_emit(batch, 0U);
 }
 
 static void
 vdenc_emit_vdenc_surface(
 	struct i915_gfx_batch *batch,
 	uint32_t opcode,
+	uint32_t dwords,
 	const struct i915_video_vdenc_encode *enc)
 {
-	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(opcode,
-						      GEN12_VIDEO_VDENC_SRC_SURFACE_STATE_DWORDS));
+	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(opcode, dwords));
 	drv_i915_batch_emit(batch, 0U);
 	drv_i915_batch_emit(batch, ((enc->width - 1U) << GEN12_VIDEO_SURFACE_WIDTH_SHIFT) |
 				   ((enc->height - 1U) << GEN12_VIDEO_SURFACE_HEIGHT_SHIFT));
 	drv_i915_batch_emit(batch, GEN12_VIDEO_SURFACE_WALK_YMAJOR |
 				   GEN12_VIDEO_SURFACE_TILED |
 				   ((enc->pitch - 1U) << GEN12_VIDEO_SURFACE_PITCH_SHIFT) |
-				   GEN12_VIDEO_SURFACE_INTERLEAVE_CHROMA |
-				   (GEN12_VIDEO_SURFACE_PLANAR_420_8 << GEN12_VIDEO_SURFACE_FORMAT_SHIFT));
+				   (7U << 20) |
+				   (GEN12_VIDEO_SURFACE_PLANAR_420_8 << 27));
 	drv_i915_batch_emit(batch, enc->chroma_rows & 0x7fffU);
-	drv_i915_batch_emit(batch, 0U);
+	drv_i915_batch_emit(batch, enc->chroma_rows & 0x7fffU);
+	vdenc_emit_zeros(batch, dwords - 6U);
 }
 
 static void
@@ -811,30 +805,62 @@ vdenc_emit_vdenc_bufs(
 {
 	uint64_t ref_addr;
 
-	ref_addr = (enc->reference_count > 0U) ? enc->references[0].picture : enc->reconstructed;
+	ref_addr = (enc->reference_count > 0U) ? enc->references[0].picture : 0U;
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_PIPE_BUF_ADDR_STATE,
 						      GEN12_VIDEO_VDENC_PIPE_BUF_ADDR_STATE_DWORDS));
-	/* Dword 1..3: Downscaled L0/L1 ref (unused -> reconstructed), 4..6: Unscaled Ref0. */
-	vdenc_emit_buf(batch, ref_addr, enc->mocs);
-	vdenc_emit_buf(batch, ref_addr, enc->mocs);
-	/* Dword 7..9: VDEnc Row Store. */
-	vdenc_emit_buf(batch, enc->vdenc_row_store, enc->mocs);
-	/* Dword 10..12: StreamIn buffer. */
-	vdenc_emit_buf(batch, enc->streamin_buffer, enc->mocs);
-	/* Dword 13..15: Source picture. */
+	/* DW1..3: DsFwdRef0, DW4..6: DsFwdRef1, DW7..9: Reserved. */
+	if (ref_addr != 0U) {
+		vdenc_emit_buf(batch, ref_addr, enc->mocs);
+		vdenc_emit_buf(batch, ref_addr, enc->mocs);
+	} else {
+		vdenc_emit_zeros(batch, 6U);
+	}
+	vdenc_emit_zeros(batch, 3U);
+	/* DW10..12: OriginalUncompressedPicture, DW13..15: StreamIn (unused), DW16..18: RowStoreScratch. */
 	vdenc_emit_buf(batch, enc->source, enc->mocs);
-	/* Remaining dwords up to 37: zero. */
-	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_PIPE_BUF_ADDR_STATE_DWORDS - 16U);
+	vdenc_emit_zeros(batch, 3U);
+	vdenc_emit_buf(batch, enc->vdenc_row_store, enc->mocs);
+	/* DW19..21: ColocatedMv, DW22..24: FwdRef0. */
+	vdenc_emit_zeros(batch, 3U);
+	if (ref_addr != 0U)
+		vdenc_emit_buf(batch, ref_addr, enc->mocs);
+	else
+		vdenc_emit_zeros(batch, 3U);
+	/* DW25..33 (FwdRef1, FwdRef2, BwdRef0 = 9 dwords): zero. */
+	vdenc_emit_zeros(batch, 9U);
+	/* DW34..36: VdencStatisticsStreamout. */
+	vdenc_emit_buf(batch, enc->streamout_buffer, enc->mocs);
+	/* Remaining dwords (DW37..70 = 34 dwords): zero. */
+	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_PIPE_BUF_ADDR_STATE_DWORDS - 37U);
 }
 
 static void
 vdenc_emit_vdenc_const_qpt(
 	struct i915_gfx_batch *batch)
 {
+	static const uint32_t qp_lambda_dw[11] = {
+		0x01010101U, 0x02010101U, 0x03020202U, 0x04040303U,
+		0x07060505U, 0x0a090807U, 0x110f0d0cU, 0x1a171513U,
+		0x2a25211eU, 0x423b352fU, 0x0000534aU
+	};
+	unsigned i;
+
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_CONST_QPT_STATE,
 						      GEN12_VIDEO_VDENC_CONST_QPT_STATE_DWORDS));
-	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_CONST_QPT_STATE_DWORDS - 1U);
+	for (i = 0U; i < 11U; i++)
+		drv_i915_batch_emit(batch, qp_lambda_dw[i]);
+	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_CONST_QPT_STATE_DWORDS - 12U);
+}
+
+static void
+vdenc_emit_vdenc_weights_offsets(
+	struct i915_gfx_batch *batch)
+{
+	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_WEIGHTSOFFSETS_STATE,
+						      GEN12_VIDEO_VDENC_WEIGHTSOFFSETS_STATE_DWORDS));
+	drv_i915_batch_emit(batch, 1U | (1U << 16));
+	drv_i915_batch_emit(batch, 1U);
 }
 
 static void
@@ -842,48 +868,66 @@ vdenc_emit_vdenc_img(
 	struct i915_gfx_batch *batch,
 	const struct i915_video_vdenc_encode *enc)
 {
+	int is_intra = (enc->slice.slice_type == I915_VIDEO_SLICE_I) ? 1 : 0;
+	uint32_t width_mbs = enc->sps->pic_width_in_mbs_minus1 + 1U;
+	uint32_t height_mbs_m1 = enc->sps->pic_height_in_map_units_minus1;
+	uint32_t dw1;
+	uint32_t dw4;
+	uint32_t dw5;
+	uint32_t dw8;
+
+	dw1 = (1U << 6);
+	if ((enc->pps->flags & I915_VIDEO_PPS_TRANSFORM_8X8) != 0U)
+		dw1 |= (1U << 7);
+
+	dw4 = (2U << 22) | (0x70U << 24);
+	if (!is_intra)
+		dw4 |= (3U << 12) | (1U << 18) | (2U << 20);
+
+	dw5 = (height_mbs_m1 & 0xffffU) | ((is_intra ? 0U : 1U) << 29);
+	dw8 = ((enc->pps->flags & I915_VIDEO_PPS_TRANSFORM_8X8) != 0U) ? 0U : 2U;
+	if (!is_intra)
+		dw8 |= (1U << 5) | (1U << 6);
+
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_IMG_STATE,
 						      GEN12_VIDEO_VDENC_IMG_STATE_DWORDS));
-	/* Dword 1: Picture Type (0=I, 1=P) and Frame Width/Height in MBs-1. */
-	drv_i915_batch_emit(batch, (enc->slice.slice_type == I915_VIDEO_SLICE_I) ? 0U : 1U);
-	drv_i915_batch_emit(batch, (enc->sps->pic_width_in_mbs_minus1 & 0xffU) |
-				   ((enc->sps->pic_height_in_map_units_minus1 & 0xffU) << 16));
-	/* Dword 3: Initial QP. */
-	drv_i915_batch_emit(batch, (uint32_t)enc->slice.qp & 0x3fU);
-	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_IMG_STATE_DWORDS - 4U);
-}
-
-static void
-vdenc_emit_vdenc_cost(
-	struct i915_gfx_batch *batch,
-	int32_t qp)
-{
-	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_AVC_COST_STATE,
-						      GEN12_VIDEO_VDENC_AVC_COST_STATE_DWORDS));
-	drv_i915_batch_emit(batch, (uint32_t)qp & 0x3fU);
-	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_AVC_COST_STATE_DWORDS - 2U);
-}
-
-static void
-vdenc_emit_vdenc_cmd1(
-	struct i915_gfx_batch *batch,
-	const struct i915_video_vdenc_encode *enc)
-{
-	(void)enc;
-	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_CMD1,
-						      GEN12_VIDEO_VDENC_CMD1_DWORDS));
-	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_CMD1_DWORDS - 1U);
-}
-
-static void
-vdenc_emit_vdenc_cmd2(
-	struct i915_gfx_batch *batch,
-	const struct i915_video_vdenc_encode *enc)
-{
-	(void)enc;
-	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_CMD2,
-						      GEN12_VIDEO_VDENC_CMD2_DWORDS));
-	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_CMD2_DWORDS - 1U);
+	drv_i915_batch_emit(batch, dw1);
+	drv_i915_batch_emit(batch, is_intra ? 0U : (0x20U << 16));
+	drv_i915_batch_emit(batch, (width_mbs & 0xffffU) << 16);
+	drv_i915_batch_emit(batch, dw4);
+	drv_i915_batch_emit(batch, dw5);
+	drv_i915_batch_emit(batch, height_mbs_m1 & 0xffffU);
+	drv_i915_batch_emit(batch, 0U);
+	drv_i915_batch_emit(batch, dw8);
+	/* DW9..13: Mode and MV costs. */
+	if (is_intra) {
+		drv_i915_batch_emit(batch, 10U | (0U << 8) | (3U << 16) | (30U << 24));
+		vdenc_emit_zeros(batch, 4U);
+	} else {
+		drv_i915_batch_emit(batch, 7U | (26U << 8) | (30U << 16) | (57U << 24));
+		drv_i915_batch_emit(batch, 8U | (2U << 8) | (4U << 16) | (6U << 24));
+		drv_i915_batch_emit(batch, 5U | (0U << 8) | (4U << 16) | (0U << 24));
+		drv_i915_batch_emit(batch, 0U | (6U << 8) | (6U << 16) | (9U << 24));
+		drv_i915_batch_emit(batch, 10U | (13U << 8) | (14U << 16) | (24U << 24));
+	}
+	/* DW14: QpPrimeY, DW15..19: zero. */
+	drv_i915_batch_emit(batch, (uint32_t)enc->slice.qp & 0xffU);
+	vdenc_emit_zeros(batch, 5U);
+	/* DW20: Intra non-DC penalties. */
+	drv_i915_batch_emit(batch, 36U | (12U << 8) | (4U << 16));
+	drv_i915_batch_emit(batch, 0U);
+	/* DW22: Small/Large MB size in words. */
+	drv_i915_batch_emit(batch, 0x00ff00ffU);
+	/* DW23..26: zero. */
+	vdenc_emit_zeros(batch, 4U);
+	/* DW27: MaxHmvR / MaxVmvR. */
+	drv_i915_batch_emit(batch, 0x2000U | (0x200U << 16));
+	vdenc_emit_zeros(batch, 3U);
+	/* DW31..34. */
+	drv_i915_batch_emit(batch, is_intra ? 0U : 800U);
+	drv_i915_batch_emit(batch, is_intra ? 0U : (1600U | (2400U << 16)));
+	drv_i915_batch_emit(batch, 0x33U | (0x0aU << 8) | (0x0fU << 24));
+	drv_i915_batch_emit(batch, is_intra ? 0U : 0x640U);
 }
 
 static void
@@ -897,17 +941,32 @@ vdenc_emit_pak_insert_slice(
 	size_t i;
 	uint32_t word;
 	uint32_t ctrl;
+	uint32_t last_bits;
 	size_t byte_idx;
+	uint32_t skip_emul = 5U;
+
+	/* Gen12+ WaSuperSliceHeaderPacking: split leading 0x00 of 4-byte start code. */
+	if (hdr_bits >= 40U && hdr[0] == 0x00U && hdr[1] == 0x00U &&
+	    hdr[2] == 0x00U && hdr[3] == 0x01U) {
+		drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_MFX_PAK_INSERT_OBJECT, 3U));
+		drv_i915_batch_emit(batch, 8U << 8);
+		drv_i915_batch_emit(batch, 0U);
+		hdr++;
+		hdr_bits -= 8U;
+		skip_emul = 4U;
+	}
 
 	hdr_bytes = (hdr_bits + 7U) / 8U;
 	payload_dwords = (hdr_bytes + 3U) / 4U;
+	last_bits = (uint32_t)(hdr_bits & 31U);
+	if (last_bits == 0U && hdr_bits > 0U)
+		last_bits = 32U;
 
-	ctrl = GEN12_VIDEO_PAK_INSERT_STARTCODE |
-	       GEN12_VIDEO_PAK_INSERT_END_OF_SLICE |
-	       GEN12_VIDEO_PAK_INSERT_LAST_HEADER |
-	       GEN12_VIDEO_PAK_INSERT_EMULATION |
-	       (5U << GEN12_VIDEO_PAK_INSERT_SKIP_EMUL_SHIFT) |
-	       (((uint32_t)hdr_bits & 0xffU) << GEN12_VIDEO_PAK_INSERT_DATABITS_SHIFT);
+	ctrl = (1U << 2) |
+	       (1U << 3) |
+	       (skip_emul << 4) |
+	       ((last_bits & 0x3fU) << 8) |
+	       (1U << 14);
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_MFX_PAK_INSERT_OBJECT,
 						      (uint32_t)(2U + payload_dwords)));
@@ -930,24 +989,32 @@ vdenc_emit_mfx_slice(
 	struct i915_gfx_batch *batch,
 	const struct i915_video_vdenc_encode *enc)
 {
+	uint32_t height_mbs = enc->sps->pic_height_in_map_units_minus1 + 1U;
+	uint32_t l0_active = (enc->slice.slice_type == I915_VIDEO_SLICE_P) ?
+		(enc->slice.num_ref_idx_l0_active_minus1 + 1U) : 0U;
+	uint32_t dw2;
 	uint32_t dw3;
-	uint32_t dw4;
+	uint32_t dw5;
+	uint32_t dw6;
 
-	dw3 = (enc->slice.slice_type & 0xfU) |
-	      ((enc->slice.cabac_init_idc & 0x3U) << 16) |
-	      (((uint32_t)enc->slice.qp & 0x3fU) << 24);
-	dw4 = (enc->slice.disable_deblocking_filter_idc & 0x3U) |
-	      (((uint32_t)enc->slice.slice_alpha_c0_offset_div2 & 0xfU) << 4) |
+	dw2 = (l0_active & 0x3fU) << 16;
+	dw3 = ((uint32_t)enc->slice.slice_alpha_c0_offset_div2 & 0xfU) |
 	      (((uint32_t)enc->slice.slice_beta_offset_div2 & 0xfU) << 8) |
-	      (1U << 19);
+	      (((uint32_t)enc->slice.qp & 0x3fU) << 16) |
+	      ((enc->slice.cabac_init_idc & 0x3U) << 24) |
+	      ((enc->slice.disable_deblocking_filter_idc & 0x3U) << 27);
+	dw5 = (height_mbs & 0x1ffU) << 16;
+	dw6 = (1U << 12) | (1U << 13) | (1U << 16) | (1U << 17) | (1U << 19);
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_MFX_AVC_SLICE_STATE,
 						      GEN12_VIDEO_MFX_AVC_SLICE_STATE_DWORDS));
 	drv_i915_batch_emit(batch, enc->slice.slice_type & 0xfU);
-	drv_i915_batch_emit(batch, enc->slice.num_ref_idx_l0_active_minus1 & 0x3fU);
+	drv_i915_batch_emit(batch, dw2);
 	drv_i915_batch_emit(batch, dw3);
-	drv_i915_batch_emit(batch, dw4);
-	vdenc_emit_zeros(batch, GEN12_VIDEO_MFX_AVC_SLICE_STATE_DWORDS - 5U);
+	drv_i915_batch_emit(batch, 0U);
+	drv_i915_batch_emit(batch, dw5);
+	drv_i915_batch_emit(batch, dw6);
+	vdenc_emit_zeros(batch, GEN12_VIDEO_MFX_AVC_SLICE_STATE_DWORDS - 7U);
 }
 
 static void
@@ -955,12 +1022,20 @@ vdenc_emit_vdenc_walker(
 	struct i915_gfx_batch *batch,
 	const struct i915_video_vdenc_encode *enc)
 {
+	uint32_t height_mbs = enc->sps->pic_height_in_map_units_minus1 + 1U;
+
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_WALKER_STATE,
 						      GEN12_VIDEO_VDENC_WALKER_STATE_DWORDS));
 	drv_i915_batch_emit(batch, 0U);
-	drv_i915_batch_emit(batch, (enc->sps->pic_width_in_mbs_minus1 & 0xffU) |
-				   ((enc->sps->pic_height_in_map_units_minus1 & 0xffU) << 16));
-	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_WALKER_STATE_DWORDS - 3U);
+	drv_i915_batch_emit(batch, height_mbs & 0x3ffU);
+	drv_i915_batch_emit(batch, 0U);
+	drv_i915_batch_emit(batch, 0U);
+	drv_i915_batch_emit(batch, (enc->width - 1U) & 0xffffU);
+	vdenc_emit_zeros(batch, 8U);
+	drv_i915_batch_emit(batch, 0x3f400000U);
+	drv_i915_batch_emit(batch, 0U);
+	drv_i915_batch_emit(batch, 0x003f3f3fU);
+	vdenc_emit_zeros(batch, GEN12_VIDEO_VDENC_WALKER_STATE_DWORDS - 17U);
 }
 
 static void
@@ -968,10 +1043,10 @@ vdenc_emit_tail(
 	struct i915_gfx_batch *batch,
 	const struct i915_video_vdenc_encode *enc)
 {
-	/* Flush VDEnc + MFX pipelines. */
+	/* Wait for VDEnc + MFX pipelines, then MI_FLUSH_DW with video cache invalidate. */
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VD_PIPELINE_FLUSH,
 						      GEN12_VIDEO_VD_PIPELINE_FLUSH_DWORDS));
-	drv_i915_batch_emit(batch, 0xffffU);
+	drv_i915_batch_emit(batch, (1U << 1) | (1U << 3) | (1U << 4) | (1U << 17));
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_MI_FLUSH_DW | GEN12_VIDEO_MI_FLUSH_DW_INVALIDATE);
 	vdenc_emit_zeros(batch, GEN12_VIDEO_MI_FLUSH_DW_DWORDS - 1U);
