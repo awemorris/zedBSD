@@ -8,6 +8,10 @@
 #ifndef LIBC_NET_IF_H
 #define LIBC_NET_IF_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include <uapi/netif.h>
 
 /* An interface's name and index (POSIX; ws130-p004). */
@@ -27,5 +31,9 @@ struct if_nameindex {
 
 struct if_nameindex *if_nameindex(void);
 void if_freenameindex(struct if_nameindex *);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif
