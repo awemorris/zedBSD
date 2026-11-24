@@ -204,7 +204,8 @@ struct font_property {
  * The families the fonts are named in.
  */
 static const struct font_family font_families[] = {
-	{ "misc", "fixed", X11_FACE_MONO, 'c' },
+	{ "misc", "fixed", X11_FACE_FIXED, 'c' },
+	{ "gnu", "unifont", X11_FACE_FIXED, 'c' },
 	{ "adobe", "courier", X11_FACE_MONO, 'm' },
 	{ "adobe", "helvetica", X11_FACE_SANS, 'p' },
 	{ "adobe", "times", X11_FACE_SANS, 'p' }
@@ -244,7 +245,8 @@ static const struct font_cell font_cells[] = {
  * 5x7 to 12x24); 8x16 and 12x24 stand for misc-fixed here.
  */
 static const struct font_alias font_aliases[] = {
-	{ "fixed", "-misc-fixed-medium-r-semicondensed--13-120-75-75-c-60-iso8859-1" },
+	{ "fixed", "-misc-fixed-medium-r-normal--16-150-75-75-c-80-iso10646-1" },
+	{ "unifont", "-gnu-unifont-medium-r-normal--16-160-75-75-c-80-iso10646-1" },
 	{ "variable", "-*-helvetica-bold-r-normal-*-*-120-*-*-*-*-iso8859-1" },
 	{ "5x7", "-misc-fixed-medium-r-normal--7-70-75-75-c-50-iso8859-1" },
 	{ "5x8", "-misc-fixed-medium-r-normal--8-80-75-75-c-50-iso8859-1" },
@@ -259,7 +261,8 @@ static const struct font_alias font_aliases[] = {
 	{ "7x14bold", "-misc-fixed-bold-r-normal--14-130-75-75-c-70-iso8859-1" },
 	{ "8x13", "-misc-fixed-medium-r-normal--13-120-75-75-c-80-iso8859-1" },
 	{ "8x13bold", "-misc-fixed-bold-r-normal--13-120-75-75-c-80-iso8859-1" },
-	{ "8x16", "-misc-fixed-medium-r-normal--16-150-75-75-c-80-iso8859-1" },
+	{ "8x16", "-misc-fixed-medium-r-normal--16-150-75-75-c-80-iso10646-1" },
+	{ "16x16", "-misc-fixed-medium-r-normal--16-160-75-75-c-160-iso10646-1" },
 	{ "9x15", "-misc-fixed-medium-r-normal--15-140-75-75-c-90-iso8859-1" },
 	{ "9x15bold", "-misc-fixed-bold-r-normal--15-140-75-75-c-90-iso8859-1" },
 	{ "10x20", "-misc-fixed-medium-r-normal--20-200-75-75-c-100-iso8859-1" },
@@ -268,9 +271,10 @@ static const struct font_alias font_aliases[] = {
 
 /*
  * The pixel sizes courier, helvetica and times are listed at (any other
- * opens through their scalable names).
+ * opens through their scalable names), and Unifont's integer multiples.
  */
 static const unsigned font_sizes[] = { 8U, 10U, 12U, 14U, 18U, 24U };
+static const unsigned font_unifont_sizes[] = { 16U, 32U, 48U };
 
 /*
  * What a fixed font keeps at 1 to 31: the DEC special graphics, the
@@ -338,7 +342,8 @@ static void font_name(const struct font_spec *spec, char *name, size_t size);
 static int font_scalable(struct x11server *server, const char *pattern, size_t length, unsigned owner, unsigned skip, struct x11_font **result);
 static int font_make(struct x11server *server, struct font_spec *spec, unsigned owner, struct x11_font **result);
 static int font_make_special(struct x11server *server, const char *name, unsigned owner, struct x11_font **result);
-static void font_make_mono(struct x11server *server, struct x11_font *font, struct font_spec *spec);
+static int font_make_mono(struct x11server *server, struct x11_font *font, struct font_spec *spec);
+static int font_make_fixed_metrics(struct x11server *server, struct x11_font *font);
 static int font_make_proportional(struct x11server *server, struct x11_font *font, struct font_spec *spec);
 static int font_charge(struct x11server *server, struct x11_font *font);
 static const struct font_cell *font_cell_of(const struct font_spec *spec);
@@ -1586,6 +1591,18 @@ font_names_family(
 				return error;
 			continue;
 		}
+		if (family == &font_families[1]) {
+			for (index = 0U; index < sizeof(font_unifont_sizes) / sizeof(font_unifont_sizes[0]); index++) {
+				spec.pixel = font_unifont_sizes[index];
+				spec.point = font_unifont_sizes[index] * 10U;
+				spec.average = (font_unifont_sizes[index] / 2U) * 10U;
+				font_name(&spec, name, sizeof(name));
+				error = font_names_add(names, size, capacity, name);
+				if (error != 0)
+					return error;
+			}
+			continue;
+		}
 
 		/* The listed sizes, each named with the width the font has at it. */
 		for (index = 0U; index < sizeof(font_sizes) / sizeof(font_sizes[0]); index++) {
@@ -2031,7 +2048,7 @@ font_make(
 	font->owner = owner;
 	font->kind = X11_FONT_TEXT;
 	font->role = spec->family->role;
-	if (spec->bold)
+	if (spec->bold && (font->role == X11_FACE_MONO || font->role == X11_FACE_SANS))
 		font->role++;
 	font->min_byte1 = 0U;
 	font->max_byte1 = 0U;
@@ -2042,7 +2059,11 @@ font_make(
 
 	/* Its metrics: one cell of the family's, or each character's of the face. */
 	if (spec->family->spacing != 'p') {
-		font_make_mono(server, font, spec);
+		error = font_make_mono(server, font, spec);
+		if (error != 0) {
+			x11_font_free(server, font);
+			return error;
+		}
 	} else {
 		error = font_make_proportional(server, font, spec);
 		if (error != 0) {
@@ -2094,6 +2115,26 @@ font_make_special(
 		font->cell_width = FONT_CURSOR_CELL;
 		font->ascent = FONT_CURSOR_CELL;
 		font->descent = 0;
+	} else if (x11_face_has_own(&server->faces, X11_FACE_FIXED)) {
+		/*
+		 * zed-unicode with Unifont: 16px cells over the Unicode BMP,
+		 * half-width 8x16 and full-width 16x16.
+		 */
+		font->kind = X11_FONT_TEXT;
+		font->role = X11_FACE_FIXED;
+		font->pixels = 16U;
+		font->raise = 0;
+		font->max_byte1 = 255U;
+		font->max_byte2 = 255U;
+		font->cell_width = FONT_ZED_WIDTH;
+		font->ascent = 14;
+		font->descent = 2;
+		font->line_drawing = 1;
+		error = font_make_fixed_metrics(server, font);
+		if (error != 0) {
+			x11_font_free(server, font);
+			return error;
+		}
 	} else {
 		/*
 		 * zed-unicode: the tree's 8x16 cells over the whole of Unicode's
@@ -2110,13 +2151,15 @@ font_make_special(
 		font->descent = 0;
 	}
 
-	/* Every character's metrics: the cell. */
-	font->min_bounds.left = 0;
-	font->min_bounds.right = (int16_t)font->cell_width;
-	font->min_bounds.width = (int16_t)font->cell_width;
-	font->min_bounds.ascent = (int16_t)font->ascent;
-	font->min_bounds.descent = (int16_t)font->descent;
-	font->max_bounds = font->min_bounds;
+	/* Every character's metrics when not already populated by per-character widths. */
+	if (font->metrics == NULL) {
+		font->min_bounds.left = 0;
+		font->min_bounds.right = (int16_t)font->cell_width;
+		font->min_bounds.width = (int16_t)font->cell_width;
+		font->min_bounds.ascent = (int16_t)font->ascent;
+		font->min_bounds.descent = (int16_t)font->descent;
+		font->max_bounds = font->min_bounds;
+	}
 
 	/* Its charge. */
 	error = font_charge(server, font);
@@ -2136,7 +2179,7 @@ font_make_special(
  * one, else the size's ascent and descent and the width asked or the
  * face's own; the face is drawn at the largest size that fits the cell.
  */
-static void
+static int
 font_make_mono(
 	struct x11server *server,
 	struct x11_font *font,
@@ -2151,11 +2194,14 @@ font_make_mono(
 	int width;
 	int error;
 
-	/* The cell's height and baseline: X's, or a fifth of the size below the baseline. */
+	/* The cell's height and baseline: X's, 14:2 for 16px multiples of fixed, or a fifth below. */
 	cell = font_cell_of(spec);
 	if (cell != NULL) {
 		font->ascent = cell->ascent;
 		font->descent = cell->descent;
+	} else if (font->role == X11_FACE_FIXED && spec->pixel >= 16U && (spec->pixel % 16U) == 0U) {
+		font->descent = (int)(spec->pixel / 16U) * 2;
+		font->ascent = (int)spec->pixel - font->descent;
 	} else {
 		font->descent = (int)spec->pixel / 5;
 		font->ascent = (int)spec->pixel - font->descent;
@@ -2182,28 +2228,110 @@ font_make_mono(
 	if (spec->average == 0U)
 		spec->average = (unsigned)width * 10U;
 
-	/* The size the face is drawn at: the largest that fits the cell, centred across it. */
+	/* The size the face is drawn at: exact for 16px multiples of fixed, else largest that fits. */
 	font->pixels = spec->pixel;
 	font->shift_x = 0;
-	for (pixels = spec->pixel + 2U; pixels >= 1U && has_face; pixels--) {
-		error = x11_face_line(&server->faces, font->role, pixels, &ascent, &descent, &advance);
-		if (error != 0)
+	if (font->role == X11_FACE_FIXED && spec->pixel >= 16U && (spec->pixel % 16U) == 0U) {
+		if (has_face) {
+			error = x11_face_line(&server->faces, font->role, spec->pixel, &ascent, &descent, &advance);
+			if (error == 0 && advance < width)
+				font->shift_x = (width - advance) / 2;
+		}
+	} else {
+		for (pixels = spec->pixel + 2U; pixels >= 1U && has_face; pixels--) {
+			error = x11_face_line(&server->faces, font->role, pixels, &ascent, &descent, &advance);
+			if (error != 0)
+				break;
+			if (ascent > font->ascent + 1 || descent > font->descent + 1 || advance > width)
+				continue;
+			font->pixels = pixels;
+			font->shift_x = (width - advance) / 2;
 			break;
-		if (ascent > font->ascent + 1 || descent > font->descent + 1 || advance > width)
-			continue;
-		font->pixels = pixels;
-		font->shift_x = (width - advance) / 2;
-		break;
+		}
 	}
 
-	/* Every character's metrics: the cell; the line-drawing characters drawn across it. */
+	/* Every character's metrics: per-character half/full widths for wide fixed fonts, else one cell. */
+	font->line_drawing = 1;
+	if (spec->wide &&
+	    font->role == X11_FACE_FIXED &&
+	    x11_face_has_own(&server->faces, X11_FACE_FIXED) &&
+	    width == (int)(font->pixels / 2U)) {
+		error = font_make_fixed_metrics(server, font);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	font->min_bounds.left = 0;
 	font->min_bounds.right = (int16_t)width;
 	font->min_bounds.width = (int16_t)width;
 	font->min_bounds.ascent = (int16_t)font->ascent;
 	font->min_bounds.descent = (int16_t)font->descent;
 	font->max_bounds = font->min_bounds;
-	font->line_drawing = 1;
+	return 0;
+}
+
+/*
+ * Populates per-character metrics for a wide fixed font (half-width
+ * and full-width cells) from the face's advance widths.  Returns 0, or
+ * ENOMEM.
+ */
+static int
+font_make_fixed_metrics(
+	struct x11server *server,
+	struct x11_font *font)
+{
+	struct x11_char_metrics *metrics;
+	size_t index;
+	int advance;
+	int max_width;
+	int error;
+
+	/* All 65,536 BMP code points. */
+	font->metric_count = 65536U;
+	metrics = calloc(font->metric_count, sizeof(*metrics));
+	if (metrics == NULL) {
+		font->metric_count = 0U;
+		return ENOMEM;
+	}
+	font->metrics = metrics;
+
+	/* Measure each printable BMP code point and DEC line-drawing entry. */
+	max_width = font->cell_width;
+	for (index = 0U; index < font->metric_count; index++) {
+		if (index >= 1U && index <= 31U && font->line_drawing) {
+			metrics[index].left = 0;
+			metrics[index].right = (int16_t)font->cell_width;
+			metrics[index].width = (int16_t)font->cell_width;
+			metrics[index].ascent = (int16_t)font->ascent;
+			metrics[index].descent = (int16_t)font->descent;
+			continue;
+		}
+		if (index < 0x20U || (index >= 0x7fU && index < 0xa0U))
+			continue;
+		error = x11_face_char_advance(&server->faces, font->role, font->pixels, (uint32_t)index, &advance);
+		if (error != 0 || advance <= 0)
+			continue;
+		metrics[index].left = 0;
+		metrics[index].right = (int16_t)advance;
+		metrics[index].width = (int16_t)advance;
+		metrics[index].ascent = (int16_t)font->ascent;
+		metrics[index].descent = (int16_t)font->descent;
+		if (advance > max_width)
+			max_width = advance;
+	}
+
+	/* Bounds spanning half-width and full-width cells. */
+	font->default_char = 0x20U;
+	font->min_bounds.left = 0;
+	font->min_bounds.right = (int16_t)font->cell_width;
+	font->min_bounds.width = (int16_t)font->cell_width;
+	font->min_bounds.ascent = (int16_t)font->ascent;
+	font->min_bounds.descent = (int16_t)font->descent;
+	font->max_bounds = font->min_bounds;
+	font->max_bounds.right = (int16_t)max_width;
+	font->max_bounds.width = (int16_t)max_width;
+	return 0;
 }
 
 /*

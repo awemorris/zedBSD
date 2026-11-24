@@ -136,6 +136,66 @@ x11_face_present(
 }
 
 /*
+ * Tells whether a role has its own font file (1) or relies on another
+ * role's face (0).
+ */
+int
+x11_face_has_own(
+	const struct x11_faces *faces,
+	unsigned role)
+{
+	/* Only a role within range with an open face has its own. */
+	if (role >= X11_FACES)
+		return 0;
+	if (faces->faces[role] == NULL)
+		return 0;
+
+	/* Succeeded: its own face is present. */
+	return 1;
+}
+
+/*
+ * Measures a character's advance width at a pixel size without loading
+ * its outline: zero when the face lacks the character.  Returns 0, or
+ * ENOENT without a face.
+ */
+int
+x11_face_char_advance(
+	struct x11_faces *faces,
+	unsigned role,
+	unsigned pixels,
+	uint32_t codepoint,
+	int *advance)
+{
+	struct truetype_design_metrics design;
+	struct truetype_face *face;
+	unsigned glyph;
+	int units;
+	int error;
+
+	/* The face at the size. */
+	*advance = 0;
+	error = faces_select(faces, role, pixels, &face);
+	if (error != 0)
+		return error;
+
+	/* A character the face lacks has no advance. */
+	glyph = truetype_glyph_index(face, codepoint);
+	if (glyph == 0U)
+		return 0;
+
+	/* Scale the design advance to whole pixels. */
+	error = truetype_design_metrics(face, &design);
+	if (error != 0 || design.units_per_em == 0U)
+		return 0;
+	error = truetype_glyph_design_advance(face, glyph, &units);
+	if (error != 0)
+		return 0;
+	*advance = (units * (int)pixels + (int)design.units_per_em / 2) / (int)design.units_per_em;
+	return 0;
+}
+
+/*
  * Measures a role's line at a pixel size: the ascent and descent (both
  * counted away from the baseline) and the advance of an M.  Returns 0, or
  * ENOENT without a face.
@@ -354,6 +414,10 @@ faces_resolve(
 			return X11_FACE_MONO;
 		}
 	}
+
+	/* A fixed role without its own face: the monospaced face. */
+	if (role == X11_FACE_FIXED && faces->faces[X11_FACE_MONO] != NULL)
+		return X11_FACE_MONO;
 
 	/* No face draws the role. */
 	return X11_FACES;

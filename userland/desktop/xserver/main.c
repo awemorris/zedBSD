@@ -38,8 +38,8 @@
 #define MAIN_SANS_PATH		KEILAND_DATADIR "/fonts/keiland.ttf"
 #define MAIN_SANS_BOLD_PATH	KEILAND_DATADIR "/fonts/keiland-bold.ttf"
 
-/* The font files read: the monospaced one, and the proportional one and its bold. */
-#define MAIN_FONTS		3U
+/* The font files read: monospaced, proportional, proportional bold, and fixed. */
+#define MAIN_FONTS		4U
 
 /* The largest font file read. */
 #define MAIN_FONT_MAX		(32U * 1024U * 1024U)
@@ -123,16 +123,9 @@ main(
 	memset(font_bytes, 0, sizeof(font_bytes));
 	font_count = 0U;
 	path = options.font_path;
-	if (path != NULL) {
-		error = main_font(path, &font_bytes[0], &font_size);
-	} else {
-		path = MAIN_FIXED_PATH;
-		error = main_font(path, &font_bytes[0], &font_size);
-		if (error != 0) {
-			path = MAIN_FONT_PATH;
-			error = main_font(path, &font_bytes[0], &font_size);
-		}
-	}
+	if (path == NULL)
+		path = MAIN_FONT_PATH;
+	error = main_font(path, &font_bytes[0], &font_size);
 	if (error != 0) {
 		fprintf(stderr, "xserver: %s: %s (no text)\n", path, strerror(error));
 	} else {
@@ -155,6 +148,15 @@ main(
 		fonts[font_count].bytes = font_bytes[2];
 		fonts[font_count].size = font_size;
 		fonts[font_count].role = X11SERVER_FONT_SANS_BOLD;
+		font_count++;
+	}
+
+	/* The fixed bitmap-style font, when it is there (else the monospaced face draws it). */
+	error = main_font(MAIN_FIXED_PATH, &font_bytes[3], &font_size);
+	if (error == 0) {
+		fonts[font_count].bytes = font_bytes[3];
+		fonts[font_count].size = font_size;
+		fonts[font_count].role = X11SERVER_FONT_FIXED;
 		font_count++;
 	}
 
