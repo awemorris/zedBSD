@@ -1501,8 +1501,10 @@ i915_video_session_sizes(
 		/* The BSD/MPC and the MPR row stores. */
 		bytes = (uint64_t)video->width_mbs * 64U * 2U;
 	} else {
-		/* A direct motion vector buffer. */
+		/* A direct motion vector buffer (plus VDEnc scratch/4xDS for spare slot). */
 		bytes = (uint64_t)video->width_mbs * video->height_mbs * 128U;
+		if (index == video->row_stores + video->max_dpb_slots && bytes < 256U * 1024U)
+			bytes = 256U * 1024U;
 	}
 
 	/* Every binding is whole 4 KiB pages. */
@@ -4739,7 +4741,8 @@ i915_video_encode_run(
 	}
 	enc.vdenc_row_store = enc.streamout_buffer + 8192U;
 	enc.streamin_buffer = 0U;
-	enc.mb_status_buffer = enc.streamout_buffer;
+	enc.mb_status_buffer = enc.streamout_buffer + 4096U;
+	enc.ds_recon_buffer = enc.streamout_buffer + 16384U;
 	enc.bitstream_base = dst_va;
 	enc.bitstream_end = dst_va + command->range;
 	enc.feedback_addr = video->feedback_obj->va;
