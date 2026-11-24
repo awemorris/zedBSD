@@ -1,3 +1,141 @@
+--- /dev/null
++++ b/content/browser/child_process_launcher_helper_zedbsd.cc
+@@ -0,0 +1,123 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "content/browser/child_process_launcher_helper.h"
++
++#include "base/command_line.h"
++#include "base/path_service.h"
++#include "base/posix/global_descriptors.h"
++#include "base/process/launch.h"
++#include "content/browser/child_process_launcher.h"
++#include "content/browser/child_process_launcher_helper_posix.h"
++#include "content/browser/sandboxed_process_launcher_delegate.h"
++#include "content/public/browser/child_process_launcher_utils.h"
++#include "content/public/common/result_codes.h"
++
++namespace content {
++namespace internal {
++
++std::optional<mojo::NamedPlatformChannel>
++ChildProcessLauncherHelper::CreateNamedPlatformChannelOnLauncherThread() {
++  CHECK(CurrentlyOnProcessLauncherTaskRunner(), base::NotFatalUntil::M159);
++  return std::nullopt;
++}
++
++void ChildProcessLauncherHelper::BeforeLaunchOnClientThread() {
++  CHECK(client_task_runner_->RunsTasksInCurrentSequence(),
++        base::NotFatalUntil::M159);
++}
++
++std::unique_ptr<FileMappedForLaunch>
++ChildProcessLauncherHelper::GetFilesToMap() {
++  CHECK(CurrentlyOnProcessLauncherTaskRunner(), base::NotFatalUntil::M159);
++  return CreateDefaultPosixFilesToMap(
++      child_process_id(), mojo_channel_->remote_endpoint(),
++      file_data_->files_to_preload, GetProcessType(), command_line());
++}
++
++bool ChildProcessLauncherHelper::IsUsingLaunchOptions() {
++  return true;
++}
++
++bool ChildProcessLauncherHelper::BeforeLaunchOnLauncherThread(
++    PosixFileDescriptorInfo& files_to_register,
++    base::LaunchOptions* options) {
++  CHECK(options, base::NotFatalUntil::M159);
++  options->fds_to_remap = files_to_register.GetMappingWithIDAdjustment(
++      base::GlobalDescriptors::kBaseDescriptor);
++  options->environment = delegate_->GetEnvironment();
++  return true;
++}
++
++ChildProcessLauncherHelper::Process
++ChildProcessLauncherHelper::LaunchProcessOnLauncherThread(
++    const base::LaunchOptions* options,
++    std::unique_ptr<FileMappedForLaunch> files_to_register,
++    bool* is_synchronous_launch,
++    int* launch_result) {
++  *is_synchronous_launch = true;
++  Process process;
++  process.process = base::LaunchProcess(*command_line(), *options);
++  *launch_result = process.process.IsValid() ? LAUNCH_RESULT_SUCCESS
++                                             : LAUNCH_RESULT_FAILURE;
++  return process;
++}
++
++void ChildProcessLauncherHelper::AfterLaunchOnLauncherThread(
++    const ChildProcessLauncherHelper::Process& process,
++    const base::LaunchOptions* options) {
++  file_data_.reset();
++}
++
++ChildProcessTerminationInfo ChildProcessLauncherHelper::GetTerminationInfo(
++    const ChildProcessLauncherHelper::Process& process,
++    bool known_dead) {
++  ChildProcessTerminationInfo info;
++  if (known_dead) {
++    info.status = base::GetKnownDeadTerminationStatus(process.process.Handle(),
++                                                      &info.exit_code);
++  } else {
++    info.status =
++        base::GetTerminationStatus(process.process.Handle(), &info.exit_code);
++  }
++  return info;
++}
++
++// static
++bool ChildProcessLauncherHelper::TerminateProcess(const base::Process& process,
++                                                  int exit_code) {
++  return process.Terminate(exit_code, false);
++}
++
++// static
++void ChildProcessLauncherHelper::ForceNormalProcessTerminationSync(
++    ChildProcessLauncherHelper::Process process) {
++  CHECK(CurrentlyOnProcessLauncherTaskRunner(), base::NotFatalUntil::M159);
++  process.process.Terminate(RESULT_CODE_NORMAL_EXIT, false);
++  base::EnsureProcessTerminated(std::move(process.process));
++}
++
++// static
++void ChildProcessLauncherHelper::ApplyProcessPriorityOnLauncherThread(
++    base::Process& process,
++    base::Process::Priority priority) {
++  CHECK(CurrentlyOnProcessLauncherTaskRunner(), base::NotFatalUntil::M159);
++  if (process.CanSetPriority()) {
++    process.SetPriority(priority);
++  }
++}
++
++base::File OpenFileToShare(const base::FilePath& path,
++                           base::MemoryMappedFile::Region* region) {
++  base::FilePath exe_dir;
++  bool result = base::PathService::Get(base::BasePathKey::DIR_EXE, &exe_dir);
++  CHECK(result, base::NotFatalUntil::M159);
++  base::File file(exe_dir.Append(path),
++                  base::File::FLAG_OPEN | base::File::FLAG_READ);
++  *region = base::MemoryMappedFile::Region::kWholeFile;
++  return file;
++}
++
++}  // namespace internal
++}  // namespace content
+--- a/content/browser/scheduler/responsiveness/native_event_observer.cc
++++ b/content/browser/scheduler/responsiveness/native_event_observer.cc
+@@ -90,7 +90,8 @@
+ }
+ #endif  // BUILDFLAG(IS_WIN)
+ 
+-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_IOS)
++#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_IOS) || \
++    BUILDFLAG(IS_ZEDBSD)
+ void BrowserUINativeEventObserver::RegisterObserver() {}
+ void BrowserUINativeEventObserver::UnregisterObserver() {}
+ #endif
 --- a/content/browser/service_host/utility_sandbox_delegate.cc
 +++ b/content/browser/service_host/utility_sandbox_delegate.cc
 @@ -24,10 +24,10 @@
@@ -64,6 +202,19 @@
  
 -use_zygote = is_posix && !is_android && !is_apple
 +use_zygote = is_posix && !is_android && !is_apple && !is_zedbsd
+--- a/content/renderer/BUILD.gn
++++ b/content/renderer/BUILD.gn
+@@ -353,6 +353,10 @@
+     deps += [ "//components/services/font/public/cpp" ]
+   }
+ 
++  if (is_zedbsd) {
++    sources += [ "renderer_main_platform_delegate_fuchsia.cc" ]
++  }
++
+   if (is_fuchsia) {
+     sources += [ "renderer_main_platform_delegate_fuchsia.cc" ]
+     public_deps += [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.mediacodec:fuchsia.mediacodec_hlcpp" ]
 --- a/content/shell/BUILD.gn
 +++ b/content/shell/BUILD.gn
 @@ -58,8 +58,9 @@
@@ -78,7 +229,25 @@
  
  source_set("android_shell_descriptors") {
    testonly = true
-@@ -105,7 +106,7 @@
+@@ -85,11 +86,15 @@
+ static_library("content_shell_app") {
+   testonly = true
+   sources = [
+-    "app/shell_crash_reporter_client.cc",
+-    "app/shell_crash_reporter_client.h",
+     "app/shell_main_delegate.cc",
+     "app/shell_main_delegate.h",
+   ]
++  if (!is_zedbsd) {
++    sources += [
++      "app/shell_crash_reporter_client.cc",
++      "app/shell_crash_reporter_client.h",
++    ]
++  }
+   deps = [
+     ":content_shell_lib",
+     "//components/crash/core/common:crash_key",
+@@ -105,7 +110,7 @@
        "//ui/native_theme",
      ]
    }
@@ -87,7 +256,7 @@
      deps += [
        "//components/crash/core/app",
        "//components/crash/core/app:test_support",
-@@ -389,7 +390,7 @@
+@@ -389,7 +394,7 @@
        "browser/fuchsia_view_presenter.h",
      ]
      deps += [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.element:fuchsia.element_hlcpp" ]
@@ -96,7 +265,7 @@
      deps += [
        "//components/crash/content/browser",
        "//components/crash/core/app",
-@@ -1163,7 +1164,7 @@
+@@ -1163,7 +1168,7 @@
    if (is_win) {
      data_deps += [ "//build/win:copy_cdb_to_output" ]
    }
@@ -107,7 +276,17 @@
        "//third_party/breakpad:minidump_stackwalk",
 --- a/content/shell/app/shell_main_delegate.cc
 +++ b/content/shell/app/shell_main_delegate.cc
-@@ -43,7 +43,7 @@
+@@ -32,7 +32,9 @@
+ #include "content/public/common/content_switches.h"
+ #include "content/public/common/main_function_params.h"
+ #include "content/public/common/url_constants.h"
++#if !BUILDFLAG(IS_ZEDBSD)
+ #include "content/shell/app/shell_crash_reporter_client.h"
++#endif
+ #include "content/shell/browser/shell_content_browser_client.h"
+ #include "content/shell/common/shell_content_client.h"
+ #include "content/shell/common/shell_paths.h"
+@@ -43,7 +45,7 @@
  #include "net/cookies/cookie_monster.h"
  #include "ui/base/resource/resource_bundle.h"
  
@@ -116,7 +295,25 @@
  #include "content/web_test/browser/web_test_browser_main_runner.h"  // nogncheck
  #include "content/web_test/browser/web_test_content_browser_client.h"  // nogncheck
  #include "content/web_test/renderer/web_test_content_renderer_client.h"  // nogncheck
-@@ -243,7 +243,7 @@
+@@ -57,7 +59,7 @@
+ #include "content/shell/android/shell_descriptors.h"
+ #endif
+ 
+-#if !BUILDFLAG(IS_FUCHSIA)
++#if !BUILDFLAG(IS_FUCHSIA) && !BUILDFLAG(IS_ZEDBSD)
+ #include "components/crash/core/app/crashpad.h"  // nogncheck
+ #endif
+ 
+@@ -104,7 +106,7 @@
+ #endif
+ };
+ 
+-#if !BUILDFLAG(IS_FUCHSIA)
++#if !BUILDFLAG(IS_FUCHSIA) && !BUILDFLAG(IS_ZEDBSD)
+ content::ShellCrashReporterClient& GetShellCrashReporterClient() {
+   static base::NoDestructor<content::ShellCrashReporterClient>
+       shell_crash_client;
+@@ -243,7 +245,7 @@
  
    InitLogging(command_line);
  
@@ -125,7 +322,16 @@
    if (switches::IsRunWebTestsSwitchPresent()) {
      // Instantiating `ui::OsSettingsProvider` will both provide sane default
      // behavior and prevent `ui::OsSettingsProvider::Get()` from instantiating a
-@@ -328,7 +328,7 @@
+@@ -295,7 +297,7 @@
+ // Disable platform crash handling and initialize the crash reporter, if
+ // requested.
+ // TODO(crbug.com/40188745): Implement crash reporter integration for Fuchsia.
+-#if !BUILDFLAG(IS_FUCHSIA)
++#if !BUILDFLAG(IS_FUCHSIA) && !BUILDFLAG(IS_ZEDBSD)
+   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+           switches::kEnableCrashReporter)) {
+     std::string process_type =
+@@ -328,7 +330,7 @@
    base::CurrentProcess::GetInstance().SetProcessType(
        base::CurrentProcessType::PROCESS_BROWSER);
  
@@ -134,7 +340,7 @@
    if (switches::IsRunWebTestsSwitchPresent()) {
      // Web tests implement their own BrowserMain() replacement.
      web_test_runner_->RunBrowserMain(std::move(main_function_params));
-@@ -476,7 +476,7 @@
+@@ -476,7 +478,7 @@
  }
  
  ContentBrowserClient* ShellMainDelegate::CreateContentBrowserClient() {
@@ -143,7 +349,7 @@
    if (switches::IsRunWebTestsSwitchPresent()) {
      browser_client_ = std::make_unique<WebTestContentBrowserClient>();
      return browser_client_.get();
-@@ -492,7 +492,7 @@
+@@ -492,7 +494,7 @@
  }
  
  ContentRendererClient* ShellMainDelegate::CreateContentRendererClient() {
@@ -204,6 +410,19 @@
    NOTREACHED() << "Cannot get single plane from GPU memory buffer";
  #else
    DCHECK(native_pixmap_handle.modifier == 0);
+--- a/gpu/config/BUILD.gn
++++ b/gpu/config/BUILD.gn
+@@ -178,6 +178,10 @@
+   allow_circular_includes_from =
+       [ "//gpu/ipc/common:gpu_preferences_interface" ]
+ 
++  if (is_zedbsd) {
++    sources += [ "gpu_info_collector_fuchsia.cc" ]
++  }
++
+   if (is_android) {
+     sources += [ "gpu_info_collector_android.cc" ]
+   }
 --- a/gpu/config/gpu_test_config.cc
 +++ b/gpu/config/gpu_test_config.cc
 @@ -27,7 +27,7 @@
@@ -215,6 +434,30 @@
    return GPUTestConfig::kOsLinux;
  #elif BUILDFLAG(IS_WIN)
    int32_t major_version = 0;
+--- a/gpu/ipc/service/BUILD.gn
++++ b/gpu/ipc/service/BUILD.gn
+@@ -155,6 +155,10 @@
+     ]
+     deps += [ "//chromeos/ash/experiences/arc:arc_features" ]
+   }
++  if (is_zedbsd) {
++    sources += [ "image_transport_surface_fuchsia.cc" ]
++  }
++
+   if (use_ozone) {
+     deps += [ "//ui/ozone" ]
+     sources += [
+--- a/media/audio/BUILD.gn
++++ b/media/audio/BUILD.gn
+@@ -290,7 +290,7 @@
+     deps += [ "//media/base/android:media_jni_headers" ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "linux/audio_manager_linux.cc" ]
+   }
+ 
 --- a/media/capture/video/fake_video_capture_device_factory.cc
 +++ b/media/capture/video/fake_video_capture_device_factory.cc
 @@ -232,7 +232,7 @@
@@ -293,6 +536,83 @@
  
    net::PlatformTrustStore* platform_trust_store =
        system_trust_store->GetPlatformTrustStore();
+--- a/services/device/time_zone_monitor/BUILD.gn
++++ b/services/device/time_zone_monitor/BUILD.gn
+@@ -57,6 +57,10 @@
+   if (is_fuchsia) {
+     sources += [ "time_zone_monitor_fuchsia.cc" ]
+   }
++
++  if (is_zedbsd) {
++    sources += [ "time_zone_monitor_zedbsd.cc" ]
++  }
+ }
+ 
+ source_set("test_support") {
+--- /dev/null
++++ b/services/device/time_zone_monitor/time_zone_monitor_zedbsd.cc
+@@ -0,0 +1,20 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "services/device/time_zone_monitor/time_zone_monitor.h"
++
++#include <memory>
++
++#include "base/memory/scoped_refptr.h"
++#include "base/task/sequenced_task_runner.h"
++
++namespace device {
++
++// static
++std::unique_ptr<TimeZoneMonitor> TimeZoneMonitor::Create(
++    scoped_refptr<base::SequencedTaskRunner> file_task_runner) {
++  return nullptr;
++}
++
++}  // namespace device
+--- a/services/resource_coordinator/public/cpp/memory_instrumentation/BUILD.gn
++++ b/services/resource_coordinator/public/cpp/memory_instrumentation/BUILD.gn
+@@ -34,6 +34,9 @@
+   if (is_fuchsia) {
+     sources += [ "os_metrics_fuchsia.cc" ]
+   }
++  if (is_zedbsd) {
++    sources += [ "os_metrics_zedbsd.cc" ]
++  }
+ 
+   defines = [ "IS_RESOURCE_COORDINATOR_PUBLIC_MEMORY_INSTRUMENTATION_IMPL" ]
+ 
+--- /dev/null
++++ b/services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics_zedbsd.cc
+@@ -0,0 +1,26 @@
++// Copyright 2026 The Chromium Authors and zedBSD Authors
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "services/resource_coordinator/public/cpp/memory_instrumentation/os_metrics.h"
++
++#include <vector>
++
++#include "base/process/process_handle.h"
++
++namespace memory_instrumentation {
++
++// static
++bool OSMetrics::FillOSMemoryDump(base::ProcessHandle handle,
++                                 const MemDumpFlagSet& flags,
++                                 mojom::RawOSMemDump* dump) {
++  return false;
++}
++
++// static
++std::vector<mojom::VmRegionPtr> OSMetrics::GetProcessMemoryMaps(
++    base::ProcessHandle) {
++  return std::vector<mojom::VmRegionPtr>();
++}
++
++}  // namespace memory_instrumentation
 --- a/services/screen_ai/buildflags/features.gni
 +++ b/services/screen_ai/buildflags/features.gni
 @@ -6,7 +6,8 @@
@@ -587,6 +907,17 @@
  #endif  // USE_SIGNALS
  
  #if defined(USE_SIGNALS)
+@@ -698,6 +702,10 @@
+ #undef ZX_THREAD_STATE_GENERAL_REGS
+ #endif
+ 
++#elif V8_OS_ZEDBSD
++
++void Sampler::DoSample() {}
++
+ #endif  // USE_SIGNALS
+ 
+ }  // namespace sampler
 --- a/v8/src/libsampler/sampler.h
 +++ b/v8/src/libsampler/sampler.h
 @@ -13,7 +13,7 @@

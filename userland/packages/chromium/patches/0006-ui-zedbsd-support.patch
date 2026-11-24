@@ -1,5 +1,23 @@
 --- a/ui/base/BUILD.gn
 +++ b/ui/base/BUILD.gn
+@@ -470,7 +470,7 @@
+     sources += [ "accelerators/media_keys_listener_stub.cc" ]
+   }
+ 
+-  if (is_fuchsia) {
++  if (is_fuchsia || is_zedbsd) {
+     sources += [ "resource/resource_bundle_fuchsia.cc" ]
+   }
+ 
+@@ -587,7 +587,7 @@
+     public_deps += [ "//ui/base/glib" ]
+   }
+ 
+-  if (is_chromeos || (use_aura && is_linux) || is_fuchsia) {
++  if (is_chromeos || (use_aura && is_linux) || is_fuchsia || is_zedbsd) {
+     sources += [
+       "dragdrop/os_exchange_data_provider_non_backed.cc",
+       "dragdrop/os_exchange_data_provider_non_backed.h",
 @@ -710,7 +710,7 @@
    ]
  }
@@ -55,6 +73,17 @@
    // The instance can be nullptr in tests that do not instantiate the platform,
    // or on platforms that do not implement specific drag'n'drop.  For them,
    // falling back to the Aura provider should be fine.
+--- a/ui/base/idle/BUILD.gn
++++ b/ui/base/idle/BUILD.gn
+@@ -61,7 +61,7 @@
+     deps += [ "//ui/gfx" ]
+   }
+ 
+-  if (is_fuchsia) {
++  if (is_fuchsia || is_zedbsd) {
+     sources += [ "idle_fuchsia.cc" ]
+   }
+ 
 --- a/ui/base/unowned_user_data/BUILD.gn
 +++ b/ui/base/unowned_user_data/BUILD.gn
 @@ -5,8 +5,8 @@
@@ -68,6 +97,26 @@
  
  component("unowned_user_data") {
    defines = [ "IS_UNOWNED_USER_DATA_IMPL" ]
+--- a/ui/compositor/BUILD.gn
++++ b/ui/compositor/BUILD.gn
+@@ -109,7 +109,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_fuchsia) {
++  if (is_linux || is_fuchsia || is_zedbsd) {
+     sources += [
+       "external_begin_frame_adapter.cc",
+       "external_begin_frame_adapter.h",
+@@ -151,7 +151,7 @@
+     deps += [ "//ui/resources" ]
+   }
+ 
+-  if (is_linux || is_fuchsia) {
++  if (is_linux || is_fuchsia || is_zedbsd) {
+     deps += [ "//ui/platform_window" ]
+   }
+ }
 --- a/ui/events/keycodes/dom/keycode_converter.cc
 +++ b/ui/events/keycodes/dom/keycode_converter.cc
 @@ -17,6 +17,13 @@
@@ -131,6 +180,35 @@
    // Convert a XKB keycode into a DomCode.
    static DomCode XkbKeycodeToDomCode(uint32_t xkb_keycode);
  
+--- a/ui/gfx/BUILD.gn
++++ b/ui/gfx/BUILD.gn
+@@ -405,6 +405,14 @@
+         "font_render_params_skia.cc",
+       ]
+     }
++    if (is_zedbsd) {
++      sources += [
++        "font_fallback_skia.cc",
++        "font_fallback_skia_impl.cc",
++        "font_fallback_skia_impl.h",
++        "font_render_params_skia.cc",
++      ]
++    }
+ 
+     if (is_android || is_fuchsia || is_win || is_apple) {
+       sources += [
+--- a/ui/gfx/animation/animation.cc
++++ b/ui/gfx/animation/animation.cc
+@@ -115,7 +115,8 @@
+   return ShouldRenderRichAnimation() ? duration : base::TimeDelta();
+ }
+ 
+-#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS) || BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_IOS) || BUILDFLAG(IS_FUCHSIA) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // static
+ bool Animation::ShouldRenderRichAnimationImpl() {
+   return true;
 --- a/ui/gfx/native_pixmap_handle.cc
 +++ b/ui/gfx/native_pixmap_handle.cc
 @@ -112,6 +112,10 @@
@@ -155,8 +233,37 @@
  
  component("menus") {
    sources = [
+--- a/ui/shell_dialogs/BUILD.gn
++++ b/ui/shell_dialogs/BUILD.gn
+@@ -137,7 +137,7 @@
+     ]
+   }
+ 
+-  if (is_fuchsia) {
++  if (is_fuchsia || is_zedbsd) {
+     sources += [ "select_file_dialog_fuchsia.cc" ]
+   }
+ }
 --- a/ui/views/BUILD.gn
 +++ b/ui/views/BUILD.gn
+@@ -986,7 +986,7 @@
+           "//ui/base:ozone_buildflags",
+         ]
+       }
+-      if (is_linux || is_fuchsia) {
++      if (is_linux || is_fuchsia || is_zedbsd) {
+         public += [
+           "widget/desktop_aura/desktop_drag_drop_client_ozone.h",
+           "widget/desktop_aura/desktop_window_tree_host_platform.h",
+@@ -1043,7 +1043,7 @@
+     }
+   }
+ 
+-  if (is_fuchsia) {
++  if (is_fuchsia || is_zedbsd) {
+     sources += [ "controls/menu/menu_config_fuchsia.cc" ]
+   }
+ 
 @@ -1052,7 +1052,7 @@
    }
  }
@@ -166,6 +273,17 @@
    static_library("view_pixel_diff_test_support") {
      testonly = true
      sources = [
+--- a/ui/views/controls/webview/BUILD.gn
++++ b/ui/views/controls/webview/BUILD.gn
+@@ -61,7 +61,7 @@
+     "//ui/views",
+   ]
+ 
+-  if (is_linux || is_chromeos || is_fuchsia) {
++  if (is_linux || is_chromeos || is_fuchsia || is_zedbsd) {
+     if (use_ozone) {
+       sources += [ "unhandled_keyboard_event_handler_ozone.cc" ]
+       deps += [ "//ui/ozone" ]
 --- a/ui/webui/webui_features.gni
 +++ b/ui/webui/webui_features.gni
 @@ -50,17 +50,17 @@

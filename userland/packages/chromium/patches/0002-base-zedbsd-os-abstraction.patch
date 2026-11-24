@@ -9,7 +9,17 @@
  
  generate_allowlist_from_histograms_file("memory_dump_provider_name_variants") {
    namespace = "trace_event_metrics"
-@@ -1117,6 +1117,22 @@
+@@ -1060,7 +1060,8 @@
+     #"system/sys_info_openbsd.cc",
+   ]
+ 
+-  if (is_apple || current_os == "freebsd" || current_os == "openbsd") {
++  if (is_apple || current_os == "freebsd" || current_os == "openbsd" ||
++      is_zedbsd) {
+     sources += [
+       "posix/sysctl.cc",
+       "posix/sysctl.h",
+@@ -1117,6 +1118,24 @@
      ]
    }
  
@@ -19,6 +29,8 @@
 +      "debug/elf_reader.cc",
 +      "debug/elf_reader.h",
 +      "files/file_path_watcher_stub.cc",
++      "nix/xdg_util.cc",
++      "nix/xdg_util.h",
 +      "process/memory_stubs.cc",
 +      "process/process_handle_zedbsd.cc",
 +      "process/process_iterator_zedbsd.cc",
@@ -32,7 +44,7 @@
    if (is_chromeos) {
      sources += [
        "process/process_priority_delegate.h",
-@@ -1767,13 +1783,21 @@
+@@ -1767,13 +1786,21 @@
        "posix/can_lower_nice_to.h",
        "process/launch_posix.cc",
        "profiler/module_cache_posix.cc",
@@ -60,7 +72,7 @@
    }
  
    if (is_posix && !is_android) {
-@@ -1783,11 +1807,11 @@
+@@ -1783,11 +1810,11 @@
    if (is_posix && !is_ios) {
      sources += [ "process/process_posix.cc" ]
    }
@@ -74,7 +86,18 @@
      sources += [ "synchronization/cancelable_event_posix.cc" ]
    }
  
-@@ -4487,7 +4511,7 @@
+@@ -2440,6 +2467,10 @@
+     }
+   }
+ 
++  if (is_zedbsd) {
++    deps += [ "//base/third_party/xdg_user_dirs" ]
++  }
++
+   if (use_blink) {
+     sources += [
+       "files/file_path_watcher.cc",
+@@ -4487,7 +4518,7 @@
        "posix/file_descriptor_shuffle_unittest.cc",
        "posix/unix_domain_socket_unittest.cc",
      ]
@@ -83,6 +106,16 @@
        sources += [
          "profiler/stack_base_address_posix_unittest.cc",
          "profiler/stack_copier_signal_unittest.cc",
+@@ -4591,7 +4622,8 @@
+     sources += [ "debug/allocation_trace_unittest.cc" ]
+   }
+ 
+-  if (is_apple || current_os == "freebsd" || current_os == "openbsd") {
++  if (is_apple || current_os == "freebsd" || current_os == "openbsd" ||
++      is_zedbsd) {
+     sources += [ "posix/sysctl_unittest.cc" ]
+   }
+   if (is_apple) {
 --- a/base/allocator/partition_allocator/src/partition_alloc/BUILD.gn
 +++ b/base/allocator/partition_allocator/src/partition_alloc/BUILD.gn
 @@ -787,7 +787,8 @@
@@ -1051,7 +1084,7 @@
  static const rlim_t kSystemDefaultMaxFds = 256;
 --- /dev/null
 +++ b/base/process/process_metrics_zedbsd.cc
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,90 @@
 +// Copyright 2026 zedBSD Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1064,6 +1097,7 @@
 +#include <unistd.h>
 +
 +#include "base/files/scoped_file.h"
++#include "base/memory/ptr_util.h"
 +#include "base/process/process.h"
 +
 +namespace base {
@@ -1107,6 +1141,37 @@
 +
 +Time Process::CreationTime() const {
 +  return Time();
++}
++
++ProcessMetrics::ProcessMetrics(ProcessHandle process) : process_(process) {}
++
++// static
++std::unique_ptr<ProcessMetrics> ProcessMetrics::CreateProcessMetrics(
++    ProcessHandle process) {
++  return base::WrapUnique(new ProcessMetrics(process));
++}
++
++base::expected<TimeDelta, ProcessCPUUsageError>
++ProcessMetrics::GetCumulativeCPUUsage() {
++  return base::unexpected(ProcessCPUUsageError::kSystemError);
++}
++
++base::expected<ProcessMemoryInfo, ProcessUsageError>
++ProcessMetrics::GetMemoryInfo() const {
++  return base::unexpected(ProcessUsageError::kSystemError);
++}
++
++// static
++bool Process::CanSetPriority() {
++  return false;
++}
++
++Process::Priority Process::GetPriority() const {
++  return Priority::kUserBlocking;
++}
++
++bool Process::SetPriority(Priority priority) {
++  return false;
 +}
 +
 +}  // namespace base
@@ -1191,7 +1256,7 @@
  #if BUILDFLAG(IS_MAC)
 --- /dev/null
 +++ b/base/system/sys_info_zedbsd.cc
-@@ -0,0 +1,56 @@
+@@ -0,0 +1,61 @@
 +// Copyright 2026 zedBSD Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1247,6 +1312,11 @@
 +  return info;
 +}
 +
++// static
++std::string SysInfo::CPUModelName() {
++  return std::string();
++}
++
 +}  // namespace base
 --- a/base/threading/platform_thread_posix.cc
 +++ b/base/threading/platform_thread_posix.cc
@@ -1263,6 +1333,18 @@
  }
  
  // static
+@@ -398,4 +402,11 @@
+   return base::GetDefaultThreadStackSize(attributes);
+ }
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++namespace internal {
++void SetCurrentThreadTypeImpl(ThreadType thread_type,
++                              MessagePumpType pump_type_hint) {}
++}  // namespace internal
++#endif
++
+ }  // namespace base
 --- /dev/null
 +++ b/base/threading/platform_thread_zedbsd.cc
 @@ -0,0 +1,65 @@
