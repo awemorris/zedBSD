@@ -1456,6 +1456,17 @@
  
  static_library("renderer") {
    sources = [
+--- a/components/safe_browsing/content/resources/BUILD.gn
++++ b/components/safe_browsing/content/resources/BUILD.gn
+@@ -29,7 +29,7 @@
+     target_arch = "win"
+   } else if (is_mac) {
+     target_arch = "mac"
+-  } else if (is_linux) {
++  } else if (is_linux || is_zedbsd) {
+     target_arch = "linux"
+   } else {
+     # This will cause the script to fail.
 --- a/components/signin/features.gni
 +++ b/components/signin/features.gni
 @@ -10,7 +10,7 @@
@@ -1477,6 +1488,17 @@
 +      is_android || is_chromeos || is_ios || is_linux || is_mac || is_win ||
 +      is_zedbsd
  }
+--- a/components/update_client/update_query_params.cc
++++ b/components/update_client/update_query_params.cc
+@@ -33,7 +33,7 @@
+     "android";
+ #elif BUILDFLAG(IS_CHROMEOS)
+     "cros";
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+     "linux";
+ #elif BUILDFLAG(IS_FUCHSIA)
+     "fuchsia";
 --- a/components/variations/client_filterable_state.cc
 +++ b/components/variations/client_filterable_state.cc
 @@ -128,9 +128,10 @@
@@ -1493,6 +1515,17 @@
    return Study::PLATFORM_LINUX;
  #else
  #error Unknown platform
+--- a/components/variations/field_trial_config/BUILD.gn
++++ b/components/variations/field_trial_config/BUILD.gn
+@@ -20,6 +20,8 @@
+ 
+   if (current_os == "win") {
+     platform = "windows"
++  } else if (current_os == "zedbsd") {
++    platform = "linux"
+   } else {
+     platform = current_os
+   }
 --- a/components/webapps/isolated_web_apps/BUILD.gn
 +++ b/components/webapps/isolated_web_apps/BUILD.gn
 @@ -2,7 +2,7 @@

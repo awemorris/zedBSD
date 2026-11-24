@@ -23,6 +23,24 @@
  
  source_set("android_shell_descriptors") {
    testonly = true
+@@ -105,7 +106,7 @@
+       "//ui/native_theme",
+     ]
+   }
+-  if (!is_fuchsia) {
++  if (!is_fuchsia && !is_zedbsd) {
+     deps += [
+       "//components/crash/core/app",
+       "//components/crash/core/app:test_support",
+@@ -389,7 +390,7 @@
+       "browser/fuchsia_view_presenter.h",
+     ]
+     deps += [ "//third_party/fuchsia-sdk/sdk/fidl/fuchsia.element:fuchsia.element_hlcpp" ]
+-  } else {
++  } else if (!is_zedbsd) {
+     deps += [
+       "//components/crash/content/browser",
+       "//components/crash/core/app",
 @@ -1163,7 +1164,7 @@
    if (is_win) {
      data_deps += [ "//build/win:copy_cdb_to_output" ]
@@ -44,6 +62,39 @@
      data = [
        "$root_out_dir/content_shell.pak",
        "data/",
+--- a/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
++++ b/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
+@@ -137,7 +137,7 @@
+ gfx::GpuMemoryBufferHandle
+ OzoneImageBacking::GetSinglePlaneGpuMemoryBufferHandle(uint32_t index) {
+   gfx::NativePixmapHandle native_pixmap_handle = pixmap_->ExportHandle();
+-#if BUILDFLAG(IS_FUCHSIA)
++#if BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   NOTREACHED() << "Cannot get single plane from GPU memory buffer";
+ #else
+   DCHECK(native_pixmap_handle.modifier == 0);
+--- a/gpu/config/gpu_test_config.cc
++++ b/gpu/config/gpu_test_config.cc
+@@ -27,7 +27,7 @@
+ GPUTestConfig::OS GetCurrentOS() {
+ #if BUILDFLAG(IS_CHROMEOS)
+   return GPUTestConfig::kOsChromeOS;
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_ZEDBSD)
+   return GPUTestConfig::kOsLinux;
+ #elif BUILDFLAG(IS_WIN)
+   int32_t major_version = 0;
+--- a/media/capture/video/fake_video_capture_device_factory.cc
++++ b/media/capture/video/fake_video_capture_device_factory.cc
+@@ -232,7 +232,7 @@
+     VideoCaptureApi api =
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+         VideoCaptureApi::LINUX_V4L2_SINGLE_PLANE;
+-#elif BUILDFLAG(IS_IOS)
++#elif BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ZEDBSD)
+         VideoCaptureApi::UNKNOWN;
+ #elif BUILDFLAG(IS_MAC)
+         VideoCaptureApi::MACOSX_AVFOUNDATION;
 --- a/media/cdm/library_cdm/cdm_paths.gni
 +++ b/media/cdm/library_cdm/cdm_paths.gni
 @@ -22,6 +22,8 @@
@@ -55,6 +106,50 @@
  } else {
    assert(false, "unsupported_platform")
  }
+--- a/media/webrtc/helpers.cc
++++ b/media/webrtc/helpers.cc
+@@ -68,12 +68,12 @@
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+   const bool kInputVolumeAdjustmentOverrideAllowed = true;
+-#elif BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++#elif BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   const bool kInputVolumeAdjustmentOverrideAllowed = false;
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   // Use AGC2 digital and input volume controller.
+   // TODO(crbug.com/40872787): Remove `kWebRtcAllowInputVolumeAdjustment` safely
+   // and set `input_volume_controller.enabled` true.
+--- a/services/cert_verifier/cert_verifier_creation.cc
++++ b/services/cert_verifier/cert_verifier_creation.cc
+@@ -129,7 +129,7 @@
+                                                 root_store_mtc_metadata);
+ 
+     std::unique_ptr<net::SystemTrustStore> trust_store;
+-#if BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+     trust_store = net::CreateChromeOnlySystemTrustStore(std::move(chrome_root));
+ #else
+     if (instance_params.include_system_trust_store) {
+--- a/services/cert_verifier/cert_verifier_service_factory.cc
++++ b/services/cert_verifier/cert_verifier_service_factory.cc
+@@ -175,8 +175,13 @@
+   mojom::PlatformRootStoreInfoPtr info_ptr =
+       mojom::PlatformRootStoreInfo::New();
+   std::unique_ptr<net::SystemTrustStore> system_trust_store =
++#if BUILDFLAG(IS_ZEDBSD)
++      net::CreateChromeOnlySystemTrustStore(
++          std::make_unique<net::TrustStoreChrome>());
++#else
+       net::CreateSslSystemTrustStoreChromeRoot(
+           std::make_unique<net::TrustStoreChrome>());
++#endif
+ 
+   net::PlatformTrustStore* platform_trust_store =
+       system_trust_store->GetPlatformTrustStore();
 --- a/services/screen_ai/buildflags/features.gni
 +++ b/services/screen_ai/buildflags/features.gni
 @@ -6,7 +6,8 @@
@@ -101,23 +196,26 @@
  
    # The headers are parsed with v8_base_without_compiler's flags.
    _metagen_flags_target = ":v8_base_without_compiler"
-@@ -2690,6 +2701,15 @@
+@@ -2690,6 +2701,18 @@
          args += [ "--extra-flag=$flag" ]
        }
      }
 +
 +    if (is_zedbsd) {
 +      # libclang does not know zedBSD: it is told the macros that zedBSD's
-+      # clang defines for the target.
++      # clang defines for the target, and the clang builtin include dir.
 +      args += [
 +        "--extra-flag=-D__ZEDBSD__=1",
 +        "--extra-flag=-D__unix__=1",
++        "--extra-flag=-isystem",
++        "--extra-flag=" +
++            rebase_path("$_metagen_clang_resource_dir/include", root_build_dir),
 +      ]
 +    }
    }
  }
  
-@@ -7974,6 +7994,11 @@
+@@ -7974,6 +7997,11 @@
        "src/base/debug/stack_trace_zos.cc",
        "src/base/platform/platform-zos.cc",
      ]
@@ -311,3 +409,40 @@
  #elif V8_OS_POSIX
    long pages = sysconf(_SC_PHYS_PAGES);    // NOLINT(runtime/int)
    long page_size = sysconf(_SC_PAGESIZE);  // NOLINT(runtime/int)
+--- a/v8/src/libsampler/sampler.cc
++++ b/v8/src/libsampler/sampler.cc
+@@ -19,7 +19,7 @@
+ 
+ #include "src/base/platform/memory-protection-key.h"
+ 
+-#if !V8_OS_QNX && !V8_OS_AIX && !V8_OS_ZOS
++#if !V8_OS_QNX && !V8_OS_AIX && !V8_OS_ZOS && !V8_OS_ZEDBSD
+ #include <sys/syscall.h>
+ #endif
+ 
+--- a/v8/src/libsampler/sampler.h
++++ b/v8/src/libsampler/sampler.h
+@@ -13,7 +13,7 @@
+ #include "src/base/lazy-instance.h"
+ #include "src/base/macros.h"
+ 
+-#if V8_OS_POSIX && !V8_OS_CYGWIN && !V8_OS_FUCHSIA
++#if V8_OS_POSIX && !V8_OS_CYGWIN && !V8_OS_FUCHSIA && !V8_OS_ZEDBSD
+ #define USE_SIGNALS
+ #endif
+ 
+--- a/v8/tools/metagen/compile_flags.py
++++ b/v8/tools/metagen/compile_flags.py
+@@ -199,9 +199,11 @@
+       # Without it gn prepends any build-file warning to the document -- an
+       # arm_float_abi that no declare_args() claims on the arm64 bots, say --
+       # and the parse below fails. A gn that actually fails still reports.
++      root_target = target_label.split("(", 1)[0]
+       proc = subprocess.run(
+           [
+-              gn, "desc", "-q", "--root=" + source_root, tmp_dir, target_label,
++              gn, "desc", "-q", "--root=" + source_root,
++              "--root-target=" + root_target, tmp_dir, target_label,
+               "--format=json"
+           ],
+           cwd=source_root,
