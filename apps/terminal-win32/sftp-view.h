@@ -27,6 +27,8 @@
 
 /* Post code used to wake the UI thread when the SFTP worker updates state. */
 #define SFTP_VIEW_POST		0x73667470U
+/* Post code used to launch OLE virtual-file drag-and-drop after pointer leave. */
+#define SFTP_VIEW_DRAG_POST	0x73667464U
 
 /* Sort columns for the file list. */
 enum sftp_sort_column {
@@ -136,6 +138,7 @@ struct sftp_view {
 	struct mikuterm_session *session;
 	struct sftp_link *link;
 	struct sftp_worker *worker;
+	struct sftp_drag_context *drag_ctx;
 	uint32_t number;
 	char host[MIKUTERM_HOST_MAX];
 	char title_text[MIKUTERM_HOST_MAX + 32U];
@@ -216,6 +219,11 @@ struct sftp_view {
 	/* External drag-over state. */
 	int ext_drop_active;
 
+	/* Outbound virtual-file drag state. */
+	int drag_start_pending;
+	int drag_error_pending;
+	char drag_error[256];
+
 	/* Transfer bar and snapshot. */
 	struct sftp_transfer_snapshot *transfers;
 	size_t transfer_count;
@@ -285,6 +293,7 @@ void sftp_view_format_mtime(uint32_t mtime, char *out, size_t cap);
 void sftp_view_format_perm(uint32_t mode, int is_dir, int is_link, char *out, size_t cap);
 void sftp_view_execute_ctx(struct sftp_view *view, int id);
 void sftp_view_move_selected_to(struct sftp_view *view, const char *target_dir);
+void sftp_view_request_external_drag(struct sftp_view *view);
 int sftp_view_hit_folder_at(struct sftp_view *view, int ux, int uy, char *path_out, size_t path_cap);
 
 int sftp_view_draw_frame(struct sftp_view *view, const struct terminal_view_state *state, uint32_t *pixels, uint32_t width, uint32_t height);

@@ -12,6 +12,7 @@
  */
 
 #include "sftp-view.h"
+#include "sftp-drag-win32.h"
 #include "sftp-local.h"
 #include "sftp-transfer.h"
 
@@ -46,6 +47,8 @@ static size_t view_op_copy(struct terminal_connection *connection, char *text, s
 static int view_op_can_paste(const struct terminal_connection *connection);
 static void view_op_paste(struct terminal_connection *connection, const char *text, size_t length);
 static void view_op_refuse(struct terminal_connection *connection);
+static void view_drag_notify(void *data, const char *error_text);
+static void view_run_external_drag(struct sftp_view *view);
 static void view_worker_notify(void *data);
 static void view_poll_worker(struct sftp_view *view);
 static void view_free_tree(struct sftp_tree_node *node);
@@ -175,6 +178,7 @@ sftp_view_create(
 		return error;
 	}
 
+	view->drag_ctx = sftp_drag_context_create(view->worker, view_drag_notify, view);
 	view->dirty = 1;
 	*connection_out = &view->connection;
 	return 0;
@@ -208,6 +212,7 @@ sftp_view_confirm_close(
 	active = 0U;
 	if (sftp_worker_transfers(view->worker, &items, &count, &active) == 0)
 		sftp_worker_transfers_free(items);
+	active += sftp_drag_context_active_count(view->drag_ctx);
 	if (active == 0U)
 		return 1;
 
@@ -217,6 +222,7 @@ sftp_view_confirm_close(
 	answer = MessageBoxW(NULL, msg, L"mikuterm SFTP", MB_YESNO | MB_ICONWARNING);
 	if (answer == IDYES) {
 		sftp_worker_cancel_all(view->worker);
+		sftp_drag_context_cancel_all(view->drag_ctx);
 		return 1;
 	}
 	return 0;
@@ -1079,9 +1085,17 @@ view_conn_event(
 	struct sftp_view *view;
 
 	view = (struct sftp_view *)connection;
-	if (event->kind != KL_APP_POST || event->code != SFTP_VIEW_POST)
+	if (event->kind != KL_APP_POST)
 		return 0U;
 	if ((uintptr_t)event->data != (uintptr_t)view->number)
+		return 0U;
+
+	if (event->code == SFTP_VIEW_DRAG_POST) {
+		view->drag_start_pending = 0;
+		view_run_external_drag(view);
+		return TERMINAL_READY_OUTPUT;
+	}
+	if (event->code != SFTP_VIEW_POST)
 		return 0U;
 
 	kl_mutex_lock(&view->lock);
@@ -1119,6 +1133,10 @@ view_conn_close(
 	if (view->session != NULL) {
 		mikuterm_session_detach_sftp(view->session, connection);
 		view->session = NULL;
+	}
+	if (view->drag_ctx != NULL) {
+		sftp_drag_context_detach(view->drag_ctx);
+		view->drag_ctx = NULL;
 	}
 	if (view->worker != NULL) {
 		sftp_worker_stop(view->worker);
@@ -1342,6 +1360,82 @@ view_op_refuse(
 	}
 }
 
+/* Requests an outbound virtual-file OLE drag on the next UI event dispatch. */
+void
+sftp_view_request_external_drag(
+	struct sftp_view *view)
+{
+	if (view == NULL || view->closed || view->app == NULL)
+		return;
+	if (view->worker_state != SFTP_WORKER_READY || view->drag_ctx == NULL)
+		return;
+	if (view->drag_start_pending)
+		return;
+	view->drag_start_pending = 1;
+	(void)kl_app_post(view->app, SFTP_VIEW_DRAG_POST, (void *)(uintptr_t)view->number);
+}
+
+/* Receives error notifications from outbound virtual-file drag operations. */
+static void
+view_drag_notify(
+	void *data,
+	const char *error_text)
+{
+	struct sftp_view *view = data;
+
+	if (view == NULL || error_text == NULL)
+		return;
+	kl_mutex_lock(&view->lock);
+	(void)snprintf(view->drag_error, sizeof(view->drag_error), "%s", error_text);
+	view->drag_error_pending = 1;
+	view->dirty = 1;
+	if (!view->closed && !view->posted && view->app != NULL) {
+		view->posted = 1;
+		(void)kl_app_post(view->app, SFTP_VIEW_POST, (void *)(uintptr_t)view->number);
+	}
+	kl_mutex_unlock(&view->lock);
+}
+
+/* Collects selected rows and runs the OLE virtual-file DoDragDrop loop. */
+static void
+view_run_external_drag(
+	struct sftp_view *view)
+{
+	struct sftp_drag_item *items;
+	size_t count;
+	size_t i;
+
+	if (view == NULL || view->closed || view->drag_ctx == NULL)
+		return;
+	if (view->worker_state != SFTP_WORKER_READY || view->row_count == 0U)
+		return;
+
+	items = calloc(view->row_count, sizeof(*items));
+	if (items == NULL)
+		return;
+
+	count = 0U;
+	for (i = 0U; i < view->row_count; i++) {
+		const struct sftp_dir_entry *ent = &view->rows[i].entry;
+
+		if (!view->rows[i].selected)
+			continue;
+		if (sftp_transfer_join_remote(items[count].remote_path, sizeof(items[count].remote_path),
+		    view->current_path, ent->name) != 0)
+			continue;
+		(void)snprintf(items[count].name, sizeof(items[count].name), "%s", ent->name);
+		items[count].size = ent->size;
+		items[count].mtime = ent->mtime;
+		items[count].is_dir = (ent->is_dir || ent->link_is_dir) ? 1 : 0;
+		items[count].is_link = ent->is_link ? 1 : 0;
+		count++;
+	}
+
+	if (count > 0U)
+		(void)sftp_drag_run(view->drag_ctx, items, count);
+	free(items);
+}
+
 /* Worker thread notification callback. */
 static void
 view_worker_notify(
@@ -1377,6 +1471,18 @@ view_poll_worker(
 
 	if (view == NULL || view->worker == NULL)
 		return;
+
+	kl_mutex_lock(&view->lock);
+	if (view->drag_error_pending) {
+		char drag_err[256];
+
+		(void)snprintf(drag_err, sizeof(drag_err), "%s", view->drag_error);
+		view->drag_error_pending = 0;
+		kl_mutex_unlock(&view->lock);
+		sftp_view_show_error(view, "Drag and Drop", drag_err);
+	} else {
+		kl_mutex_unlock(&view->lock);
+	}
 
 	sftp_worker_status(view->worker, &st, home, sizeof(home), err, sizeof(err));
 	view->worker_state = st;

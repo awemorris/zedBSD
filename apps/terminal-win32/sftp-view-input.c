@@ -104,6 +104,14 @@ sftp_view_handle_input(
 		view->pointer_y = uy;
 		input_handle_motion(view, ux, uy);
 		break;
+	case TERMINAL_PICTURE_LEAVE:
+		if (view->drag_active) {
+			view->drag_active = 0;
+			view->drag_pending = 0;
+			view->drop_target_path[0] = '\0';
+			sftp_view_request_external_drag(view);
+		}
+		break;
 	case TERMINAL_PICTURE_BUTTON:
 		view->pointer_x = ux;
 		view->pointer_y = uy;
