@@ -89,6 +89,7 @@ struct terminal_picture_ops {
 	void (*title)(struct terminal_connection *connection, char *title, size_t size);
 	void (*input)(struct terminal_connection *connection, const struct terminal_picture_event *event);
 	void (*refuse)(struct terminal_connection *connection);
+	int is_x11;
 };
 
 /*

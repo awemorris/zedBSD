@@ -92,11 +92,13 @@ struct mikuterm_conf {
 	int sftp_show_hidden;
 	unsigned rdp_port;
 	int rdp_resize;
+	int hide_x11_keyboard;
 	int font_size_given;
 	int theme_given;
 	int ambiguous_given;
 	int copy_given;
 	int sftp_show_hidden_given;
+	int hide_x11_keyboard_given;
 	char problems[MIKUTERM_PROBLEMS_MAX];
 };
 

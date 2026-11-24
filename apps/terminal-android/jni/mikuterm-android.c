@@ -235,6 +235,7 @@ mikuterm_android_main(void)
 	run.token = "mikuterm";
 	run.about = MAIN_ABOUT;
 	run.input_method_menu = 0;
+	run.hide_x11_keyboard_menu = 1;
 	run.open_sftp_menu = 1;
 	run.can_open_sftp = main_can_open_sftp;
 	run.open_sftp = main_open_sftp;

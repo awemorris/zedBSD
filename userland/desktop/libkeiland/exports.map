@@ -464,6 +464,7 @@
 		kl_window_paste;
 		kl_window_can_paste;
 		kl_window_text_input;
+		kl_window_suppress_keyboard;
 		kl_window_text_cursor;
 		kl_window_text_context;
 		kl_window_select;

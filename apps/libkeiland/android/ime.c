@@ -63,11 +63,35 @@ kl_window_text_input(
 	/* The keyboard's kind, and shown when the window wants text. */
 	(void)keiland_java_set_input_mode(enabled ? IME_MODE_LANGUAGE : IME_MODE_LETTERS);
 	if (enabled) {
-		(void)keiland_java_show_keyboard(1);
+		if (!window->keyboard_suppressed)
+			(void)keiland_java_show_keyboard(1);
 	} else {
 		/* The composing text goes with the language's input. */
 		ime_composing = 0;
 	}
+}
+
+/*
+ * Suppresses automatic soft-keyboard display on tap or text-input activation
+ * when suppress is nonzero, and hides the soft keyboard if currently shown.
+ */
+void
+kl_window_suppress_keyboard(
+	struct kl_window *window,
+	int suppress)
+{
+	struct kl_window *top;
+
+	if (window == NULL)
+		return;
+	window->keyboard_suppressed = (suppress != 0);
+	if (window->app == NULL)
+		return;
+	top = android_window_top(window->app);
+	if (top != window)
+		return;
+	if (window->keyboard_suppressed)
+		(void)keiland_java_show_keyboard(0);
 }
 
 /* Takes where the caret is, in the window's pixels, and tells the input method where it is on the screen. */

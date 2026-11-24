@@ -285,6 +285,7 @@ static int run_text_off;
  * the settings keep it (Settings > Behavior changes it).
  */
 static int run_copy_on_select;
+static int run_hide_x11_keyboard;
 
 /* The ID of the tab that was active before Shell > Settings chose the settings' tab (0: none), which the item chooses again. */
 static uint32_t run_page_from;
@@ -392,6 +393,8 @@ static int run_page_frame(struct run_state *run);
 static void run_page_copy(void);
 static void run_page_paste(void);
 static void run_copy_on_select_switch(const struct terminal_run_options *options, struct run_state *run);
+static void run_hide_x11_keyboard_switch(const struct terminal_run_options *options, struct run_state *run);
+static void run_x11_keyboard_follow(void);
 static int run_tabs_take(const struct terminal_run_options *options, struct run_state *run, const unsigned *ready, const uint32_t *told);
 static int run_tab_picture_open(const struct terminal_run_options *options, struct run_state *run, struct terminal_connection *connection);
 static void run_picture_output(unsigned index, unsigned ready);
@@ -497,6 +500,7 @@ run_start(
 	run->kept_pixels = settings.font_size;
 	run->theme = settings.theme;
 	run_copy_on_select = settings.copy_on_select;
+	run_hide_x11_keyboard = settings.hide_x11_keyboard;
 	printf("ZTERM SETTINGS run=%s ambiguous_wide=%d font_size=%u theme=%u copy_on_select=%d\n", options->token, run->ambiguous_wide, settings.font_size, settings.theme,
 	       run_copy_on_select);
 
@@ -551,6 +555,7 @@ run_start(
 		return -1;
 	run_window.open_sftp_item = options->open_sftp_menu;
 	run_window.open_vi_item = options->open_vi_menu;
+	run_window.hide_x11_keyboard_item = options->hide_x11_keyboard_menu;
 	run_window.refuse_terminal_drop = options->refuse_terminal_drop;
 
 	/* A window on a screen of another scale than the one asked has the font at its scale (a size the font cannot give keeps the old one). */
@@ -1374,6 +1379,10 @@ run_menu_actions(
 			if (options->open_vi != NULL)
 				status = run_open_vi_tab(options, run, NULL);
 			break;
+		case TERMINAL_ACTION_HIDE_X11_KEYBOARD:
+			/* Toggles hiding the soft keyboard on X11 tabs and persists the choice. */
+			run_hide_x11_keyboard_switch(options, run);
+			break;
 		case TERMINAL_ACTION_ABOUT:
 			/* A line about the terminal on the screen (there are no dialogs). */
 			if (options->about != NULL)
@@ -1437,6 +1446,7 @@ run_menu_state(
 	if (!run_window.page_active && !run_window.picture_active && !run_window.view_active && run_window.search_length != 0U)
 		state->can_find_again = 1;
 	state->input_method_off = run_input_method_off;
+	state->hide_x11_keyboard = run_hide_x11_keyboard;
 	if (options->can_open_sftp != NULL &&
 	    run_tab_count > 0U &&
 	    !run_tabs[run_active].settings &&
@@ -1641,6 +1651,7 @@ run_save_settings(
 	settings.font_size = run->kept_pixels;
 	settings.theme = run->theme;
 	settings.copy_on_select = run_copy_on_select;
+	settings.hide_x11_keyboard = run_hide_x11_keyboard;
 
 	/* The settings file keeps them. */
 	error = terminal_settings_save(&settings);
@@ -2029,6 +2040,7 @@ run_tab_switch(
 	run_window.view_active = 0;
 	run_window.picture_event_count = 0U;
 	run_window.view_drop_count = 0U;
+	run_x11_keyboard_follow();
 
 	/* The settings' tab takes the window's input; a grid's tab gets the text input back as its connection left it. */
 	if (run_tabs[index].settings) {
@@ -3417,6 +3429,38 @@ run_copy_on_select_switch(
 	/* The log line the tests read. */
 	printf("ZTERM COPY-ON-SELECT run=%s on=%d saved=%d\n", options->token, run_copy_on_select, error);
 	fflush(stdout);
+}
+
+/*
+ * Updates whether the soft keyboard is suppressed for the currently active tab.
+ */
+static void
+run_x11_keyboard_follow(void)
+{
+	int suppress;
+
+	suppress = (run_hide_x11_keyboard &&
+		    run_tab_count > 0U &&
+		    run_tabs[run_active].picture != NULL &&
+		    run_tabs[run_active].picture->is_x11);
+	kl_window_suppress_keyboard(run_window.kui, suppress);
+}
+
+/*
+ * Toggles View > Hide keyboard for X11 tabs, saves it, and applies it to the active tab.
+ */
+static void
+run_hide_x11_keyboard_switch(
+	const struct terminal_run_options *options,
+	struct run_state *run)
+{
+	int error;
+
+	(void)options;
+	run_hide_x11_keyboard = !run_hide_x11_keyboard;
+	error = run_save_settings(run);
+	(void)error;
+	run_x11_keyboard_follow();
 }
 
 /* Reads nothing: the settings' tab's connection has no other end. */

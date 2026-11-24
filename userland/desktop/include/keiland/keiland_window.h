@@ -323,6 +323,7 @@ void kl_window_copy(struct kl_window *window, const char *text, size_t length);
 size_t kl_window_paste(struct kl_window *window, char *text, size_t size);
 int kl_window_can_paste(const struct kl_window *window);
 void kl_window_text_input(struct kl_window *window, int enabled);
+void kl_window_suppress_keyboard(struct kl_window *window, int suppress);
 void kl_window_text_cursor(struct kl_window *window, int x, int y, int width, int height);
 
 /*

@@ -125,6 +125,19 @@ kl_window_text_input(
 }
 
 /*
+ * Suppresses automatic soft-keyboard display on tap or text-input activation
+ * when suppress is nonzero (no-op on desktop Wayland).
+ */
+void
+kl_window_suppress_keyboard(
+	struct kl_window *window,
+	int suppress)
+{
+	(void)window;
+	(void)suppress;
+}
+
+/*
  * Tells where the caret is (the window's pixels; the compositor hears it in
  * its logical units), so that a candidate list or a keyboard stays out of
  * its way; sent when it changes.

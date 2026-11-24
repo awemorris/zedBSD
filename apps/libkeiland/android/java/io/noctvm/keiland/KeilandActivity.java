@@ -134,6 +134,9 @@ public class KeilandActivity extends NativeActivity {
 	public void onConfigurationChanged(Configuration newConfig) {
 		super.onConfigurationChanged(newConfig);
 		sendConfig(newConfig);
+		if (inputView != null) {
+			inputView.requestApplyInsets();
+		}
 	}
 
 	@Override
@@ -195,11 +198,16 @@ public class KeilandActivity extends NativeActivity {
 		/* A keyboard that covers most of the window (a full-screen input method) leaves the program nothing to be shown in, so it is not made room for. */
 		if (insets.isVisible(WindowInsets.Type.ime()) &&
 		    (inputView.getHeight() == 0 || keyboard.bottom <= inputView.getHeight() * KEYBOARD_MAX_PERCENT / 100)) {
-			covered = keyboard.bottom + keyBar.heightPixels();
-			if (keyBarWindow.isShowing()) {
-				keyBarWindow.update(0, keyboard.bottom, ViewGroup.LayoutParams.MATCH_PARENT, keyBar.heightPixels());
-			} else if (inputView.getWindowToken() != null) {
-				keyBarWindow.showAtLocation(inputView, Gravity.BOTTOM | Gravity.START, 0, keyboard.bottom);
+			if (getResources().getConfiguration().hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO) {
+				covered = keyboard.bottom;
+				keyBarWindow.dismiss();
+			} else {
+				covered = keyboard.bottom + keyBar.heightPixels();
+				if (keyBarWindow.isShowing()) {
+					keyBarWindow.update(0, keyboard.bottom, ViewGroup.LayoutParams.MATCH_PARENT, keyBar.heightPixels());
+				} else if (inputView.getWindowToken() != null) {
+					keyBarWindow.showAtLocation(inputView, Gravity.BOTTOM | Gravity.START, 0, keyboard.bottom);
+				}
 			}
 		} else {
 			keyBarWindow.dismiss();

@@ -93,6 +93,7 @@ struct kl_window {
 	kl_window_resize_fn resize_callback;
 	void *resize_data;
 	int text_input;
+	int keyboard_suppressed;
 };
 
 /* app.c */

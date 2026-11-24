@@ -76,7 +76,8 @@ enum conf_keyword {
 	CONF_SFTP_SHOW_HIDDEN = 17,
 	CONF_RDP_PORT = 18,
 	CONF_RDP_RESIZE = 19,
-	CONF_KEYWORDS = 20
+	CONF_HIDE_X11_KEYBOARD = 20,
+	CONF_KEYWORDS = 21
 };
 
 /*
@@ -109,7 +110,8 @@ static const struct conf_name conf_names[CONF_KEYWORDS] = {
 	{ "SftpPreserveTimes", 0 },
 	{ "SftpShowHidden", 1 },
 	{ "RdpPort", 0 },
-	{ "RdpResize", 0 }
+	{ "RdpResize", 0 },
+	{ "HideX11Keyboard", 1 }
 };
 
 /* The themes' names, in the order of TERMINAL_THEME_*. */
@@ -340,6 +342,9 @@ mikuterm_conf_text(
 		break;
 	case CONF_RDP_RESIZE:
 		written = snprintf(value, size, "%s", conf->rdp_resize ? "yes" : "no");
+		break;
+	case CONF_HIDE_X11_KEYBOARD:
+		written = snprintf(value, size, "%s", conf->hide_x11_keyboard ? "yes" : "no");
 		break;
 	default:
 		written = snprintf(value, size, "%u", conf->connect_timeout);
@@ -829,6 +834,14 @@ conf_value(
 		*why = "RdpResize is yes or no";
 		if (status == 0)
 			conf->rdp_resize = yes;
+		break;
+	case CONF_HIDE_X11_KEYBOARD:
+		status = conf_yes(value, &yes);
+		*why = "HideX11Keyboard is yes or no";
+		if (status == 0) {
+			conf->hide_x11_keyboard = yes;
+			conf->hide_x11_keyboard_given = 1;
+		}
 		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);
