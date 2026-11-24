@@ -153,16 +153,6 @@ static const uint8_t pos_class[16] = {
 	2U, 1U, 2U, 1U
 };
 
-/* Maps CBP index in P-slices for me(v) when total_zeros/cbp is needed. */
-static const uint8_t cbp_inter_code[48] = {
-	 0U,  1U,  2U,  5U,  3U,  6U, 14U, 10U,
-	 4U, 15U,  7U, 11U,  8U, 12U, 13U, 29U,
-	 9U, 16U, 17U, 18U, 19U, 20U, 21U, 22U,
-	23U, 24U, 25U, 26U, 27U, 28U, 30U, 31U,
-	32U, 33U, 34U, 35U, 36U, 37U, 38U, 39U,
-	40U, 41U, 42U, 43U, 44U, 45U, 46U, 47U
-};
-
 /* Reports h264sw-enc capabilities for H.264 queries. */
 static int
 enc_query(
@@ -679,6 +669,357 @@ copy_picture_planes(
 	}
 }
 
+static int
+compute_luma_nc(
+	const struct h264sw_enc *enc,
+	uint32_t mbx,
+	uint32_t mby,
+	uint32_t bx,
+	uint32_t by)
+{
+	int have_a;
+	int have_b;
+	int na;
+	int nb;
+	uint32_t a_idx;
+	uint32_t b_idx;
+	have_a = (bx > 0U || mbx > 0U);
+	have_b = (by > 0U || mby > 0U);
+	na = 0;
+	nb = 0;
+	if (have_a) {
+		uint32_t ax;
+		uint32_t amb;
+		ax = bx > 0U ? bx - 1U : 3U;
+		amb = bx > 0U ? (mby * enc->mb_w + mbx) : (mby * enc->mb_w + mbx - 1U);
+		a_idx = ((by & 2U) << 2) | ((ax & 2U) << 1) | ((by & 1U) << 1) | (ax & 1U);
+		na = (int)enc->nz_y[amb * 16U + a_idx];
+	}
+	if (have_b) {
+		uint32_t ty;
+		uint32_t bmb;
+		ty = by > 0U ? by - 1U : 3U;
+		bmb = by > 0U ? (mby * enc->mb_w + mbx) : ((mby - 1U) * enc->mb_w + mbx);
+		b_idx = ((ty & 2U) << 2) | ((bx & 2U) << 1) | ((ty & 1U) << 1) | (bx & 1U);
+		nb = (int)enc->nz_y[bmb * 16U + b_idx];
+	}
+	if (have_a && have_b)
+		return (na + nb + 1) >> 1;
+	if (have_a)
+		return na;
+	if (have_b)
+		return nb;
+	return 0;
+}
+
+static int
+compute_chroma_nc(
+	const struct h264sw_enc *enc,
+	const uint8_t *nz_c,
+	uint32_t mbx,
+	uint32_t mby,
+	uint32_t bx,
+	uint32_t by)
+{
+	int have_a;
+	int have_b;
+	int na;
+	int nb;
+	have_a = (bx > 0U || mbx > 0U);
+	have_b = (by > 0U || mby > 0U);
+	na = 0;
+	nb = 0;
+	if (have_a) {
+		uint32_t ax;
+		uint32_t amb;
+		ax = bx > 0U ? bx - 1U : 1U;
+		amb = bx > 0U ? (mby * enc->mb_w + mbx) : (mby * enc->mb_w + mbx - 1U);
+		na = (int)nz_c[amb * 4U + by * 2U + ax];
+	}
+	if (have_b) {
+		uint32_t ty;
+		uint32_t bmb;
+		ty = by > 0U ? by - 1U : 1U;
+		bmb = by > 0U ? (mby * enc->mb_w + mbx) : ((mby - 1U) * enc->mb_w + mbx);
+		nb = (int)nz_c[bmb * 4U + ty * 2U + bx];
+	}
+	if (have_a && have_b)
+		return (na + nb + 1) >> 1;
+	if (have_a)
+		return na;
+	if (have_b)
+		return nb;
+	return 0;
+}
+
+static void
+hadamard_4x4(
+	const int16_t *in,
+	int16_t *out)
+{
+	int32_t t[16];
+	int i;
+	for (i = 0; i < 4; i++) {
+		int32_t s0;
+		int32_t s1;
+		int32_t d0;
+		int32_t d1;
+		s0 = (int32_t)in[i * 4 + 0] + (int32_t)in[i * 4 + 3];
+		s1 = (int32_t)in[i * 4 + 1] + (int32_t)in[i * 4 + 2];
+		d0 = (int32_t)in[i * 4 + 0] - (int32_t)in[i * 4 + 3];
+		d1 = (int32_t)in[i * 4 + 1] - (int32_t)in[i * 4 + 2];
+		t[i * 4 + 0] = s0 + s1;
+		t[i * 4 + 1] = d0 + d1;
+		t[i * 4 + 2] = s0 - s1;
+		t[i * 4 + 3] = d0 - d1;
+	}
+	for (i = 0; i < 4; i++) {
+		int32_t s0;
+		int32_t s1;
+		int32_t d0;
+		int32_t d1;
+		s0 = t[0 * 4 + i] + t[3 * 4 + i];
+		s1 = t[1 * 4 + i] + t[2 * 4 + i];
+		d0 = t[0 * 4 + i] - t[3 * 4 + i];
+		d1 = t[1 * 4 + i] - t[2 * 4 + i];
+		out[0 * 4 + i] = (int16_t)((s0 + s1) >> 1);
+		out[1 * 4 + i] = (int16_t)((d0 + d1) >> 1);
+		out[2 * 4 + i] = (int16_t)((s0 - s1) >> 1);
+		out[3 * 4 + i] = (int16_t)((d0 - d1) >> 1);
+	}
+}
+
+static void
+inv_hadamard_4x4(
+	const int16_t *in,
+	int16_t *out)
+{
+	int32_t t[16];
+	int i;
+	for (i = 0; i < 4; i++) {
+		int32_t s0;
+		int32_t s1;
+		int32_t d0;
+		int32_t d1;
+		s0 = (int32_t)in[i * 4 + 0] + (int32_t)in[i * 4 + 2];
+		s1 = (int32_t)in[i * 4 + 0] - (int32_t)in[i * 4 + 2];
+		d0 = (int32_t)in[i * 4 + 1] + (int32_t)in[i * 4 + 3];
+		d1 = (int32_t)in[i * 4 + 1] - (int32_t)in[i * 4 + 3];
+		t[i * 4 + 0] = s0 + d0;
+		t[i * 4 + 1] = s1 + d1;
+		t[i * 4 + 2] = s1 - d1;
+		t[i * 4 + 3] = s0 - d0;
+	}
+	for (i = 0; i < 4; i++) {
+		int32_t s0;
+		int32_t s1;
+		int32_t d0;
+		int32_t d1;
+		s0 = t[0 * 4 + i] + t[2 * 4 + i];
+		s1 = t[0 * 4 + i] - t[2 * 4 + i];
+		d0 = t[1 * 4 + i] + t[3 * 4 + i];
+		d1 = t[1 * 4 + i] - t[3 * 4 + i];
+		out[0 * 4 + i] = (int16_t)(s0 + d0);
+		out[1 * 4 + i] = (int16_t)(s1 + d1);
+		out[2 * 4 + i] = (int16_t)(s1 - d1);
+		out[3 * 4 + i] = (int16_t)(s0 - d0);
+	}
+}
+
+static void
+quant_dc_blk(
+	int16_t *blk,
+	unsigned count,
+	uint32_t qp)
+{
+	uint32_t qbits;
+	uint32_t qp6;
+	uint32_t f;
+	unsigned i;
+	qbits = 16U + qp / 6U;
+	qp6 = qp % 6U;
+	f = (1U << qbits) / 3U;
+	for (i = 0U; i < count; i++) {
+		int32_t v;
+		int32_t mag;
+		v = (int32_t)blk[i];
+		mag = v < 0 ? -v : v;
+		mag = (int32_t)(((uint32_t)mag * quant_mf[qp6][0] + f) >> qbits);
+		blk[i] = (int16_t)(v < 0 ? -mag : mag);
+	}
+}
+
+static void
+dequant_dc_blk(
+	int16_t *blk,
+	unsigned count,
+	uint32_t qp,
+	int is_chroma)
+{
+	uint32_t shift;
+	uint32_t qp6;
+	uint32_t base_shift;
+	unsigned i;
+	shift = qp / 6U;
+	qp6 = qp % 6U;
+	base_shift = is_chroma != 0 ? 1U : 2U;
+	for (i = 0U; i < count; i++) {
+		int32_t val;
+		val = (int32_t)blk[i] * (int32_t)dequant_v[qp6][0];
+		if (shift >= base_shift)
+			val = val * (int32_t)(1U << (shift - base_shift));
+		else
+			val = (val + (int32_t)(1U << (base_shift - shift - 1U))) >> (base_shift - shift);
+		blk[i] = (int16_t)val;
+	}
+}
+
+static void
+encode_chroma_mb(
+	struct h264sw_enc *enc,
+	struct h264enc_bw *bw,
+	uint32_t mbx,
+	uint32_t mby,
+	int is_idr)
+{
+	uint8_t pred[2][64];
+	int16_t ac[2][4][16];
+	int16_t dc_inv[2][4];
+	const uint8_t *cur[2];
+	uint8_t *ref[2];
+	uint8_t *nz_c[2];
+	uint32_t mb_idx;
+	uint32_t p;
+	uint32_t blk;
+	uint32_t y;
+	uint32_t x;
+	uint8_t nz;
+	cur[0] = enc->cur_u;
+	cur[1] = enc->cur_v;
+	ref[0] = enc->ref_u;
+	ref[1] = enc->ref_v;
+	nz_c[0] = enc->nz_u;
+	nz_c[1] = enc->nz_v;
+	mb_idx = mby * enc->mb_w + mbx;
+	for (p = 0U; p < 2U; p++) {
+		int16_t dc[4];
+		int16_t dc_h[4];
+		if (is_idr != 0) {
+			for (blk = 0U; blk < 4U; blk++) {
+				uint32_t bx;
+				uint32_t by;
+				int have_l;
+				int have_t;
+				int32_t sum_l;
+				int32_t sum_t;
+				int32_t dc_val;
+				bx = blk & 1U;
+				by = blk >> 1;
+				have_l = (mbx > 0U);
+				have_t = (mby > 0U);
+				sum_l = 0;
+				sum_t = 0;
+				if (have_l) {
+					for (y = 0U; y < 4U; y++)
+						sum_l += ref[p][(size_t)(mby * 8U + by * 4U + y) * enc->stride_c + mbx * 8U - 1U];
+				}
+				if (have_t) {
+					for (x = 0U; x < 4U; x++)
+						sum_t += ref[p][(size_t)(mby * 8U - 1U) * enc->stride_c + mbx * 8U + bx * 4U + x];
+				}
+				if (bx == by) {
+					if (have_l && have_t)
+						dc_val = (sum_l + sum_t + 4) >> 3;
+					else if (have_l)
+						dc_val = (sum_l + 2) >> 2;
+					else if (have_t)
+						dc_val = (sum_t + 2) >> 2;
+					else
+						dc_val = 128;
+				} else if (bx == 1U && by == 0U) {
+					if (have_t)
+						dc_val = (sum_t + 2) >> 2;
+					else if (have_l)
+						dc_val = (sum_l + 2) >> 2;
+					else
+						dc_val = 128;
+				} else {
+					if (have_l)
+						dc_val = (sum_l + 2) >> 2;
+					else if (have_t)
+						dc_val = (sum_t + 2) >> 2;
+					else
+						dc_val = 128;
+				}
+				for (y = 0U; y < 4U; y++) {
+					for (x = 0U; x < 4U; x++)
+						pred[p][(by * 4U + y) * 8U + bx * 4U + x] = (uint8_t)dc_val;
+				}
+			}
+		} else {
+			for (y = 0U; y < 8U; y++) {
+				memcpy(pred[p] + y * 8U,
+				       ref[p] + (size_t)(mby * 8U + y) * enc->stride_c + mbx * 8U,
+				       8U);
+			}
+		}
+		for (blk = 0U; blk < 4U; blk++) {
+			uint32_t bx;
+			uint32_t by;
+			int16_t res[16];
+			bx = blk & 1U;
+			by = blk >> 1;
+			for (y = 0U; y < 4U; y++) {
+				size_t off;
+				off = (size_t)(mby * 8U + by * 4U + y) * enc->stride_c + mbx * 8U + bx * 4U;
+				for (x = 0U; x < 4U; x++) {
+					res[y * 4U + x] = (int16_t)cur[p][off + x] -
+							  (int16_t)pred[p][(by * 4U + y) * 8U + bx * 4U + x];
+				}
+			}
+			fwd_4x4(res, ac[p][blk]);
+			dc[blk] = ac[p][blk][0];
+		}
+		dc_h[0] = (int16_t)(dc[0] + dc[1] + dc[2] + dc[3]);
+		dc_h[1] = (int16_t)(dc[0] - dc[1] + dc[2] - dc[3]);
+		dc_h[2] = (int16_t)(dc[0] + dc[1] - dc[2] - dc[3]);
+		dc_h[3] = (int16_t)(dc[0] - dc[1] - dc[2] + dc[3]);
+		quant_dc_blk(dc_h, 4U, enc->qp);
+		encode_cavlc_block(bw, dc_h, 4U, -1, &nz);
+		dc_inv[p][0] = (int16_t)(dc_h[0] + dc_h[1] + dc_h[2] + dc_h[3]);
+		dc_inv[p][1] = (int16_t)(dc_h[0] - dc_h[1] + dc_h[2] - dc_h[3]);
+		dc_inv[p][2] = (int16_t)(dc_h[0] + dc_h[1] - dc_h[2] - dc_h[3]);
+		dc_inv[p][3] = (int16_t)(dc_h[0] - dc_h[1] - dc_h[2] + dc_h[3]);
+		dequant_dc_blk(dc_inv[p], 4U, enc->qp, 1);
+	}
+	for (p = 0U; p < 2U; p++) {
+		for (blk = 0U; blk < 4U; blk++) {
+			uint32_t bx;
+			uint32_t by;
+			int nc;
+			int16_t recon[16];
+			bx = blk & 1U;
+			by = blk >> 1;
+			quant_4x4(ac[p][blk], enc->qp, is_idr, 1);
+			nc = compute_chroma_nc(enc, nz_c[p], mbx, mby, bx, by);
+			encode_cavlc_block(bw, ac[p][blk], 15U, nc, &nz);
+			nz_c[p][mb_idx * 4U + blk] = nz;
+			dequant_4x4(ac[p][blk], enc->qp, 1);
+			ac[p][blk][0] = dc_inv[p][blk];
+			inv_4x4(ac[p][blk], recon);
+			for (y = 0U; y < 4U; y++) {
+				size_t off;
+				off = (size_t)(mby * 8U + by * 4U + y) * enc->stride_c + mbx * 8U + bx * 4U;
+				for (x = 0U; x < 4U; x++) {
+					ref[p][off + x] = clip_u8(
+						(int32_t)pred[p][(by * 4U + y) * 8U + bx * 4U + x] +
+						recon[y * 4U + x]);
+				}
+			}
+		}
+	}
+}
+
 /* Encodes one IDR I-slice or P-slice into enc->au_buf. */
 static int
 encode_frame(
@@ -722,6 +1063,11 @@ encode_frame(
 	}
 	bw_put_se(&bw, (int32_t)enc->qp - 26);
 	bw_put_ue(&bw, 1U);
+	if (is_idr != 0) {
+		memset(enc->nz_y, 0, (size_t)enc->mb_w * enc->mb_h * 16U);
+		memset(enc->nz_u, 0, (size_t)enc->mb_w * enc->mb_h * 4U);
+		memset(enc->nz_v, 0, (size_t)enc->mb_w * enc->mb_h * 4U);
+	}
 	skip_run = 0U;
 	for (mby = 0U; mby < enc->mb_h; mby++) {
 		for (mbx = 0U; mbx < enc->mb_w; mbx++) {
@@ -781,78 +1127,71 @@ encode_frame(
 				bw_put_ue(&bw, 0U);
 				bw_put_se(&bw, 0);
 
-				/* Emits empty Intra16x16 DC block (16 coeffs = 0) by using I_4x4? */
-				/* Actually in I_16x16, DC block is coded first, then 15-coeff AC blocks. */
-				/* Let's encode the DC block from 4x4 DC averages. */
 				{
+					int16_t ac_y[16][16];
 					int16_t dc_blk[16];
 					int16_t dc_tr[16];
-					uint32_t by;
-					uint32_t bx;
-					for (by = 0U; by < 4U; by++) {
-						for (bx = 0U; bx < 4U; bx++) {
-							int32_t s;
-							uint32_t py;
-							uint32_t px;
-							s = 0;
-							for (py = 0U; py < 4U; py++) {
-								for (px = 0U; px < 4U; px++) {
-									size_t idx;
-									idx = (size_t)(mby * 16U + by * 4U + py) * enc->stride_y +
-									      mbx * 16U + bx * 4U + px;
-									s += (int32_t)enc->cur_y[idx] - dc_sum;
-								}
+					int16_t dc_inv[16];
+					int nc;
+					for (blk = 0U; blk < 16U; blk++) {
+						uint32_t by;
+						uint32_t bx;
+						by = ((blk >> 3) * 2U) + ((blk >> 1) & 1U);
+						bx = (((blk >> 2) & 1U) * 2U) + (blk & 1U);
+						for (y = 0U; y < 4U; y++) {
+							size_t off;
+							off = (size_t)(mby * 16U + by * 4U + y) * enc->stride_y +
+							      mbx * 16U + bx * 4U;
+							for (x = 0U; x < 4U; x++) {
+								res[y * 4U + x] =
+									(int16_t)enc->cur_y[off + x] -
+									(int16_t)dc_sum;
 							}
-							dc_blk[by * 4U + bx] = (int16_t)(s >> 2);
 						}
+						fwd_4x4(res, ac_y[blk]);
+						dc_blk[by * 4U + bx] = ac_y[blk][0];
 					}
-					fwd_4x4(dc_blk, dc_tr);
-					quant_4x4(dc_tr, enc->qp, 1, 0);
-					encode_cavlc_block(&bw, dc_tr, 16U, 0, &nz);
-					dequant_4x4(dc_tr, enc->qp, 0);
-					inv_4x4(dc_tr, dc_blk);
-				}
-				for (blk = 0U; blk < 16U; blk++) {
-					uint32_t by;
-					uint32_t bx;
-					by = ((blk >> 3) * 2U) + ((blk >> 1) & 1U);
-					bx = (((blk >> 2) & 1U) * 2U) + (blk & 1U);
-					for (y = 0U; y < 4U; y++) {
-						size_t off;
-						off = (size_t)(mby * 16U + by * 4U + y) * enc->stride_y +
-						      mbx * 16U + bx * 4U;
-						for (x = 0U; x < 4U; x++) {
-							res[y * 4U + x] =
-								(int16_t)enc->cur_y[off + x] -
-								(int16_t)pred_y[(by * 4U + y) * 16U + bx * 4U + x];
-						}
-					}
-					fwd_4x4(res, coeff);
-					quant_4x4(coeff, enc->qp, 1, 1);
-					encode_cavlc_block(&bw, coeff, 15U, 0, &nz);
-					dequant_4x4(coeff, enc->qp, 1);
-					inv_4x4(coeff, recon);
-					for (y = 0U; y < 4U; y++) {
-						size_t off;
-						off = (size_t)(mby * 16U + by * 4U + y) * enc->stride_y +
-						      mbx * 16U + bx * 4U;
-						for (x = 0U; x < 4U; x++) {
-							enc->ref_y[off + x] = clip_u8(
-								(int32_t)pred_y[(by * 4U + y) * 16U + bx * 4U + x] +
-								recon[y * 4U + x]);
+					hadamard_4x4(dc_blk, dc_tr);
+					quant_dc_blk(dc_tr, 16U, enc->qp);
+					nc = compute_luma_nc(enc, mbx, mby, 0U, 0U);
+					encode_cavlc_block(&bw, dc_tr, 16U, nc, &nz);
+					inv_hadamard_4x4(dc_tr, dc_inv);
+					dequant_dc_blk(dc_inv, 16U, enc->qp, 0);
+					for (blk = 0U; blk < 16U; blk++) {
+						uint32_t by;
+						uint32_t bx;
+						by = ((blk >> 3) * 2U) + ((blk >> 1) & 1U);
+						bx = (((blk >> 2) & 1U) * 2U) + (blk & 1U);
+						quant_4x4(ac_y[blk], enc->qp, 1, 1);
+						nc = compute_luma_nc(enc, mbx, mby, bx, by);
+						encode_cavlc_block(&bw, ac_y[blk], 15U, nc, &nz);
+						enc->nz_y[mb_idx * 16U + blk] = nz;
+						dequant_4x4(ac_y[blk], enc->qp, 1);
+						ac_y[blk][0] = dc_inv[by * 4U + bx];
+						inv_4x4(ac_y[blk], recon);
+						for (y = 0U; y < 4U; y++) {
+							size_t off;
+							off = (size_t)(mby * 16U + by * 4U + y) * enc->stride_y +
+							      mbx * 16U + bx * 4U;
+							for (x = 0U; x < 4U; x++) {
+								enc->ref_y[off + x] = clip_u8(
+									(int32_t)dc_sum +
+									recon[y * 4U + x]);
+							}
 						}
 					}
 				}
 			} else {
-				/* P_L0_16x16 with zero MV and CBP=15 (luma) + 2 (chroma). */
+				/* P_L0_16x16 with zero MV and CBP=47 (luma 15 + chroma 2 -> codeNum 12). */
 				bw_put_ue(&bw, 0U);
 				bw_put_se(&bw, 0);
 				bw_put_se(&bw, 0);
-				bw_put_ue(&bw, cbp_inter_code[47]);
+				bw_put_ue(&bw, 12U);
 				bw_put_se(&bw, 0);
 				for (blk = 0U; blk < 16U; blk++) {
 					uint32_t by;
 					uint32_t bx;
+					int nc;
 					by = ((blk >> 3) * 2U) + ((blk >> 1) & 1U);
 					bx = (((blk >> 2) & 1U) * 2U) + (blk & 1U);
 					for (y = 0U; y < 4U; y++) {
@@ -867,7 +1206,9 @@ encode_frame(
 					}
 					fwd_4x4(res, coeff);
 					quant_4x4(coeff, enc->qp, 0, 0);
-					encode_cavlc_block(&bw, coeff, 16U, 0, &nz);
+					nc = compute_luma_nc(enc, mbx, mby, bx, by);
+					encode_cavlc_block(&bw, coeff, 16U, nc, &nz);
+					enc->nz_y[mb_idx * 16U + blk] = nz;
 					dequant_4x4(coeff, enc->qp, 0);
 					inv_4x4(coeff, recon);
 					for (y = 0U; y < 4U; y++) {
@@ -883,18 +1224,7 @@ encode_frame(
 				}
 			}
 
-			/* Encodes chroma DC (2x2) and AC (8x8) as zero-residual. */
-			bw_put_bit(&bw, 1U);
-			bw_put_bit(&bw, 1U);
-			for (blk = 0U; blk < 8U; blk++)
-				bw_put_bit(&bw, 1U);
-			for (y = 0U; y < 8U; y++) {
-				size_t off;
-				off = (size_t)(mby * 8U + y) * enc->stride_c +
-				      mbx * 8U;
-				memcpy(enc->ref_u + off, enc->cur_u + off, 8U);
-				memcpy(enc->ref_v + off, enc->cur_v + off, 8U);
-			}
+			encode_chroma_mb(enc, &bw, mbx, mby, is_idr);
 		}
 	}
 	if (is_idr == 0 && skip_run > 0U)
@@ -911,7 +1241,7 @@ encode_frame(
 	return 0;
 }
 
-/* Encodes a 4x4 (or 15-coeff AC) block using H.264 CAVLC (nC = 0 table). */
+/* Encodes a 4x4, 15-coeff AC, or 2x2 chroma DC block using H.264 CAVLC. */
 static void
 encode_cavlc_block(
 	struct h264enc_bw *bw,
@@ -930,57 +1260,68 @@ encode_cavlc_block(
 	int suffix_len;
 	unsigned zeros_left;
 	unsigned run_before;
-	static const uint8_t tz_code[16] = {
-		1U, 3U, 2U, 3U, 2U, 3U, 2U, 3U,
-		2U, 3U, 2U, 3U, 2U, 3U, 2U, 0U
-	};
-	static const uint8_t tz_bits[16] = {
-		1U, 3U, 3U, 4U, 4U, 5U, 5U, 6U,
-		6U, 7U, 7U, 8U, 8U, 9U, 9U, 9U
-	};
-	(void)nc;
+	unsigned target_val;
+	unsigned idx;
+	unsigned rem_coeff;
+
 	start_idx = max_coeffs == 15U ? 1U : 0U;
 	total_coeff = 0U;
 	last_nz = -1;
 	for (i = 0U; i < max_coeffs; i++) {
-		scan[i] = coeffs[zigzag4[i + start_idx]];
+		scan[i] = max_coeffs == 4U ? coeffs[i] : coeffs[zigzag4[i + start_idx]];
 		if (scan[i] != 0) {
 			total_coeff++;
 			last_nz = (int)i;
 		}
 	}
 	*out_nz = (uint8_t)total_coeff;
-	if (total_coeff == 0U) {
-		bw_put_bit(bw, 1U);
-		return;
-	}
 	trailing_ones = 0U;
 	t1_signs = 0U;
-	for (i = (unsigned)last_nz; (int)i >= 0 && trailing_ones < 3U; i--) {
-		if (scan[i] == 0)
-			continue;
-		if (scan[i] == 1 || scan[i] == -1) {
-			t1_signs = (t1_signs << 1) | (scan[i] < 0 ? 1U : 0U);
-			trailing_ones++;
-		} else {
-			break;
-		}
-	}
-
-	/* Emits coeff_token from ITU-T H.264 Table 9-5 (0 <= nC < 2). */
-	{
-		unsigned target_val;
-		unsigned idx;
-		target_val = (total_coeff << 2) | trailing_ones;
-		for (idx = 0U; idx < H264SW_COEFF_TOKEN_CODES; idx++) {
-			if (h264sw_cavlc_coeff_token[0][idx].value == target_val) {
-				bw_put_bits(bw,
-					    h264sw_cavlc_coeff_token[0][idx].code,
-					    h264sw_cavlc_coeff_token[0][idx].length);
+	if (total_coeff > 0U) {
+		for (i = (unsigned)last_nz; (int)i >= 0 && trailing_ones < 3U; i--) {
+			if (scan[i] == 0)
+				continue;
+			if (scan[i] == 1 || scan[i] == -1) {
+				t1_signs = (t1_signs << 1) | (scan[i] < 0 ? 1U : 0U);
+				trailing_ones++;
+			} else {
 				break;
 			}
 		}
 	}
+
+	/* Emits coeff_token from ITU-T H.264 Table 9-5. */
+	target_val = (total_coeff << 2) | trailing_ones;
+	if (nc < 0) {
+		for (idx = 0U; idx < H264SW_COEFF_TOKEN_CHROMA_DC_CODES; idx++) {
+			if (h264sw_cavlc_coeff_token_chroma_dc[idx].value == target_val) {
+				bw_put_bits(bw,
+					    h264sw_cavlc_coeff_token_chroma_dc[idx].code,
+					    h264sw_cavlc_coeff_token_chroma_dc[idx].length);
+				break;
+			}
+		}
+	} else {
+		unsigned col;
+		if (nc < 2)
+			col = 0U;
+		else if (nc < 4)
+			col = 1U;
+		else if (nc < 8)
+			col = 2U;
+		else
+			col = 3U;
+		for (idx = 0U; idx < H264SW_COEFF_TOKEN_CODES; idx++) {
+			if (h264sw_cavlc_coeff_token[col][idx].value == target_val) {
+				bw_put_bits(bw,
+					    h264sw_cavlc_coeff_token[col][idx].code,
+					    h264sw_cavlc_coeff_token[col][idx].length);
+				break;
+			}
+		}
+	}
+	if (total_coeff == 0U)
+		return;
 	if (trailing_ones > 0U)
 		bw_put_bits(bw, t1_signs, trailing_ones);
 
@@ -991,6 +1332,7 @@ encode_cavlc_block(
 		skipped_t1 = 0U;
 		for (i = (unsigned)last_nz; (int)i >= 0; i--) {
 			int32_t lv;
+			int32_t abs_lv;
 			uint32_t lv_code;
 			uint32_t prefix;
 			uint32_t suffix;
@@ -1001,37 +1343,79 @@ encode_cavlc_block(
 				continue;
 			}
 			lv = scan[i];
+			abs_lv = lv < 0 ? -lv : lv;
 			lv_code = lv > 0 ? (uint32_t)(lv * 2 - 2) :
 					   (uint32_t)(-lv * 2 - 1);
 			if (skipped_t1 == trailing_ones && trailing_ones < 3U)
 				lv_code -= 2U;
 			skipped_t1 = 4U;
-			prefix = lv_code >> (unsigned)suffix_len;
-			if (prefix < 14U) {
-				bw_put_bits(bw, 0U, prefix);
-				bw_put_bit(bw, 1U);
-				if (suffix_len > 0) {
-					suffix = lv_code & ((1U << (unsigned)suffix_len) - 1U);
-					bw_put_bits(bw, suffix, (unsigned)suffix_len);
+			if (suffix_len == 0) {
+				if (lv_code < 14U) {
+					bw_put_bits(bw, 0U, lv_code);
+					bw_put_bit(bw, 1U);
+				} else if (lv_code < 30U) {
+					bw_put_bits(bw, 0U, 14U);
+					bw_put_bit(bw, 1U);
+					bw_put_bits(bw, lv_code - 14U, 4U);
+				} else {
+					uint32_t rem;
+					unsigned p;
+					rem = lv_code - 30U;
+					p = 15U;
+					while (rem >= (1U << (p - 3U))) {
+						rem -= (1U << (p - 3U));
+						p++;
+					}
+					bw_put_bits(bw, 0U, p);
+					bw_put_bit(bw, 1U);
+					bw_put_bits(bw, rem, p - 3U);
 				}
 			} else {
-				bw_put_bits(bw, 0U, 15U);
-				bw_put_bit(bw, 1U);
-				bw_put_bits(bw, lv_code - (14U << (unsigned)suffix_len), 12U);
+				uint32_t esc_thresh;
+				esc_thresh = 15U << (unsigned)suffix_len;
+				if (lv_code < esc_thresh) {
+					prefix = lv_code >> (unsigned)suffix_len;
+					suffix = lv_code & ((1U << (unsigned)suffix_len) - 1U);
+					bw_put_bits(bw, 0U, prefix);
+					bw_put_bit(bw, 1U);
+					bw_put_bits(bw, suffix, (unsigned)suffix_len);
+				} else {
+					uint32_t rem;
+					unsigned p;
+					rem = lv_code - esc_thresh;
+					p = 15U;
+					while (rem >= (1U << (p - 3U))) {
+						rem -= (1U << (p - 3U));
+						p++;
+					}
+					bw_put_bits(bw, 0U, p);
+					bw_put_bit(bw, 1U);
+					bw_put_bits(bw, rem, p - 3U);
+				}
 			}
 			if (suffix_len == 0)
 				suffix_len = 1;
+			if (abs_lv > (3 << (suffix_len - 1)) && suffix_len < 6)
+				suffix_len++;
 		}
 	}
 
 	/* Encodes total_zeros and run_before when total_coeff < max_coeffs. */
 	if (total_coeff < max_coeffs) {
 		zeros_left = (unsigned)(last_nz + 1) - total_coeff;
-		if (zeros_left <= 15U)
-			bw_put_bits(bw, tz_code[zeros_left], tz_bits[zeros_left]);
-		else
-			bw_put_bits(bw, 0U, 9U);
-		for (i = (unsigned)last_nz; (int)i >= 0 && zeros_left > 0U; i--) {
+		if (nc < 0) {
+			const struct h264sw_vlc_code *c;
+			c = &h264sw_cavlc_total_zeros_chroma_dc[total_coeff - 1U][zeros_left];
+			bw_put_bits(bw, c->code, c->length);
+		} else {
+			const struct h264sw_vlc_code *c;
+			c = &h264sw_cavlc_total_zeros[total_coeff - 1U][zeros_left];
+			bw_put_bits(bw, c->code, c->length);
+		}
+		rem_coeff = total_coeff;
+		for (i = (unsigned)last_nz; (int)i >= 0 && zeros_left > 0U && rem_coeff > 1U; i--) {
+			const struct h264sw_vlc_code *c;
+			unsigned row;
 			if (scan[i] == 0)
 				continue;
 			run_before = 0U;
@@ -1039,16 +1423,11 @@ encode_cavlc_block(
 			       scan[i - 1U - run_before] == 0) {
 				run_before++;
 			}
-			if (run_before > zeros_left)
-				run_before = zeros_left;
-			if (zeros_left == 1U) {
-				bw_put_bit(bw, run_before == 0U ? 1U : 0U);
-			} else {
-				bw_put_bits(bw, 0U, run_before);
-				if (run_before < zeros_left)
-					bw_put_bit(bw, 1U);
-			}
+			row = zeros_left >= 7U ? 6U : zeros_left - 1U;
+			c = &h264sw_cavlc_run_before[row][run_before];
+			bw_put_bits(bw, c->code, c->length);
 			zeros_left -= run_before;
+			rem_coeff--;
 		}
 	}
 }
