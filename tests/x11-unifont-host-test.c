@@ -72,13 +72,16 @@ main(
 	test_fallback_without_fixed();
 	free(test_replies);
 
+	/* Check whether any failure occurred. */
 	if (test_failures != 0U) {
 		printf("x11-unifont-host-test: FAIL (%u of %u checks)\n",
 		       test_failures, test_checks);
 		return 1;
 	}
 
+	/* All checks passed. */
 	printf("x11-unifont-host-test: PASS (%u checks)\n", test_checks);
+	/* No ink found. */
 	return 0;
 }
 
@@ -103,32 +106,47 @@ read_file_bytes(
 	FILE *f;
 	long len;
 	uint8_t *buf;
+	int err;
+	size_t got;
 
+	/* Open and measure the file. */
 	f = fopen(path, "rb");
 	if (f == NULL)
 		return errno;
-	if (fseek(f, 0, SEEK_END) != 0) {
+	err = fseek(f, 0, SEEK_END);
+	if (err != 0) {
 		fclose(f);
 		return EIO;
 	}
+
+	/* Measure the file size. */
 	len = ftell(f);
-	if (len <= 0 || fseek(f, 0, SEEK_SET) != 0) {
+	err = fseek(f, 0, SEEK_SET);
+	if (len <= 0 || err != 0) {
 		fclose(f);
 		return EIO;
 	}
+
+	/* Read the file into a newly allocated buffer. */
 	buf = malloc((size_t)len);
 	if (buf == NULL) {
 		fclose(f);
 		return ENOMEM;
 	}
-	if (fread(buf, 1U, (size_t)len, f) != (size_t)len) {
+
+	/* Read the file contents. */
+	got = fread(buf, 1U, (size_t)len, f);
+	if (got != (size_t)len) {
 		free(buf);
 		fclose(f);
 		return EIO;
 	}
+
+	/* Return the buffer to the caller. */
 	fclose(f);
 	*out = buf;
 	*out_size = (size_t)len;
+	/* No ink found. */
 	return 0;
 }
 
@@ -184,6 +202,7 @@ send_open_font(
 	size_t nlen;
 	size_t padded;
 
+	/* Build an OpenFont (opcode 45) request. */
 	nlen = strlen(name);
 	padded = (nlen + 3U) & ~(size_t)3U;
 	memset(req, 0, 12U + padded);
@@ -202,6 +221,7 @@ send_query_font(
 {
 	uint8_t req[8];
 
+	/* Build a QueryFont (opcode 47) request. */
 	reset_replies();
 	memset(req, 0, sizeof(req));
 	req[0] = 47U;
@@ -221,6 +241,8 @@ send_list_fonts(
 	size_t plen;
 	size_t padded;
 
+	/* Build a QueryFont (opcode 47) request. */
+	/* Build a ListFonts or ListFontsWithInfo request. */
 	reset_replies();
 	plen = strlen(pattern);
 	padded = (plen + 3U) & ~(size_t)3U;
@@ -243,20 +265,26 @@ list_has_name(
 	uint16_t i;
 	size_t off;
 	size_t tlen;
+	uint8_t nlen;
+	int cmp;
 
+	/* Parse the ListFonts reply header. */
 	if (reply_len < 32U)
 		return 0;
 	count = get16(reply + 8);
 	off = 32U;
 	tlen = strlen(target);
 	for (i = 0U; i < count && off < reply_len; i++) {
-		uint8_t nlen = reply[off];
+		nlen = reply[off];
 		if (off + 1U + nlen > reply_len)
 			break;
-		if (nlen == tlen && memcmp(reply + off + 1U, target, tlen) == 0)
+		cmp = memcmp(reply + off + 1U, target, tlen);
+		if (nlen == tlen && cmp == 0)
 			return 1;
 		off += 1U + nlen;
 	}
+
+	/* Not found. */
 	return 0;
 }
 
@@ -268,16 +296,20 @@ glyph_has_ink_in_cols(
 {
 	int r;
 	int c;
+	uint8_t byte;
 
+	/* Scan the requested column range for set bits. */
 	if (g == NULL || g->bits == NULL)
 		return 0;
 	for (r = 0; r < g->height; r++) {
 		for (c = c0; c < c1 && c < g->width; c++) {
-			uint8_t byte = g->bits[(size_t)r * g->stride + (size_t)c / 8U];
+			byte = g->bits[(size_t)r * g->stride + (size_t)c / 8U];
 			if ((byte & (uint8_t)(0x80U >> (c % 8))) != 0U)
 				return 1;
 		}
 	}
+
+	/* No ink found. */
 	return 0;
 }
 
@@ -301,6 +333,7 @@ test_with_unifont(
 	size_t info_off;
 	int err;
 
+	/* Load test font files. */
 	unifont_bytes = NULL;
 	mono_bytes = NULL;
 	err = read_file_bytes(TEST_UNIFONT_PATH, &unifont_bytes, &unifont_size);
@@ -313,6 +346,7 @@ test_with_unifont(
 		return;
 	}
 
+	/* Initialize a minimal server state. */
 	s = calloc(1U, sizeof(*s));
 	test_check("alloc server", s != NULL);
 	s->clients = calloc(1U, sizeof(*s->clients));
@@ -320,6 +354,7 @@ test_with_unifont(
 	s->client_memory_max = 256U * 1024U * 1024U;
 	s->server_memory_max = 512U * 1024U * 1024U;
 
+	/* Open MONO and FIXED faces. */
 	files[0].bytes = mono_bytes;
 	files[0].size = mono_size;
 	files[0].role = X11SERVER_FONT_MONO;
@@ -330,6 +365,7 @@ test_with_unifont(
 	test_check("x11_faces_open with MONO + FIXED", err == 0);
 	test_check("x11_face_has_own(FIXED) is 1", x11_face_has_own(&s->faces, X11_FACE_FIXED) == 1);
 
+	/* Verify ListFonts includes Unifont aliases and sizes. */
 	test_check("ListFonts(*) succeeds", send_list_fonts(s, 49U, 500U, "*") == 0U);
 	test_check("ListFonts(*) includes fixed", list_has_name(test_replies, test_replies_size, "fixed"));
 	test_check("ListFonts(*) includes 8x16", list_has_name(test_replies, test_replies_size, "8x16"));
@@ -340,11 +376,13 @@ test_with_unifont(
 	test_check("ListFonts(*) includes gnu-unifont 32px",
 		   list_has_name(test_replies, test_replies_size, "-gnu-unifont-medium-r-normal--32-320-75-75-c-160-iso10646-1"));
 
+	/* Verify ListFontsWithInfo reports 14:2 metrics for fixed. */
 	test_check("ListFontsWithInfo(fixed) succeeds", send_list_fonts(s, 50U, 10U, "fixed") == 0U);
 	test_check("ListFontsWithInfo(fixed) has font + terminator", test_replies_size > 60U);
 	test_check("ListFontsWithInfo(fixed) ascent is 14", (int16_t)get16(test_replies + 52) == 14);
 	test_check("ListFontsWithInfo(fixed) descent is 2", (int16_t)get16(test_replies + 54) == 2);
 
+	/* Open fixed, 16x16, zed-unicode, 32px Unifont, and cursor. */
 	test_check("OpenFont(fixed) succeeds", send_open_font(s, 0x101U, "fixed") == 0U);
 	test_check("OpenFont(16x16) succeeds", send_open_font(s, 0x102U, "16x16") == 0U);
 	test_check("OpenFont(zed-unicode) succeeds", send_open_font(s, 0x103U, "zed-unicode") == 0U);
@@ -352,6 +390,7 @@ test_with_unifont(
 		   send_open_font(s, 0x104U, "-gnu-unifont-medium-r-normal--32-320-75-75-c-160-iso10646-1") == 0U);
 	test_check("OpenFont(cursor) succeeds", send_open_font(s, 0x105U, "cursor") == 0U);
 
+	/* Look up opened font objects. */
 	f_fixed = x11_font_find(s, 0x101U);
 	f_16x16 = x11_font_find(s, 0x102U);
 	f_zed = x11_font_find(s, 0x103U);
@@ -359,6 +398,7 @@ test_with_unifont(
 	f_cursor = x11_font_find(s, 0x105U);
 	test_check("all 5 fonts found", f_fixed != NULL && f_16x16 != NULL && f_zed != NULL && f_32 != NULL && f_cursor != NULL);
 
+	/* Verify QueryFont(fixed) reports 8px half-width and 16px full-width. */
 	test_check("QueryFont(fixed) succeeds", send_query_font(s, 0x101U) == 0U);
 	n_infos = get32(test_replies + 56);
 	test_check("QueryFont(fixed) has 65536 char_infos", n_infos == 65536U);
@@ -369,10 +409,12 @@ test_with_unifont(
 	test_check("QueryFont(fixed) U+3042 width == 16", (int16_t)get16(test_replies + info_off + (size_t)0x3042U * 12U + 4U) == 16);
 	test_check("QueryFont(fixed) U+9F8D width == 16", (int16_t)get16(test_replies + info_off + (size_t)0x9F8DU * 12U + 4U) == 16);
 
+	/* Verify QueryFont(16x16) is a uniform 16x16 cell font. */
 	test_check("QueryFont(16x16) succeeds", send_query_font(s, 0x102U) == 0U);
 	test_check("QueryFont(16x16) char_infos == 0", get32(test_replies + 56) == 0U);
 	test_check("QueryFont(16x16) min_bounds.width == 16", (int16_t)get16(test_replies + 12) == 16);
 
+	/* Verify zed-unicode, 32px integer scaling, and cursor separation. */
 	test_check("zed-unicode ascent=14 descent=2 pixels=16",
 		   f_zed->ascent == 14 && f_zed->descent == 2 && f_zed->pixels == 16U);
 	test_check("unifont 32px kept pixels=32 ascent=28 descent=4",
@@ -380,6 +422,7 @@ test_with_unifont(
 	test_check("cursor font isolated",
 		   f_cursor->kind == X11_FONT_CURSOR && x11_font_glyph(s, f_cursor, 'A') == NULL);
 
+	/* Verify 16px half-width and full-width glyph bitmaps. */
 	g = x11_font_glyph(s, f_fixed, 'A');
 	test_check("fixed 'A' glyph 8x16 with ink", g != NULL && g->width == 8 && g->height == 16 && glyph_has_ink_in_cols(g, 0, 8));
 	g = x11_font_glyph(s, f_fixed, 0x9F8DU);
@@ -387,11 +430,13 @@ test_with_unifont(
 		   g != NULL && g->width == 16 && g->height == 16 &&
 		   glyph_has_ink_in_cols(g, 0, 8) && glyph_has_ink_in_cols(g, 8, 16));
 
+	/* Verify 32px full-width glyph bitmap. */
 	g = x11_font_glyph(s, f_32, 0x9F8DU);
 	test_check("unifont 32px U+9F8D glyph 32x32 with ink in right half",
 		   g != NULL && g->width == 32 && g->height == 32 &&
 		   glyph_has_ink_in_cols(g, 16, 32));
 
+	/* Release all resources. */
 	x11_fonts_fini(s);
 	x11_faces_close(&s->faces);
 	free(s->font_names);
@@ -411,17 +456,20 @@ test_fallback_without_fixed(
 	size_t mono_size;
 	int err;
 
+	/* Load monospaced fallback font. */
 	mono_bytes = NULL;
 	err = read_file_bytes(TEST_MONO_PATH, &mono_bytes, &mono_size);
 	test_check("fallback: read Mahora-Mono.ttf", err == 0);
 	if (mono_bytes == NULL)
 		return;
 
+	/* Initialize a minimal server state. */
 	s = calloc(1U, sizeof(*s));
 	s->clients = calloc(1U, sizeof(*s->clients));
 	s->client_memory_max = 256U * 1024U * 1024U;
 	s->server_memory_max = 512U * 1024U * 1024U;
 
+	/* Open MONO without FIXED and verify fallback. */
 	file.bytes = mono_bytes;
 	file.size = mono_size;
 	file.role = X11SERVER_FONT_MONO;
@@ -432,6 +480,7 @@ test_fallback_without_fixed(
 	test_check("fallback: OpenFont(fixed) succeeds", send_open_font(s, 0x201U, "fixed") == 0U);
 	test_check("fallback: OpenFont(zed-unicode) succeeds", send_open_font(s, 0x202U, "zed-unicode") == 0U);
 
+	/* Release all resources. */
 	x11_fonts_fini(s);
 	x11_faces_close(&s->faces);
 	free(s->font_names);
@@ -448,11 +497,15 @@ x11_resource_find(
 {
 	size_t i;
 
+	/* Search the stub resource table. */
+	/* Clear the matching slot. */
 	(void)server;
 	for (i = 0U; i < 32U; i++) {
 		if (test_res_table[i].id == id && test_res_table[i].kind == type)
 			return test_res_table[i].value;
 	}
+
+	/* Not found. */
 	return NULL;
 }
 
@@ -463,11 +516,15 @@ x11_resource_type(
 {
 	size_t i;
 
+	/* Look up the resource type. */
+	/* Clear the matching slot. */
 	(void)server;
 	for (i = 0U; i < 32U; i++) {
 		if (test_res_table[i].id == id)
 			return test_res_table[i].kind;
 	}
+
+	/* Not found. */
 	return 0U;
 }
 
@@ -486,6 +543,7 @@ x11_gc_find(
 	struct x11server *server,
 	uint32_t id)
 {
+	/* Clear the matching slot. */
 	(void)server;
 	(void)id;
 	return NULL;
@@ -500,6 +558,7 @@ x11_resource_add(
 {
 	size_t i;
 
+	/* Clear the matching slot. */
 	(void)server;
 	for (i = 0U; i < 32U; i++) {
 		if (test_res_table[i].id == 0U) {
@@ -509,6 +568,8 @@ x11_resource_add(
 			return 0;
 		}
 	}
+
+	/* Table full. */
 	return ENOMEM;
 }
 
@@ -519,6 +580,7 @@ x11_resource_remove(
 {
 	size_t i;
 
+	/* Clear the matching slot. */
 	(void)server;
 	for (i = 0U; i < 32U; i++) {
 		if (test_res_table[i].id == id) {
@@ -537,6 +599,7 @@ x11_atom_intern(
 	size_t length,
 	int only_if_exists)
 {
+	/* Clear the matching slot. */
 	(void)server;
 	(void)name;
 	(void)length;
@@ -550,9 +613,11 @@ x11_memory_charge(
 	unsigned client,
 	size_t bytes)
 {
+	/* Clear the matching slot. */
 	(void)server;
 	(void)client;
 	(void)bytes;
+	/* No ink found. */
 	return 0;
 }
 
@@ -562,6 +627,7 @@ x11_memory_release(
 	unsigned owner,
 	size_t bytes)
 {
+	/* Clear the matching slot. */
 	(void)server;
 	(void)owner;
 	(void)bytes;
@@ -574,15 +640,23 @@ x11_reply(
 	uint8_t *bytes,
 	size_t length)
 {
+	size_t want;
+
+	/* Clear the matching slot. */
+	/* Append reply bytes to the capture buffer. */
 	(void)server;
 	(void)client;
 	if (test_replies_size + length > test_replies_cap) {
-		size_t want = test_replies_cap ? test_replies_cap * 2U : 4096U;
+		want = 4096U;
+		if (test_replies_cap != 0U)
+			want = test_replies_cap * 2U;
 		while (want < test_replies_size + length)
 			want *= 2U;
 		test_replies = realloc(test_replies, want);
 		test_replies_cap = want;
 	}
+
+	/* Copy the reply payload. */
 	memcpy(test_replies + test_replies_size, bytes, length);
 	test_replies_size += length;
 }
@@ -630,6 +704,7 @@ x11_draw_text(
 	struct x11server *server,
 	const struct x11_text *text)
 {
+	/* Clear the matching slot. */
 	(void)server;
 	(void)text;
 	return 0U;
