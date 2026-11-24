@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/sysctl.h>
+#include <sys/umtx.h>
 #include <time.h>
 #include <threads.h>
 
@@ -1030,6 +1031,84 @@ pthread_attr_get_np(
 {
 	/* Delegates to pthread_getattr_np, which populates every field. */
 	return pthread_getattr_np(thread, attr);
+}
+
+/*
+ * Performs user-space wait and wake operations by translating BSD _umtx_op
+ * requests onto the kernel usync primitive.
+ */
+int
+_umtx_op(
+	void *obj,
+	int op,
+	unsigned long val,
+	void *uaddr,
+	void *uaddr2)
+{
+	const struct timespec *timeout;
+	const struct _umtx_time *umtx_time;
+	size_t timeout_size;
+	unsigned usync_flags;
+	unsigned wake_count;
+	intptr_t result;
+
+	/* Translates wait operations, including optional relative or absolute timeouts. */
+	if (op == UMTX_OP_WAIT ||
+	    op == UMTX_OP_WAIT_UINT ||
+	    op == UMTX_OP_WAIT_UINT_PRIVATE) {
+		usync_flags = (op == UMTX_OP_WAIT_UINT_PRIVATE) ?
+		    KERN_USYNC_PRIVATE : 0U;
+		timeout = NULL;
+		if (uaddr2 != NULL) {
+			timeout_size = (size_t)(uintptr_t)uaddr;
+			if (timeout_size == sizeof(struct timespec)) {
+				timeout = (const struct timespec *)uaddr2;
+			} else if (timeout_size == sizeof(struct _umtx_time)) {
+				umtx_time = (const struct _umtx_time *)uaddr2;
+				timeout = &umtx_time->_timeout;
+				if ((umtx_time->_flags & UMTX_ABSTIME) != 0U) {
+					usync_flags |= KERN_USYNC_ABSTIME;
+					if (umtx_time->_clockid == CLOCK_REALTIME) {
+						usync_flags |= KERN_USYNC_CLOCK_REALTIME;
+					} else if (umtx_time->_clockid != CLOCK_MONOTONIC) {
+						errno = EINVAL;
+						return -1;
+					}
+				}
+			} else {
+				errno = EINVAL;
+				return -1;
+			}
+		}
+		result = __syscall6(KERN_SYS_usync, (uintptr_t)obj,
+		    KERN_USYNC_WAIT, (uint32_t)val, (uintptr_t)timeout,
+		    0, usync_flags);
+		if (result < 0) {
+			if (result == -EAGAIN)
+				return 0;
+			errno = (int)-result;
+			return -1;
+		}
+		return 0;
+	}
+
+	/* Translates wake operations with a bounded wake count. */
+	if (op == UMTX_OP_WAKE || op == UMTX_OP_WAKE_PRIVATE) {
+		usync_flags = (op == UMTX_OP_WAKE_PRIVATE) ?
+		    KERN_USYNC_PRIVATE : 0U;
+		wake_count = (val > UINT32_MAX) ? UINT32_MAX : (unsigned)val;
+		result = __syscall6(KERN_SYS_usync, (uintptr_t)obj,
+		    KERN_USYNC_WAKE, 0, 0, wake_count, usync_flags);
+		if (result < 0) {
+			errno = (int)-result;
+			return -1;
+		}
+		return 0;
+	}
+
+	/* Rejects unsupported operations. */
+	errno = EINVAL;
+	return -1;
 }
 
 /*
