@@ -113,6 +113,8 @@ int pthread_getconcurrency(void);
  */
 int pthread_setname_np(pthread_t thread, const char *name);
 int pthread_getname_np(pthread_t thread, char *name, size_t size);
+int pthread_getattr_np(pthread_t thread, pthread_attr_t *attr);
+int pthread_attr_get_np(pthread_t thread, pthread_attr_t *attr);
 int pthread_setconcurrency(int);
 void __pthread_cleanup_push(struct __pthread_cleanup *,
 	void (*)(void *),void *);
