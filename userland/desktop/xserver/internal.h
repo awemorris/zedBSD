@@ -335,15 +335,16 @@
 
 /*
  * The faces the core fonts are drawn from (glyphs.c), by their roles: the
- * monospaced one and its bold, the proportional one and its bold.  A role
- * without a file of its own takes another's face (drawn bold when it is a
- * bold role).
+ * monospaced one and its bold, the proportional one and its bold, and the
+ * fixed bitmap-style face.  A role without a file of its own takes
+ * another's face (drawn bold when it is a bold role).
  */
 #define X11_FACE_MONO		0U
 #define X11_FACE_MONO_BOLD	1U
 #define X11_FACE_SANS		2U
 #define X11_FACE_SANS_BOLD	3U
-#define X11_FACES		4U
+#define X11_FACE_FIXED		4U
+#define X11_FACES		5U
 
 /* The largest pixel size a core font is drawn at, and the largest glyph drawn from a face (pixels each way). */
 #define X11_FONT_PIXELS_MAX	128U
@@ -1714,8 +1715,10 @@ void x11_wm_constrain(struct x11server *server, struct x11_window *window, int *
 int x11_faces_open(struct x11_faces *faces, const struct x11server_font_file *files, unsigned count, const char *fallback_path);
 void x11_faces_close(struct x11_faces *faces);
 int x11_face_present(const struct x11_faces *faces, unsigned role);
+int x11_face_has_own(const struct x11_faces *faces, unsigned role);
 int x11_face_line(struct x11_faces *faces, unsigned role, unsigned pixels, int *ascent, int *descent, int *advance);
 int x11_face_char(struct x11_faces *faces, unsigned role, unsigned pixels, uint32_t codepoint, struct x11_char_metrics *metrics);
+int x11_face_char_advance(struct x11_faces *faces, unsigned role, unsigned pixels, uint32_t codepoint, int *advance);
 int x11_face_draw(struct x11_faces *faces, unsigned role, unsigned pixels, uint32_t codepoint, struct x11_face_glyph *glyph);
 
 /* font.c: the core fonts and the requests of fonts and text. */

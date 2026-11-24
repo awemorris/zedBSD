@@ -48,16 +48,17 @@ typedef void (*x11server_vulkan_function)(void);
 #define X11SERVER_VULKAN_LOADER	1
 
 /*
- * The role of a font file: the monospaced face the core fonts of fixed
- * width (fixed, courier, the tree's zed-unicode) are drawn with and its
- * bold, and the proportional face of the others (helvetica, times) and its
- * bold.  Only the monospaced one is needed: a role without a file is drawn
- * with another's face, made bold for a bold role.
+ * The role of a font file: the monospaced face (courier) and its bold,
+ * the proportional face (helvetica, times) and its bold, and the fixed
+ * bitmap-style face (fixed, unifont, zed-unicode).  Only the monospaced
+ * one is needed: a role without a file is drawn with another's face, made
+ * bold for a bold role.
  */
 #define X11SERVER_FONT_MONO		0U
 #define X11SERVER_FONT_MONO_BOLD	1U
 #define X11SERVER_FONT_SANS		2U
 #define X11SERVER_FONT_SANS_BOLD	3U
+#define X11SERVER_FONT_FIXED		4U
 
 /*
  * How the server shows itself: rootless, each top-level X window a window

@@ -541,6 +541,32 @@ x11_face_present(
 }
 
 int
+x11_face_has_own(
+	const struct x11_faces *faces,
+	unsigned role)
+{
+	(void)faces;
+	(void)role;
+	return 0;
+}
+
+int
+x11_face_char_advance(
+	struct x11_faces *faces,
+	unsigned role,
+	unsigned pixels,
+	uint32_t codepoint,
+	int *advance)
+{
+	(void)faces;
+	(void)role;
+	(void)pixels;
+	(void)codepoint;
+	*advance = 8;
+	return 0;
+}
+
+int
 x11_face_line(
 	struct x11_faces *faces,
 	unsigned role,
