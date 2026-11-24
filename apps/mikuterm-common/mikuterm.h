@@ -90,6 +90,8 @@ struct mikuterm_conf {
 	int sftp;
 	int sftp_preserve_times;
 	int sftp_show_hidden;
+	unsigned rdp_port;
+	int rdp_resize;
 	int font_size_given;
 	int theme_given;
 	int ambiguous_given;

@@ -883,7 +883,8 @@ connection_event(
 	if (session->settings)
 		ready |= TERMINAL_READY_SETTINGS;
 	session->settings = 0;
-	if (session->tab_count != 0U || session->sftp_pending_tab != NULL)
+	if (session->tab_count != 0U || session->sftp_pending_tab != NULL ||
+	    session->rdp_pending_tab != NULL)
 		ready |= TERMINAL_READY_TAB;
 #if MIKUTERM_HAVE_LOGIN_SHELL
 	memcpy(shell, session->shell, sizeof(shell));
@@ -921,7 +922,8 @@ connection_pending(
 		ready |= TERMINAL_READY_OUTPUT;
 	if (session->ended)
 		ready |= TERMINAL_READY_EXIT;
-	if (session->tab_count != 0U || session->sftp_pending_tab != NULL)
+	if (session->tab_count != 0U || session->sftp_pending_tab != NULL ||
+	    session->rdp_pending_tab != NULL)
 		ready |= TERMINAL_READY_TAB;
 
 	kl_mutex_unlock(&session->lock);
@@ -942,6 +944,7 @@ connection_close(
 {
 	struct mikuterm_session *session;
 	struct terminal_connection *pending_sftp;
+	struct terminal_connection *pending_rdp;
 	struct x11_tab *tabs[SESSION_TABS];
 	unsigned count;
 	unsigned index;
@@ -965,6 +968,8 @@ connection_close(
 	session->sftp_ready = 0;
 	pending_sftp = session->sftp_pending_tab;
 	session->sftp_pending_tab = NULL;
+	pending_rdp = session->rdp_pending_tab;
+	session->rdp_pending_tab = NULL;
 	if (session->question != SESSION_ASK_NONE && !session->answered) {
 		session->cancelled = 1;
 		session->answered = 1;
@@ -975,9 +980,11 @@ connection_close(
 
 	kl_mutex_unlock(&session->lock);
 
-	/* An SFTP view tab no run will show closes, as the user's closing would. */
+	/* An SFTP or RDP view tab no run will show closes, as the user's closing would. */
 	if (pending_sftp != NULL)
 		pending_sftp->ops->close(pending_sftp);
+	if (pending_rdp != NULL)
+		pending_rdp->ops->close(pending_rdp);
 
 	/* The X windows' tabs no run will show close, as the user's closing would. */
 	for (index = 0U; index < count; index++)
@@ -999,6 +1006,7 @@ connection_take(
 {
 	struct mikuterm_session *session;
 	struct terminal_connection *sftp_tab;
+	struct terminal_connection *rdp_tab;
 	struct x11_tab *tab;
 
 	/* The session the connection is. */
@@ -1009,8 +1017,13 @@ connection_take(
 
 	sftp_tab = session->sftp_pending_tab;
 	session->sftp_pending_tab = NULL;
+	rdp_tab = NULL;
 	tab = NULL;
-	if (sftp_tab == NULL && session->tab_count != 0U) {
+	if (sftp_tab == NULL) {
+		rdp_tab = session->rdp_pending_tab;
+		session->rdp_pending_tab = NULL;
+	}
+	if (sftp_tab == NULL && rdp_tab == NULL && session->tab_count != 0U) {
 		tab = session->tabs[0];
 		session->tab_count--;
 		memmove(&session->tabs[0], &session->tabs[1], session->tab_count * sizeof(session->tabs[0]));
@@ -1018,9 +1031,11 @@ connection_take(
 
 	kl_mutex_unlock(&session->lock);
 
-	/* An SFTP view tab waiting to open. */
+	/* An SFTP or RDP view tab waiting to open. */
 	if (sftp_tab != NULL)
 		return sftp_tab;
+	if (rdp_tab != NULL)
+		return rdp_tab;
 
 	/* None waits. */
 	if (tab == NULL)
@@ -1390,4 +1405,24 @@ mikuterm_session_host(
 
 	/* Copies the target host name. */
 	(void)snprintf(host, size, "%s", session->host);
+}
+
+/*
+ * Queues a newly created RDP view tab for the terminal run to open.
+ */
+void
+session_rdp_tab(
+	struct mikuterm_session *session,
+	struct terminal_connection *tab)
+{
+	kl_mutex_lock(&session->lock);
+	if (session->closing || session->rdp_pending_tab != NULL) {
+		kl_mutex_unlock(&session->lock);
+		tab->ops->close(tab);
+		return;
+	}
+
+	session->rdp_pending_tab = tab;
+	kl_mutex_unlock(&session->lock);
+	session_post(session);
 }
