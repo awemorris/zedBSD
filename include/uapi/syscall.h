@@ -206,6 +206,9 @@ enum syscall_number {
 	 * child is ready to run.
 	 */
 	KERN_SYS_sandbox_spawn = 170,
+	KERN_SYS_mlock = 171,
+	KERN_SYS_munlock = 172,
+	KERN_SYS_mincore = 173,
 };
 
 #endif

@@ -378,6 +378,171 @@ vmspace_protect(
 }
 
 /*
+ * Locks or unlocks a user virtual range in memory after validating and faulting
+ * its pages in.
+ */
+int
+vmspace_lock_range(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	int lock)
+{
+	uintptr_t page_start;
+	uintptr_t page_end;
+	uintptr_t address;
+	struct vm_region *region;
+	struct vm_page *page;
+	uint32_t access;
+	int error;
+
+	if (vm == NULL || vm == &kernel_vmspace)
+		return EINVAL;
+	if (size == 0)
+		return 0;
+
+	/* Rounds the range out to whole pages and checks for wraparound. */
+	page_start = start & ~(uintptr_t)(PAGE_SIZE - 1U);
+	if (start > UINTPTR_MAX - size)
+		return ENOMEM;
+	page_end = start + size;
+	if (page_end > UINTPTR_MAX - (PAGE_SIZE - 1U))
+		return ENOMEM;
+	page_end = (page_end + PAGE_SIZE - 1U) & ~(uintptr_t)(PAGE_SIZE - 1U);
+	if (page_end <= page_start ||
+	    !vmspace_user_range_valid(page_start, page_end - page_start))
+		return ENOMEM;
+
+	/* Verifies that every page in the range is mapped and accessible. */
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+
+	for (address = page_start; address < page_end; address += PAGE_SIZE) {
+		region = vmspace_find_region_locked(vm, address, 1);
+		if (region == NULL ||
+		    (region->flags & VM_REGION_GUARD) != 0 ||
+		    (region->prot & (HAL_SPACE_READ | HAL_SPACE_WRITE |
+		    HAL_SPACE_EXEC)) == 0) {
+			mutex_unlock(&vm->lock);
+			vm_metadata_leave();
+			return ENOMEM;
+		}
+	}
+
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+
+	/* Faults every page in when locking so the range is resident. */
+	if (lock) {
+		for (address = page_start; address < page_end;
+		     address += PAGE_SIZE) {
+			access = HAL_SPACE_READ;
+			vm_metadata_enter();
+			mutex_lock(&vm->lock);
+			region = vmspace_find_region_locked(vm, address, 1);
+			if (region != NULL) {
+				if ((region->prot & HAL_SPACE_READ) != 0)
+					access = HAL_SPACE_READ;
+				else if ((region->prot & HAL_SPACE_WRITE) != 0)
+					access = HAL_SPACE_WRITE;
+				else if ((region->prot & HAL_SPACE_EXEC) != 0)
+					access = HAL_SPACE_EXEC;
+				else
+					region = NULL;
+			}
+			mutex_unlock(&vm->lock);
+			vm_metadata_leave();
+
+			if (region == NULL)
+				return ENOMEM;
+			error = vmspace_fault(vm, address, access);
+			if (error != 0)
+				return ENOMEM;
+		}
+	}
+
+	/* Updates the page lock bit across the validated range. */
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+
+	for (address = page_start; address < page_end; address += PAGE_SIZE) {
+		region = vmspace_find_region_locked(vm, address, 1);
+		if (region == NULL) {
+			mutex_unlock(&vm->lock);
+			vm_metadata_leave();
+			return ENOMEM;
+		}
+		page = vmspace_find_page(region, address);
+		if (page != NULL) {
+			if (lock)
+				page->flags |= VM_PAGE_LOCKED;
+			else
+				page->flags &= ~VM_PAGE_LOCKED;
+		}
+	}
+
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+	return 0;
+}
+
+/*
+ * Reports per-page residency for a page-aligned chunk of a user address space.
+ */
+int
+vmspace_mincore_chunk(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t page_count,
+	uint8_t *vec)
+{
+	size_t i;
+	uintptr_t address;
+	struct vm_region *region;
+	struct vm_page *page;
+	uint8_t resident;
+
+	if (vm == NULL || vm == &kernel_vmspace || vec == NULL)
+		return EINVAL;
+	if ((start & (PAGE_SIZE - 1U)) != 0)
+		return EINVAL;
+	if (page_count == 0)
+		return 0;
+	if (page_count > (SIZE_MAX / PAGE_SIZE) ||
+	    start > UINTPTR_MAX - page_count * PAGE_SIZE ||
+	    !vmspace_user_range_valid(start, page_count * PAGE_SIZE))
+		return ENOMEM;
+
+	/* Checks each page's backing residency under the space lock. */
+	vm_metadata_enter();
+	mutex_lock(&vm->lock);
+
+	for (i = 0; i < page_count; i++) {
+		address = start + i * PAGE_SIZE;
+		region = vmspace_find_region_locked(vm, address, 1);
+		if (region == NULL) {
+			mutex_unlock(&vm->lock);
+			vm_metadata_leave();
+			return ENOMEM;
+		}
+		page = vmspace_find_page(region, address);
+		resident = 0;
+		if (page != NULL) {
+			if (region->backing == VM_BACKING_DEVICE ||
+			    page->object_page != NULL)
+				resident = ((page->flags & VM_PAGE_RESIDENT) != 0) ? 1U : 0U;
+			else if (page->private_page != NULL)
+				resident = ((page->private_page->flags & VM_PAGE_RESIDENT) != 0) ? 1U : 0U;
+		}
+		vec[i] = resident;
+	}
+
+	mutex_unlock(&vm->lock);
+	vm_metadata_leave();
+	return 0;
+}
+
+/*
  * Sets the limit on mapped virtual bytes.
  */
 int

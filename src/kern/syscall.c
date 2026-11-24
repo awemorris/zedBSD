@@ -221,6 +221,8 @@ static intptr_t sys_mmap_call(const uintptr_t args[6]);
 static intptr_t sys_munmap_call(const uintptr_t args[6]);
 static intptr_t sys_mprotect_call(const uintptr_t args[6]);
 static intptr_t sys_msync_call(const uintptr_t args[6]);
+static intptr_t sys_mlock_call(const uintptr_t args[6], int lock);
+static intptr_t sys_mincore_call(const uintptr_t args[6]);
 static intptr_t sys_brk_call(const uintptr_t args[6]);
 static intptr_t sys_ioctl_call(const uintptr_t args[6]);
 static intptr_t sys_clock_gettime_call(const uintptr_t args[6]);
@@ -4045,6 +4047,78 @@ sys_msync_call(
 	/* Reports the outcome of the call. */
 	if (error != 0)
 		return -error;
+	return 0;
+}
+
+/* Handles mlock(2) and munlock(2). */
+static intptr_t
+sys_mlock_call(
+	const uintptr_t args[6],
+	int lock)
+{
+	struct process *process;
+	int error;
+
+	process = current_process();
+	if (process == NULL || process->vmspace == NULL)
+		return -EINVAL;
+	error = vmspace_lock_range(process->vmspace, args[0], args[1], lock);
+	if (error != 0)
+		return -error;
+	return 0;
+}
+
+/* Handles mincore(2). */
+static intptr_t
+sys_mincore_call(
+	const uintptr_t args[6])
+{
+	struct process *process;
+	uint8_t chunk[256];
+	size_t page_size;
+	size_t total_pages;
+	size_t done;
+	size_t batch;
+	uintptr_t address;
+	uintptr_t user_vec;
+	int error;
+
+	process = current_process();
+	if (process == NULL || process->vmspace == NULL)
+		return -EINVAL;
+
+	/* The start address must be page-aligned. */
+	page_size = SYSCALL_PAGE_MASK + 1U;
+	if ((args[0] & SYSCALL_PAGE_MASK) != 0)
+		return -EINVAL;
+	if (args[1] == 0)
+		return 0;
+	if (args[1] > SIZE_MAX - SYSCALL_PAGE_MASK)
+		return -ENOMEM;
+	if (args[2] == 0)
+		return -EFAULT;
+
+	/* Queries residency in bounded chunks so copyout runs unlocked. */
+	total_pages = (args[1] + SYSCALL_PAGE_MASK) / page_size;
+	address = args[0];
+	user_vec = args[2];
+	done = 0;
+	while (done < total_pages) {
+		batch = total_pages - done;
+		if (batch > sizeof(chunk))
+			batch = sizeof(chunk);
+		error = vmspace_mincore_chunk(process->vmspace, address, batch,
+		    chunk);
+		if (error != 0)
+			return -error;
+		error = copyout(chunk, user_vec, batch);
+		if (error != 0)
+			return -error;
+		address += batch * page_size;
+		user_vec += batch;
+		done += batch;
+	}
+
 	return 0;
 }
 
@@ -10377,6 +10451,15 @@ syscall_dispatch_body(
 	/* Writes a mapping back. */
 	case KERN_SYS_msync:
 		result = sys_msync_call(args);
+		break;
+	case KERN_SYS_mlock:
+		result = sys_mlock_call(args, 1);
+		break;
+	case KERN_SYS_munlock:
+		result = sys_mlock_call(args, 0);
+		break;
+	case KERN_SYS_mincore:
+		result = sys_mincore_call(args);
 		break;
 
 	/* Changes the mode and the ownership of a file. */

@@ -30,6 +30,9 @@ int posix_madvise(void *, size_t, int);
 #define POSIX_MADV_WILLNEED   MADV_WILLNEED
 #define POSIX_MADV_DONTNEED   MADV_DONTNEED
 int msync(void *, size_t, int);
+int mlock(const void *, size_t);
+int munlock(const void *, size_t);
+int mincore(void *, size_t, unsigned char *);
 int shm_open(const char *, int, mode_t);
 int shm_unlink(const char *);
 

@@ -52,6 +52,7 @@ struct vm_device_mapping;
 #define VM_PAGE_DIRTY			0x0002U
 #define VM_PAGE_BUSY			0x0004U
 #define VM_PAGE_SWAPPED			0x0008U
+#define VM_PAGE_LOCKED			0x0010U
 
 #define VM_MAPPING_COW			0x0100U
 #define VM_MAPPING_MAPPED		0x0200U
@@ -579,6 +580,26 @@ int
 vmspace_set_address_limit(
 	struct vmspace *vm,
 	uint64_t limit);
+
+/*
+ * Locks or unlocks a user virtual range in memory after faulting its pages in.
+ */
+int
+vmspace_lock_range(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t size,
+	int lock);
+
+/*
+ * Reports per-page residency for a page-aligned chunk of a user address space.
+ */
+int
+vmspace_mincore_chunk(
+	struct vmspace *vm,
+	uintptr_t start,
+	size_t page_count,
+	uint8_t *vec);
 
 int
 vmspace_set_data_limit(

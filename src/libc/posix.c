@@ -1483,6 +1483,61 @@ msync(
 }
 
 /*
+ * Implements the mlock operation.
+ */
+int
+mlock(
+	const void *address,
+	size_t length)
+{
+	int function_result;
+
+	/* Computes the function result. */
+	function_result = (int)call(KERN_SYS_mlock, (uintptr_t)address, length,
+	    0, 0, 0, 0);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/*
+ * Implements the munlock operation.
+ */
+int
+munlock(
+	const void *address,
+	size_t length)
+{
+	int function_result;
+
+	/* Computes the function result. */
+	function_result = (int)call(KERN_SYS_munlock, (uintptr_t)address,
+	    length, 0, 0, 0, 0);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/*
+ * Implements the mincore operation.
+ */
+int
+mincore(
+	void *address,
+	size_t length,
+	unsigned char *vec)
+{
+	int function_result;
+
+	/* Computes the function result. */
+	function_result = (int)call(KERN_SYS_mincore, (uintptr_t)address,
+	    length, (uintptr_t)vec, 0, 0, 0);
+
+	/* Returns the computed result. */
+	return function_result;
+}
+
+/*
  * Implements the brk operation.
  */
 int
