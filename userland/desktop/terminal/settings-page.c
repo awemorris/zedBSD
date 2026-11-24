@@ -2511,7 +2511,9 @@ page_hosts_vi(
 	char text[PAGE_MESSAGE];
 	int exists;
 	int error;
+	int written;
 
+	/* Creates an empty ssh_config if none exists yet. */
 	exists = page.program->exists(page.program->data, page.program->config_path);
 	if (!exists) {
 		error = page.program->create(page.program->data, page.program->config_path, "", 0U, 1);
@@ -2522,10 +2524,14 @@ page_hosts_vi(
 		}
 	}
 
-	if (snprintf(window->open_vi_path, sizeof(window->open_vi_path), "%s", page.program->config_path) >= (int)sizeof(window->open_vi_path)) {
+	/* Records the pending request for the terminal main loop to open. */
+	written = snprintf(window->open_vi_path, sizeof(window->open_vi_path), "%s", page.program->config_path);
+	if (written < 0 || (size_t)written >= sizeof(window->open_vi_path)) {
 		page_say(&page.hosts_message, 1, "The file path is too long.");
 		return;
 	}
+
+	/* Marks the request active and informs the user. */
 	window->open_vi_requested = 1;
 	page_say(&page.hosts_message, 0, "Opened in vi tab. Its changes take effect from the next connection; Revert shows them here.");
 	page_log("hosts", "vi");

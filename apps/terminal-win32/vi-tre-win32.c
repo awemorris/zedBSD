@@ -39,9 +39,8 @@ vi_tre_mbtowc(
 	if (n == 0U)
 		return -1;
 
-	bytes = (const unsigned char *)s;
-
 	/* NUL byte terminates and returns 0 per ISO C mbtowc. */
+	bytes = (const unsigned char *)s;
 	if (bytes[0] == 0U) {
 		if (pwc != NULL)
 			*pwc = 0;
@@ -69,6 +68,7 @@ vi_tre_mbtowc(
 		return -1;
 	}
 
+	/* Ensures all continuation bytes are available. */
 	if (n < needed)
 		return -1;
 
@@ -86,6 +86,7 @@ vi_tre_mbtowc(
 	    code > 0x10ffffU)
 		return -1;
 
+	/* Stores the BMP code point or U+FFFD for supplementary planes. */
 	if (pwc != NULL) {
 		if (code > 0xffffU)
 			*pwc = (wchar_t)0xfffdU;
@@ -93,5 +94,6 @@ vi_tre_mbtowc(
 			*pwc = (wchar_t)code;
 	}
 
+	/* Returns the UTF-8 byte length consumed. */
 	return (int)needed;
 }

@@ -462,12 +462,21 @@ main_open_vi(
 	struct terminal_connection **connection)
 {
 	struct main_state *st;
+	struct kl_app *app;
 	int ambiguous_wide;
 
+	/* Selects the window's application handle and ambiguous-width setting. */
 	st = data;
-	ambiguous_wide = (window != NULL) ? window->menu_state.ambiguous_wide : st->conf.ambiguous_wide;
+	app = NULL;
+	ambiguous_wide = st->conf.ambiguous_wide;
+	if (window != NULL) {
+		app = window->app;
+		ambiguous_wide = window->menu_state.ambiguous_wide;
+	}
+
+	/* Opens the file in vi.exe over Win32 pipes. */
 	return mikuterm_vi_open(
-		(window != NULL) ? window->app : NULL,
+		app,
 		window,
 		columns,
 		rows,

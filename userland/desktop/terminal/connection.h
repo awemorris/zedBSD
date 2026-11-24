@@ -154,5 +154,6 @@ struct terminal_process_connector {
 };
 
 void terminal_process_connector_init(struct terminal_process_connector *process, const char *command);
+int terminal_process_open_argv(struct kl_app *app, const char *const *argv, const char *term_name, int ambiguous_wide, unsigned columns, unsigned rows, const char *tab_title, char *title, size_t size, struct terminal_connection **connection);
 
 #endif

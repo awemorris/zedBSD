@@ -54,6 +54,8 @@ vi_file_load(
 	wchar_t *wide;
 	HANDLE handle;
 	DWORD file_type;
+	DWORD last;
+	DWORD attrs;
 	LARGE_INTEGER file_size;
 	char *contents;
 	size_t length;
@@ -61,7 +63,9 @@ vi_file_load(
 	int incomplete;
 	int crlf;
 	int error;
+	BOOL ok;
 
+	/* Initializes a temporary buffer so a failed load leaves the editor intact. */
 	vi_buffer_init(&buffer);
 	contents = NULL;
 	length = 0U;
@@ -69,16 +73,18 @@ vi_file_load(
 	crlf = 0;
 	exists = 0;
 
+	/* Converts the UTF-8 path to UTF-16. */
 	error = utf8_to_wide(path, &wide);
 	if (error != 0) {
 		(void)snprintf(editor->message, sizeof(editor->message), "\"%s\": %s", path, strerror(error));
 		return error;
 	}
 
+	/* Opens the existing file, or treats a missing file as a new empty buffer. */
 	handle = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
 	    NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (handle == INVALID_HANDLE_VALUE) {
-		DWORD last = GetLastError();
+		last = GetLastError();
 		free(wide);
 		if (last != ERROR_FILE_NOT_FOUND && last != ERROR_PATH_NOT_FOUND) {
 			error = win32_errno(last);
@@ -86,16 +92,17 @@ vi_file_load(
 			return error;
 		}
 	} else {
-		DWORD attrs = GetFileAttributesW(wide);
+		/* Verifies the target is a regular disk file within the size limit. */
+		attrs = GetFileAttributesW(wide);
 		free(wide);
 		exists = 1;
-
 		if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_DIRECTORY) != 0U) {
 			CloseHandle(handle);
 			(void)snprintf(editor->message, sizeof(editor->message), "\"%s\": not a regular file", path);
 			return EINVAL;
 		}
 
+		/* Rejects non-disk handles such as pipes or devices. */
 		file_type = GetFileType(handle);
 		if (file_type != FILE_TYPE_DISK) {
 			CloseHandle(handle);
@@ -103,19 +110,23 @@ vi_file_load(
 			return EINVAL;
 		}
 
-		if (!GetFileSizeEx(handle, &file_size)) {
+		/* Queries and validates the file size against the editor limit. */
+		ok = GetFileSizeEx(handle, &file_size);
+		if (!ok) {
 			error = win32_errno(GetLastError());
 			CloseHandle(handle);
 			(void)snprintf(editor->message, sizeof(editor->message), "\"%s\": %s", path, strerror(error));
 			return error;
 		}
 
+		/* Enforces the upper bound before reading into memory. */
 		if (file_size.QuadPart < 0 || (unsigned long long)file_size.QuadPart > (unsigned long long)VI_FILE_SIZE_LIMIT) {
 			CloseHandle(handle);
 			(void)snprintf(editor->message, sizeof(editor->message), "\"%s\": file too large", path);
 			return EFBIG;
 		}
 
+		/* Reads the file bytes and detects CR+LF line endings. */
 		error = read_whole(handle, (size_t)file_size.QuadPart, &contents, &length);
 		CloseHandle(handle);
 		if (error != 0) {
@@ -126,11 +137,13 @@ vi_file_load(
 			return error;
 		}
 
+		/* Records incomplete trailing lines and detects CR+LF endings. */
 		if (length != 0U && contents[length - 1U] != '\n')
 			incomplete = 1;
 		crlf = detect_crlf(contents, length);
 	}
 
+	/* Splits the loaded bytes into lines in the temporary buffer. */
 	error = split_lines(&buffer, contents, length, crlf);
 	free(contents);
 	if (error != 0) {
@@ -142,12 +155,12 @@ vi_file_load(
 		return error;
 	}
 
+	/* Commits the new buffer and resets undo and cursor state. */
 	vi_buffer_free(&editor->buffer);
 	editor->buffer = buffer;
 	vi_undo_free(&editor->undo);
 	vi_undo_init(&editor->undo);
 	editor->crlf = crlf;
-
 	editor->cursor.line = 0U;
 	editor->cursor.offset = 0U;
 	editor->want_column = 0U;
@@ -155,6 +168,7 @@ vi_file_load(
 	editor->top_skip = 0U;
 	vi_screen_invalidate(editor);
 
+	/* Reports the loaded file summary in the status line. */
 	if (!exists) {
 		(void)snprintf(editor->message, sizeof(editor->message), "\"%s\" [New file]", path);
 	} else if (incomplete) {
@@ -167,6 +181,7 @@ vi_file_load(
 		    path, (unsigned long)editor->buffer.count, (unsigned long)length);
 	}
 
+	/* Succeeded. */
 	return 0;
 }
 
@@ -182,29 +197,37 @@ vi_file_write(
 	struct file_totals totals;
 	wchar_t *wide;
 	DWORD attrs;
+	DWORD last;
 	int is_own_file;
 	int exists;
+	int same_name;
 	char *name_copy;
 	int error;
 
+	/* Uses the buffer's own name when no explicit path is given. */
 	if (path == NULL)
 		path = editor->file_name;
-
 	if (path == NULL) {
 		vi_message(editor, "No file name");
 		return EINVAL;
 	}
 
+	/* Checks whether the target is the buffer's own file. */
 	is_own_file = 0;
-	if (editor->file_name != NULL && strcmp(path, editor->file_name) == 0)
-		is_own_file = 1;
+	if (editor->file_name != NULL) {
+		same_name = strcmp(path, editor->file_name);
+		if (same_name == 0)
+			is_own_file = 1;
+	}
 
+	/* Converts the target path to UTF-16. */
 	error = utf8_to_wide(path, &wide);
 	if (error != 0) {
 		(void)snprintf(editor->message, sizeof(editor->message), "\"%s\": %s", path, strerror(error));
 		return error;
 	}
 
+	/* Checks whether the target exists and is a writable regular file. */
 	attrs = GetFileAttributesW(wide);
 	exists = 0;
 	if (attrs != INVALID_FILE_ATTRIBUTES) {
@@ -215,7 +238,7 @@ vi_file_write(
 			return EINVAL;
 		}
 	} else {
-		DWORD last = GetLastError();
+		last = GetLastError();
 		if (last != ERROR_FILE_NOT_FOUND && last != ERROR_PATH_NOT_FOUND) {
 			error = win32_errno(last);
 			free(wide);
@@ -224,31 +247,32 @@ vi_file_write(
 		}
 	}
 
+	/* Refuses to clobber another file or a read-only file without force. */
 	if (exists && !is_own_file && !force) {
 		free(wide);
 		(void)snprintf(editor->message, sizeof(editor->message), "\"%s\": file exists (add ! to override)", path);
 		return EEXIST;
 	}
 
+	/* Blocks overwriting read-only files unless forced. */
 	if (exists && !force && (attrs & FILE_ATTRIBUTE_READONLY) != 0U) {
 		free(wide);
 		(void)snprintf(editor->message, sizeof(editor->message), "\"%s\": file is read-only (add ! to override)", path);
 		return EACCES;
 	}
 
+	/* Writes atomically via a temporary file, falling back to in-place on denial. */
 	memset(&totals, 0, sizeof(totals));
 	error = write_replacing(wide, exists, &editor->buffer, editor->crlf, &totals);
-	if (error != 0 && exists) {
-		/* Fallback when temporary creation in the directory is denied. */
+	if (error != 0 && exists)
 		error = write_in_place(wide, &editor->buffer, editor->crlf, &totals);
-	}
 	free(wide);
-
 	if (error != 0) {
 		(void)snprintf(editor->message, sizeof(editor->message), "\"%s\": %s", path, strerror(error));
 		return error;
 	}
 
+	/* Adopts the name if the buffer was unnamed and marks it saved. */
 	if (editor->file_name == NULL) {
 		name_copy = strdup(path);
 		if (name_copy != NULL) {
@@ -257,9 +281,11 @@ vi_file_write(
 		}
 	}
 
+	/* Clears dirty state when saving the buffer's own file. */
 	if (is_own_file)
 		vi_undo_mark_saved(editor);
 
+	/* Reports the write summary. */
 	(void)snprintf(editor->message, sizeof(editor->message),
 	    "\"%s\" %lu lines, %lu bytes written",
 	    path, (unsigned long)totals.lines, totals.bytes);
@@ -279,17 +305,19 @@ vi_file_recover(
 	HANDLE handle;
 	struct file_totals totals;
 
+	/* Resolves the Windows temporary directory. */
 	dir_len = GetTempPathW((DWORD)(sizeof(dir) / sizeof(dir[0])), dir);
 	if (dir_len == 0U || dir_len >= (DWORD)(sizeof(dir) / sizeof(dir[0])))
 		return;
 
+	/* Creates the recovery file and flushes the buffer contents. */
 	(void)swprintf(recover, sizeof(recover) / sizeof(recover[0]),
 	    L"%svi-recover.%lu.txt", dir, (unsigned long)GetCurrentProcessId());
-
 	handle = CreateFileW(recover, GENERIC_WRITE, 0U, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (handle == INVALID_HANDLE_VALUE)
 		return;
 
+	/* Writes all lines and closes the recovery file. */
 	memset(&totals, 0, sizeof(totals));
 	(void)write_lines(handle, &editor->buffer, editor->crlf, &totals);
 	(void)FlushFileBuffers(handle);
@@ -305,24 +333,29 @@ utf8_to_wide(
 	wchar_t **wide)
 {
 	int units;
+	int converted;
 	wchar_t *buffer;
 
+	/* Rejects empty paths. */
 	if (utf8 == NULL || utf8[0] == '\0')
 		return EINVAL;
 
+	/* Measures the UTF-16 length. */
 	units = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, NULL, 0);
 	if (units <= 0 || (unsigned)units > FILE_WIDE_MAX)
 		return EINVAL;
 
+	/* Allocates and converts the UTF-16 path. */
 	buffer = malloc((size_t)units * sizeof(wchar_t));
 	if (buffer == NULL)
 		return ENOMEM;
-
-	if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, buffer, units) <= 0) {
+	converted = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, buffer, units);
+	if (converted <= 0) {
 		free(buffer);
 		return EINVAL;
 	}
 
+	/* Succeeded. */
 	*wide = buffer;
 	return 0;
 }
@@ -334,6 +367,7 @@ static int
 win32_errno(
 	DWORD error)
 {
+	/* Translates filesystem error codes. */
 	switch (error) {
 	case ERROR_FILE_NOT_FOUND:
 	case ERROR_PATH_NOT_FOUND:
@@ -364,9 +398,11 @@ detect_crlf(
 	size_t index;
 	int saw_lf;
 
+	/* Empty files default to LF. */
 	if (contents == NULL || length == 0U)
 		return 0;
 
+	/* Checks that every LF is immediately preceded by CR. */
 	saw_lf = 0;
 	for (index = 0U; index < length; index++) {
 		if (contents[index] == '\n') {
@@ -376,6 +412,7 @@ detect_crlf(
 		}
 	}
 
+	/* True only when at least one CRLF line ending was seen. */
 	return saw_lf;
 }
 
@@ -394,9 +431,11 @@ split_lines(
 	size_t line_length;
 	int error;
 
+	/* An empty file starts with one empty line. */
 	if (length == 0U)
 		return vi_buffer_append_line(buffer, "", 0U);
 
+	/* Appends each newline-terminated line. */
 	start = 0U;
 	for (index = 0U; index < length; index++) {
 		if (contents[index] == '\n') {
@@ -410,6 +449,7 @@ split_lines(
 		}
 	}
 
+	/* Appends a trailing incomplete line if present. */
 	if (start < length) {
 		line_length = length - start;
 		if (crlf && line_length > 0U && contents[start + line_length - 1U] == '\r')
@@ -419,6 +459,7 @@ split_lines(
 			return error;
 	}
 
+	/* Succeeded. */
 	return 0;
 }
 
@@ -434,33 +475,46 @@ read_whole(
 {
 	char *buffer;
 	size_t total;
+	size_t remaining;
 	DWORD want;
 	DWORD got;
+	BOOL ok;
+	int error;
 
+	/* Zero-byte files need no allocation. */
 	if (size == 0U) {
 		*contents = NULL;
 		*length = 0U;
 		return 0;
 	}
 
+	/* Allocates the file buffer. */
 	buffer = malloc(size);
 	if (buffer == NULL)
 		return ENOMEM;
 
+	/* Reads in blocks until size bytes or EOF. */
 	total = 0U;
 	while (total < size) {
-		want = (DWORD)((size - total > FILE_WRITE_BLOCK) ? FILE_WRITE_BLOCK : (size - total));
+		remaining = size - total;
+		want = (DWORD)remaining;
+		if (remaining > FILE_WRITE_BLOCK)
+			want = FILE_WRITE_BLOCK;
 		got = 0U;
-		if (!ReadFile(handle, buffer + total, want, &got, NULL)) {
-			int error = win32_errno(GetLastError());
+		ok = ReadFile(handle, buffer + total, want, &got, NULL);
+		if (!ok) {
+			error = win32_errno(GetLastError());
 			free(buffer);
 			return error;
 		}
+
+		/* Stops reading at EOF. */
 		if (got == 0U)
 			break;
 		total += (size_t)got;
 	}
 
+	/* Hands ownership of buffer to the caller. */
 	*contents = buffer;
 	*length = total;
 	return 0;
@@ -476,18 +530,26 @@ write_all(
 	size_t length)
 {
 	size_t written;
+	size_t remaining;
 	DWORD want;
 	DWORD got;
+	BOOL ok;
 
+	/* Loops until all bytes are written or WriteFile fails. */
 	written = 0U;
 	while (written < length) {
-		want = (DWORD)((length - written > FILE_WRITE_BLOCK) ? FILE_WRITE_BLOCK : (length - written));
+		remaining = length - written;
+		want = (DWORD)remaining;
+		if (remaining > FILE_WRITE_BLOCK)
+			want = FILE_WRITE_BLOCK;
 		got = 0U;
-		if (!WriteFile(handle, bytes + written, want, &got, NULL) || got == 0U)
+		ok = WriteFile(handle, bytes + written, want, &got, NULL);
+		if (!ok || got == 0U)
 			return win32_errno(GetLastError());
 		written += (size_t)got;
 	}
 
+	/* Succeeded. */
 	return 0;
 }
 
@@ -509,16 +571,25 @@ write_lines(
 	size_t ending_len;
 	int error;
 
+	/* Allocates a staging block to batch small lines. */
 	block = malloc(FILE_WRITE_BLOCK);
 	if (block == NULL)
 		return ENOMEM;
 
-	ending = crlf ? "\r\n" : "\n";
-	ending_len = crlf ? 2U : 1U;
+	/* Selects the line ending sequence. */
+	ending = "\n";
+	ending_len = 1U;
+	if (crlf) {
+		ending = "\r\n";
+		ending_len = 2U;
+	}
+
+	/* Resets staging counters before writing lines. */
 	used = 0U;
 	totals->lines = 0U;
 	totals->bytes = 0UL;
 
+	/* Writes each line followed by its ending. */
 	for (index = 0U; index < buffer->count; index++) {
 		line = &buffer->lines[index];
 		if (line->length + ending_len > FILE_WRITE_BLOCK) {
@@ -528,8 +599,12 @@ write_lines(
 					free(block);
 					return error;
 				}
+
+				/* Resets the staging buffer after flushing. */
 				used = 0U;
 			}
+
+			/* Writes the oversized line and its ending directly. */
 			error = write_all(handle, line->text, line->length);
 			if (error == 0)
 				error = write_all(handle, ending, ending_len);
@@ -544,19 +619,28 @@ write_lines(
 					free(block);
 					return error;
 				}
+
+				/* Resets the staging buffer after flushing. */
 				used = 0U;
 			}
+
+			/* Copies the line text into the staging buffer when non-empty. */
 			if (line->length > 0U) {
 				memcpy(block + used, line->text, line->length);
 				used += line->length;
 			}
+
+			/* Appends the line ending to the staging buffer. */
 			memcpy(block + used, ending, ending_len);
 			used += ending_len;
 		}
+
+		/* Updates the written line and byte counters. */
 		totals->lines++;
 		totals->bytes += (unsigned long)(line->length + ending_len);
 	}
 
+	/* Flushes any remaining staged bytes. */
 	if (used > 0U) {
 		error = write_all(handle, block, used);
 		if (error != 0) {
@@ -565,6 +649,7 @@ write_lines(
 		}
 	}
 
+	/* Succeeded. */
 	free(block);
 	return 0;
 }
@@ -583,16 +668,18 @@ write_replacing(
 	size_t target_len;
 	wchar_t *temp_path;
 	HANDLE handle;
+	BOOL ok;
 	int error;
 
+	/* Builds a sibling temporary filename. */
 	target_len = wcslen(target);
 	temp_path = malloc((target_len + 32U) * sizeof(wchar_t));
 	if (temp_path == NULL)
 		return ENOMEM;
-
 	(void)swprintf(temp_path, target_len + 32U, L"%ls.vi%lu.tmp",
 	    target, (unsigned long)GetCurrentProcessId());
 
+	/* Creates the temporary file and writes all lines. */
 	handle = CreateFileW(temp_path, GENERIC_WRITE, 0U, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (handle == INVALID_HANDLE_VALUE) {
 		error = win32_errno(GetLastError());
@@ -600,20 +687,28 @@ write_replacing(
 		return error;
 	}
 
+	/* Writes all lines and flushes buffers before closing the temp file. */
 	error = write_lines(handle, buffer, crlf, totals);
-	if (error == 0 && !FlushFileBuffers(handle))
-		error = win32_errno(GetLastError());
-	CloseHandle(handle);
+	if (error == 0) {
+		ok = FlushFileBuffers(handle);
+		if (!ok)
+			error = win32_errno(GetLastError());
+	}
 
+	/* Closes the temp file handle before replacing or deleting. */
+	CloseHandle(handle);
 	if (error != 0) {
 		(void)DeleteFileW(temp_path);
 		free(temp_path);
 		return error;
 	}
 
+	/* Atomically replaces target, preserving ACLs when target already exists. */
 	if (exists) {
-		if (!ReplaceFileW(target, temp_path, NULL, REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL)) {
-			if (!MoveFileExW(temp_path, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		ok = ReplaceFileW(target, temp_path, NULL, REPLACEFILE_IGNORE_MERGE_ERRORS, NULL, NULL);
+		if (!ok) {
+			ok = MoveFileExW(temp_path, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+			if (!ok) {
 				error = win32_errno(GetLastError());
 				(void)DeleteFileW(temp_path);
 				free(temp_path);
@@ -621,7 +716,8 @@ write_replacing(
 			}
 		}
 	} else {
-		if (!MoveFileExW(temp_path, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+		ok = MoveFileExW(temp_path, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+		if (!ok) {
 			error = win32_errno(GetLastError());
 			(void)DeleteFileW(temp_path);
 			free(temp_path);
@@ -629,6 +725,7 @@ write_replacing(
 		}
 	}
 
+	/* Succeeded. */
 	free(temp_path);
 	return 0;
 }
@@ -644,21 +741,29 @@ write_in_place(
 	struct file_totals *totals)
 {
 	HANDLE handle;
+	BOOL ok;
 	int error;
 
+	/* Opens the existing file and truncates it to zero bytes. */
 	handle = CreateFileW(target, GENERIC_WRITE, 0U, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	if (handle == INVALID_HANDLE_VALUE)
 		return win32_errno(GetLastError());
-
-	if (!SetEndOfFile(handle)) {
+	ok = SetEndOfFile(handle);
+	if (!ok) {
 		error = win32_errno(GetLastError());
 		CloseHandle(handle);
 		return error;
 	}
 
+	/* Writes the buffer and flushes to disk. */
 	error = write_lines(handle, buffer, crlf, totals);
-	if (error == 0 && !FlushFileBuffers(handle))
-		error = win32_errno(GetLastError());
+	if (error == 0) {
+		ok = FlushFileBuffers(handle);
+		if (!ok)
+			error = win32_errno(GetLastError());
+	}
+
+	/* Closes the target handle and returns the write result. */
 	CloseHandle(handle);
 	return error;
 }
