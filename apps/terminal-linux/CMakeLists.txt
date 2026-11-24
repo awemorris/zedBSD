@@ -198,7 +198,7 @@ endforeach()
 target_link_libraries(mikuterm_png PUBLIC mikuterm_z)
 target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
 target_link_libraries(mikuterm_keiland PUBLIC mikuterm_truetype mikuterm_png mikuterm_wayland
-	${MIKUTERM_VULKAN_LIBRARY} Threads::Threads m)
+	${MIKUTERM_VULKAN_LIBRARY} Threads::Threads ${CMAKE_DL_LIBS} m)
 target_link_libraries(mikuterm_terminal PUBLIC mikuterm_keiland mikuterm_ssh)
 target_link_libraries(mikuterm_xserver PUBLIC mikuterm_keiland)
 

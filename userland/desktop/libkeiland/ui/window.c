@@ -30,11 +30,13 @@
 
 #include <keiland/keiland.h>
 
+#include <dlfcn.h>
 #include <errno.h>
 #include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -75,6 +77,25 @@
 #define WINDOW_KEY_RIGHTALT	100U
 #define WINDOW_KEY_LEFTMETA	125U
 #define WINDOW_KEY_RIGHTMETA	126U
+
+/*
+ * Values referenced: wayland-protocols 1.44 unstable/xdg-decoration/xdg-decoration-unstable-v1.xml
+ * (opcodes of zxdg_decoration_manager_v1 and zxdg_toplevel_decoration_v1,
+ * and zxdg_toplevel_decoration_v1.mode server_side).
+ */
+#define WINDOW_DECORATION_MANAGER_DESTROY	0U
+#define WINDOW_DECORATION_MANAGER_GET		1U
+#define WINDOW_TOPLEVEL_DECORATION_DESTROY	0U
+#define WINDOW_TOPLEVEL_DECORATION_SET_MODE	1U
+#define WINDOW_TOPLEVEL_DECORATION_SERVER_SIDE	2U
+
+/*
+ * Values referenced: libxkbcommon 1.13.2 include/xkbcommon/xkbcommon.h
+ * (XKB_KEYMAP_FORMAT_TEXT_V1 and XKB_KEYMAP_COMPILE_NO_FLAGS; XKB keycodes
+ * are evdev keycodes offset by 8).
+ */
+#define WINDOW_XKB_KEYMAP_FORMAT_TEXT_V1	1U
+#define WINDOW_XKB_KEYMAP_OFFSET		8U
 
 static void window_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version);
 static void window_global_remove(void *data, struct wl_registry *registry, uint32_t name);
@@ -134,6 +155,15 @@ static void window_traced(void *data, struct wl_callback *callback, uint32_t tim
 static void window_scale_preferred(void *data, struct wp_fractional_scale_v1 *fractional, uint32_t scale);
 static int window_scale_resize(struct kl_window *window);
 static void window_viewport_send(struct kl_window *window);
+static void window_decoration_configure(void *data, struct zxdg_toplevel_decoration_v1 *decoration, uint32_t mode);
+static void window_decoration_attach(struct kl_window *window);
+static void window_decoration_manager_destroy(struct zxdg_decoration_manager_v1 *manager);
+static struct zxdg_toplevel_decoration_v1 *window_decoration_manager_get(struct zxdg_decoration_manager_v1 *manager, struct xdg_toplevel *toplevel);
+static void window_toplevel_decoration_destroy(struct zxdg_toplevel_decoration_v1 *decoration);
+static void window_toplevel_decoration_set_mode(struct zxdg_toplevel_decoration_v1 *decoration, uint32_t mode);
+static int window_xkb_open(struct kl_window *window);
+static void window_xkb_close(struct kl_window *window);
+static void window_xkb_text(struct kl_window *window, uint32_t key, char *text, size_t size);
 
 /*
  * The globals a window on another's connection finds through a registry of
@@ -150,6 +180,81 @@ struct window_found {
 	uint32_t text_manager;
 	uint32_t viewporter;
 	uint32_t fractional_manager;
+	uint32_t decoration_manager;
+};
+
+/*
+ * Keymap compilation and translation state loaded dynamically from
+ * libxkbcommon.so.0 when the compositor sends an XKB keymap.
+ */
+struct keiui_xkb {
+	void *library;
+	struct xkb_context *(*context_new)(unsigned flags);
+	void (*context_unref)(struct xkb_context *context);
+	struct xkb_keymap *(*keymap_new_from_string)(struct xkb_context *context, const char *string, unsigned format, unsigned flags);
+	void (*keymap_unref)(struct xkb_keymap *keymap);
+	struct xkb_state *(*state_new)(struct xkb_keymap *keymap);
+	void (*state_unref)(struct xkb_state *state);
+	int (*state_update_mask)(struct xkb_state *state, uint32_t depressed_mods, uint32_t latched_mods, uint32_t locked_mods, uint32_t depressed_layout, uint32_t latched_layout, uint32_t locked_layout);
+	int (*state_key_get_utf8)(struct xkb_state *state, uint32_t key, char *buffer, size_t size);
+	struct xkb_context *context;
+	struct xkb_keymap *keymap;
+	struct xkb_state *state;
+};
+
+/*
+ * Listener table for zxdg_toplevel_decoration_v1.configure.
+ */
+struct window_decoration_listener {
+	void (*configure)(void *data, struct zxdg_toplevel_decoration_v1 *decoration, uint32_t mode);
+};
+
+/*
+ * Values referenced: wayland-protocols 1.44 unstable/xdg-decoration/xdg-decoration-unstable-v1.xml
+ * (interfaces zxdg_decoration_manager_v1 and zxdg_toplevel_decoration_v1,
+ * version 1, requests and events in wire opcode order).
+ */
+static const struct wl_interface window_toplevel_decoration_interface;
+
+static const struct wl_interface *window_decoration_uint_types[] = {
+	NULL,
+};
+
+static const struct wl_message window_toplevel_decoration_requests[] = {
+	{ "destroy", "", NULL },
+	{ "set_mode", "u", window_decoration_uint_types },
+	{ "unset_mode", "", NULL },
+};
+
+static const struct wl_message window_toplevel_decoration_events[] = {
+	{ "configure", "u", window_decoration_uint_types },
+};
+
+static const struct wl_interface window_toplevel_decoration_interface = {
+	"zxdg_toplevel_decoration_v1", 1,
+	3, window_toplevel_decoration_requests,
+	1, window_toplevel_decoration_events
+};
+
+static const struct wl_interface *window_decoration_get_types[] = {
+	&window_toplevel_decoration_interface,
+	&xdg_toplevel_interface,
+};
+
+static const struct wl_message window_decoration_manager_requests[] = {
+	{ "destroy", "", NULL },
+	{ "get_toplevel_decoration", "no", window_decoration_get_types },
+};
+
+static const struct wl_interface window_decoration_manager_interface = {
+	"zxdg_decoration_manager_v1", 1,
+	2, window_decoration_manager_requests,
+	0, NULL
+};
+
+/* The decoration mode acknowledgement. */
+static const struct window_decoration_listener decoration_listener = {
+	window_decoration_configure
 };
 
 /* The registry's callbacks of that search. */
@@ -339,6 +444,8 @@ kl_window_close(
 		wp_viewporter_destroy(window->viewporter);
 
 	/* The roles before the surface, the surface before the globals that made it. */
+	if (window->decoration != NULL)
+		window_toplevel_decoration_destroy(window->decoration);
 	if (window->toplevel != NULL)
 		xdg_toplevel_destroy(window->toplevel);
 	if (window->desktop != NULL)
@@ -347,6 +454,8 @@ kl_window_close(
 		xdg_surface_destroy(window->role);
 	if (window->surface != NULL)
 		wl_surface_destroy(window->surface);
+	if (window->decoration_manager != NULL)
+		window_decoration_manager_destroy(window->decoration_manager);
 	if (window->shell != NULL)
 		xdg_wm_base_destroy(window->shell);
 	if (window->shm != NULL)
@@ -355,6 +464,9 @@ kl_window_close(
 		wl_compositor_destroy(window->compositor);
 	if (window->registry != NULL)
 		wl_registry_destroy(window->registry);
+
+	/* Keymap translation state. */
+	window_xkb_close(window);
 
 	/* The owner's wake-up. */
 	if (window->notify_sync != NULL)
@@ -615,6 +727,7 @@ kl_window_repeat(
 			event->code = window->repeat_key;
 			event->pressed = 1;
 			event->repeated = 1;
+			window_xkb_text(window, window->repeat_key, event->text, sizeof(event->text));
 			keiui_edit_key(window, event);
 		}
 		window->repeat_at += window->repeat_interval;
@@ -1898,6 +2011,10 @@ window_setup_shared(
 		window->fractional_manager = wl_registry_bind(registry, found.fractional_manager, &wp_fractional_scale_manager_v1_interface, 1U);
 	}
 
+	/* The decoration manager, when the compositor offers server-side decorations. */
+	if (found.decoration_manager != 0U)
+		window->decoration_manager = wl_registry_bind(registry, found.decoration_manager, &window_decoration_manager_interface, 1U);
+
 	/* The search's objects go. */
 	wl_registry_destroy(registry);
 	wl_proxy_wrapper_destroy(wrapper);
@@ -1928,6 +2045,8 @@ window_setup_shared(
 		wl_proxy_set_queue((struct wl_proxy *)window->viewporter, NULL);
 	if (window->fractional_manager != NULL)
 		wl_proxy_set_queue((struct wl_proxy *)window->fractional_manager, NULL);
+	if (window->decoration_manager != NULL)
+		wl_proxy_set_queue((struct wl_proxy *)window->decoration_manager, NULL);
 
 	/* The search's queue is empty and goes. */
 	wl_event_queue_destroy(queue);
@@ -1963,6 +2082,7 @@ window_setup_shared(
 	if (parent != NULL)
 		xdg_toplevel_set_parent(window->toplevel, parent);
 	xdg_toplevel_set_min_size(window->toplevel, (int32_t)min_width, (int32_t)min_height);
+	window_decoration_attach(window);
 
 	/*
 	 * The library's own windows (a file chooser's, a media picker's) follow
@@ -2105,6 +2225,9 @@ window_surface(
 	if (options->fullscreen)
 		xdg_toplevel_set_fullscreen(window->toplevel, NULL);
 
+	/* Server-side window decorations when the compositor supports them. */
+	window_decoration_attach(window);
+
 	/* Succeeded. */
 	return 0;
 }
@@ -2166,6 +2289,13 @@ window_search(
 	match = strcmp(interface, "wp_fractional_scale_manager_v1");
 	if (match == 0 && found->fractional_manager == 0U) {
 		found->fractional_manager = name;
+		return;
+	}
+
+	/* The decoration manager, for server-side window frames. */
+	match = strcmp(interface, "zxdg_decoration_manager_v1");
+	if (match == 0 && found->decoration_manager == 0U) {
+		found->decoration_manager = name;
 		return;
 	}
 
@@ -2394,6 +2524,13 @@ window_global(
 	match = strcmp(interface, "wp_fractional_scale_manager_v1");
 	if (match == 0 && window->fractional_manager == NULL) {
 		window->fractional_manager = wl_registry_bind(registry, name, &wp_fractional_scale_manager_v1_interface, 1U);
+		return;
+	}
+
+	/* The decoration manager, for server-side window frames. */
+	match = strcmp(interface, "zxdg_decoration_manager_v1");
+	if (match == 0 && window->decoration_manager == NULL) {
+		window->decoration_manager = wl_registry_bind(registry, name, &window_decoration_manager_interface, 1U);
 		return;
 	}
 
@@ -2890,7 +3027,10 @@ window_pointer_axis_discrete(
 	(void)discrete;
 }
 
-/* Closes the keymap file: keys arrive as evdev codes and the library has its own layout (input.c). */
+/*
+ * Compiles the compositor's XKB keymap with libxkbcommon when available;
+ * otherwise closes the descriptor and falls back to the built-in US layout.
+ */
 static void
 window_keyboard_keymap(
 	void *data,
@@ -2899,13 +3039,56 @@ window_keyboard_keymap(
 	int32_t fd,
 	uint32_t size)
 {
-	/* The descriptor is the window's to close. */
-	(void)data;
+	struct kl_window *window;
+	void *mapped;
+	struct xkb_keymap *keymap;
+	struct xkb_state *state;
+
 	(void)keyboard;
-	(void)format;
-	(void)size;
-	if (fd >= 0)
+	window = data;
+	if (fd < 0)
+		return;
+
+	/* Only XKB v1 text keymaps are compiled; any other format is closed. */
+	if (format != WL_KEYBOARD_KEYMAP_FORMAT_XKB_V1 || size == 0U) {
 		(void)close(fd);
+		return;
+	}
+
+	/* Load libxkbcommon lazily; without it the built-in US layout remains active. */
+	if (window_xkb_open(window) != 0) {
+		(void)close(fd);
+		return;
+	}
+
+	/* Map the keymap descriptor read-only and compile it. */
+	mapped = mmap(NULL, (size_t)size, PROT_READ, MAP_PRIVATE, fd, 0);
+	(void)close(fd);
+	if (mapped == MAP_FAILED)
+		return;
+
+	keymap = window->xkb->keymap_new_from_string(
+		window->xkb->context,
+		(const char *)mapped,
+		WINDOW_XKB_KEYMAP_FORMAT_TEXT_V1,
+		0U);
+	(void)munmap(mapped, (size_t)size);
+	if (keymap == NULL)
+		return;
+
+	state = window->xkb->state_new(keymap);
+	if (state == NULL) {
+		window->xkb->keymap_unref(keymap);
+		return;
+	}
+
+	/* Replace any previous keymap and state atomically. */
+	if (window->xkb->state != NULL)
+		window->xkb->state_unref(window->xkb->state);
+	if (window->xkb->keymap != NULL)
+		window->xkb->keymap_unref(window->xkb->keymap);
+	window->xkb->keymap = keymap;
+	window->xkb->state = state;
 }
 
 /* Focus arrives: no key is held yet as far as the window is concerned, and the application hears of it. */
@@ -2992,8 +3175,10 @@ window_keyboard_key(
 	if (event != NULL) {
 		event->code = key;
 		event->pressed = 0;
-		if (state == WL_KEYBOARD_KEY_STATE_PRESSED)
+		if (state == WL_KEYBOARD_KEY_STATE_PRESSED) {
 			event->pressed = 1;
+			window_xkb_text(window, key, event->text, sizeof(event->text));
+		}
 		keiui_edit_key(window, event);
 	}
 
@@ -3012,7 +3197,7 @@ window_keyboard_key(
 	}
 }
 
-/* Keeps the modifiers held, in the window's own bits. */
+/* Keeps the modifiers held, in the window's own bits and XKB state. */
 static void
 window_keyboard_modifiers(
 	void *data,
@@ -3025,13 +3210,21 @@ window_keyboard_modifiers(
 {
 	struct kl_window *window;
 
-	/* Only the held modifiers count; the compositor latches and locks nothing. */
+	/* Update the XKB state when a keymap is active. */
 	(void)keyboard;
 	(void)serial;
-	(void)latched;
-	(void)locked;
-	(void)group;
 	window = data;
+	if (window->xkb != NULL && window->xkb->state != NULL) {
+		(void)window->xkb->state_update_mask(
+			window->xkb->state,
+			depressed,
+			latched,
+			locked,
+			0U,
+			0U,
+			group);
+	}
+
 	window->modifiers = 0U;
 	if ((depressed & WINDOW_WAYLAND_SHIFT) != 0U)
 		window->modifiers |= KL_MOD_SHIFT;
@@ -3808,4 +4001,218 @@ window_viewport_send(
 	wp_viewport_set_destination(window->viewport, (int32_t)window->width, (int32_t)window->height);
 	window->viewport_width = window->width;
 	window->viewport_height = window->height;
+}
+
+/* Accepts the compositor's decoration mode configure event. */
+static void
+window_decoration_configure(
+	void *data,
+	struct zxdg_toplevel_decoration_v1 *decoration,
+	uint32_t mode)
+{
+	(void)data;
+	(void)decoration;
+	(void)mode;
+}
+
+/* Requests server-side window decorations if the compositor offers the protocol. */
+static void
+window_decoration_attach(
+	struct kl_window *window)
+{
+	if (window->decoration_manager == NULL || window->toplevel == NULL)
+		return;
+	if (window->decoration != NULL)
+		return;
+
+	window->decoration = window_decoration_manager_get(window->decoration_manager, window->toplevel);
+	if (window->decoration == NULL)
+		return;
+
+	(void)wl_proxy_add_listener((struct wl_proxy *)window->decoration, (void (**)(void))&decoration_listener, window);
+	window_toplevel_decoration_set_mode(window->decoration, WINDOW_TOPLEVEL_DECORATION_SERVER_SIDE);
+}
+
+/* Destroys the xdg-decoration manager proxy. */
+static void
+window_decoration_manager_destroy(
+	struct zxdg_decoration_manager_v1 *manager)
+{
+	wl_proxy_marshal_array_flags(
+		(struct wl_proxy *)manager,
+		WINDOW_DECORATION_MANAGER_DESTROY,
+		NULL,
+		0U,
+		WL_MARSHAL_FLAG_DESTROY,
+		NULL);
+}
+
+/* Creates a toplevel decoration object for an xdg_toplevel. */
+static struct zxdg_toplevel_decoration_v1 *
+window_decoration_manager_get(
+	struct zxdg_decoration_manager_v1 *manager,
+	struct xdg_toplevel *toplevel)
+{
+	union wl_argument args[2];
+	struct wl_proxy *proxy;
+	uint32_t version;
+
+	args[0].o = NULL;
+	args[1].o = (struct wl_object *)toplevel;
+	version = wl_proxy_get_version((struct wl_proxy *)manager);
+	proxy = wl_proxy_marshal_array_flags(
+		(struct wl_proxy *)manager,
+		WINDOW_DECORATION_MANAGER_GET,
+		&window_toplevel_decoration_interface,
+		version,
+		0U,
+		args);
+	return (struct zxdg_toplevel_decoration_v1 *)proxy;
+}
+
+/* Destroys a toplevel decoration object. */
+static void
+window_toplevel_decoration_destroy(
+	struct zxdg_toplevel_decoration_v1 *decoration)
+{
+	wl_proxy_marshal_array_flags(
+		(struct wl_proxy *)decoration,
+		WINDOW_TOPLEVEL_DECORATION_DESTROY,
+		NULL,
+		0U,
+		WL_MARSHAL_FLAG_DESTROY,
+		NULL);
+}
+
+/* Sets the preferred decoration mode on a toplevel decoration object. */
+static void
+window_toplevel_decoration_set_mode(
+	struct zxdg_toplevel_decoration_v1 *decoration,
+	uint32_t mode)
+{
+	union wl_argument args[1];
+	uint32_t version;
+
+	args[0].u = mode;
+	version = wl_proxy_get_version((struct wl_proxy *)decoration);
+	(void)wl_proxy_marshal_array_flags(
+		(struct wl_proxy *)decoration,
+		WINDOW_TOPLEVEL_DECORATION_SET_MODE,
+		NULL,
+		version,
+		0U,
+		args);
+}
+
+/* Loads libxkbcommon.so.0 and initializes the window's XKB context; 0 on success. */
+static int
+window_xkb_open(
+	struct kl_window *window)
+{
+	struct keiui_xkb *xkb;
+	void *symbol;
+
+	if (window->xkb != NULL)
+		return 0;
+
+	/* Allocate and clear the XKB state container. */
+	xkb = calloc(1, sizeof(*xkb));
+	if (xkb == NULL)
+		return ENOMEM;
+
+	xkb->library = dlopen("libxkbcommon.so.0", RTLD_NOW | RTLD_LOCAL);
+	if (xkb->library == NULL) {
+		free(xkb);
+		return ENOENT;
+	}
+
+	/* Resolve every required libxkbcommon symbol. */
+	symbol = dlsym(xkb->library, "xkb_context_new");
+	memcpy(&xkb->context_new, &symbol, sizeof(symbol));
+	symbol = dlsym(xkb->library, "xkb_context_unref");
+	memcpy(&xkb->context_unref, &symbol, sizeof(symbol));
+	symbol = dlsym(xkb->library, "xkb_keymap_new_from_string");
+	memcpy(&xkb->keymap_new_from_string, &symbol, sizeof(symbol));
+	symbol = dlsym(xkb->library, "xkb_keymap_unref");
+	memcpy(&xkb->keymap_unref, &symbol, sizeof(symbol));
+	symbol = dlsym(xkb->library, "xkb_state_new");
+	memcpy(&xkb->state_new, &symbol, sizeof(symbol));
+	symbol = dlsym(xkb->library, "xkb_state_unref");
+	memcpy(&xkb->state_unref, &symbol, sizeof(symbol));
+	symbol = dlsym(xkb->library, "xkb_state_update_mask");
+	memcpy(&xkb->state_update_mask, &symbol, sizeof(symbol));
+	symbol = dlsym(xkb->library, "xkb_state_key_get_utf8");
+	memcpy(&xkb->state_key_get_utf8, &symbol, sizeof(symbol));
+
+	if (xkb->context_new == NULL ||
+	    xkb->context_unref == NULL ||
+	    xkb->keymap_new_from_string == NULL ||
+	    xkb->keymap_unref == NULL ||
+	    xkb->state_new == NULL ||
+	    xkb->state_unref == NULL ||
+	    xkb->state_update_mask == NULL ||
+	    xkb->state_key_get_utf8 == NULL) {
+		(void)dlclose(xkb->library);
+		free(xkb);
+		return ENOENT;
+	}
+
+	xkb->context = xkb->context_new(0U);
+	if (xkb->context == NULL) {
+		(void)dlclose(xkb->library);
+		free(xkb);
+		return ENOMEM;
+	}
+
+	window->xkb = xkb;
+	return 0;
+}
+
+/* Releases the window's XKB state, keymap, context and library handle. */
+static void
+window_xkb_close(
+	struct kl_window *window)
+{
+	struct keiui_xkb *xkb;
+
+	xkb = window->xkb;
+	if (xkb == NULL)
+		return;
+	window->xkb = NULL;
+
+	if (xkb->state != NULL)
+		xkb->state_unref(xkb->state);
+	if (xkb->keymap != NULL)
+		xkb->keymap_unref(xkb->keymap);
+	if (xkb->context != NULL)
+		xkb->context_unref(xkb->context);
+	if (xkb->library != NULL)
+		(void)dlclose(xkb->library);
+	free(xkb);
+}
+
+/* Translates an evdev keycode into UTF-8 using the active XKB state. */
+static void
+window_xkb_text(
+	struct kl_window *window,
+	uint32_t key,
+	char *text,
+	size_t size)
+{
+	int length;
+
+	if (size == 0U)
+		return;
+	text[0] = '\0';
+
+	if (window->xkb == NULL || window->xkb->state == NULL)
+		return;
+
+	length = window->xkb->state_key_get_utf8(
+		window->xkb->state,
+		key + WINDOW_XKB_KEYMAP_OFFSET,
+		text,
+		size);
+	if (length <= 0 || (size_t)length >= size)
+		text[0] = '\0';
 }
