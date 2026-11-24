@@ -1268,6 +1268,13 @@ event_loop(
 
 		/* Lets the OS populate its entries in this descriptor snapshot, and the watched descriptors after them. */
 		kwl_os_poll_fill(server, descriptors + first_os);
+		if (server->headless && server->rdp_fd >= 0 &&
+		    server->watched_count < KWL_WATCH_MAX) {
+			server->watched[server->watched_count].fd = server->rdp_fd;
+			server->watched[server->watched_count].events = POLLIN;
+			server->watched[server->watched_count].revents = 0;
+			server->watched_count++;
+		}
 		for (index = 0; index < server->watched_count; index++)
 			descriptors[first_watched + index] = server->watched[index];
 

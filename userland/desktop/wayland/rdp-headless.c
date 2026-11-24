@@ -457,6 +457,16 @@ kwl_rdp_encode_and_send(
 		return 0;
 	if (width != rdp->width || height != rdp->height)
 		return 0;
+	{
+		struct pollfd pfd;
+		pfd.fd = rdp->fd;
+		pfd.events = POLLOUT;
+		pfd.revents = 0;
+		if (poll(&pfd, 1, 0) == 0) {
+			rdp->force_key = 1U;
+			return 0;
+		}
+	}
 	vkResetFences(rdp->device, 1U, &rdp->copy_fence);
 	vkResetCommandBuffer(rdp->cmd_buf, 0U);
 	memset(&begin, 0, sizeof(begin));

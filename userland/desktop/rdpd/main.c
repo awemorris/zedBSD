@@ -336,16 +336,34 @@ handle_client(
 			break;
 		}
 
-		/* Reads and feeds incoming RDP/TLS bytes. */
+		/* Reads and feeds incoming RDP/TLS bytes (draining buffered TLS records). */
 		if ((pfds[0].revents & POLLIN) != 0) {
-			if (ctx.tls_active)
-				n = SSL_read(ctx.ssl, io_buf, sizeof(io_buf));
-			else
-				n = (int)recv(ctx.sock, io_buf, sizeof(io_buf), 0);
-			if (n <= 0)
-				break;
-			rc = rdp_server_feed(ctx.srv, io_buf, (size_t)n);
-			if (rc != 0)
+			for (;;) {
+				if (ctx.tls_active)
+					n = SSL_read(ctx.ssl, io_buf, sizeof(io_buf));
+				else
+					n = (int)recv(ctx.sock, io_buf, sizeof(io_buf), 0);
+				if (n <= 0) {
+					if (ctx.tls_active) {
+						int ssl_err = SSL_get_error(ctx.ssl, n);
+						if (ssl_err == SSL_ERROR_WANT_READ ||
+						    ssl_err == SSL_ERROR_WANT_WRITE)
+							break;
+					} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+						break;
+					}
+					ctx.running = 0;
+					break;
+				}
+				rc = rdp_server_feed(ctx.srv, io_buf, (size_t)n);
+				if (rc != 0) {
+					ctx.running = 0;
+					break;
+				}
+				if (!ctx.tls_active || SSL_pending(ctx.ssl) <= 0)
+					break;
+			}
+			if (!ctx.running)
 				break;
 		}
 
