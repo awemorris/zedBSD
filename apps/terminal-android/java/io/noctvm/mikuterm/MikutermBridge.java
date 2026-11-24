@@ -51,6 +51,17 @@ final class MikutermBridge {
 	/** The user asked to close every connection. */
 	static native void nativeStopAll();
 
+	/** Delivers SAF upload file virtual paths to the native thread. */
+	static native void nativeSftpUploadPicked(int viewNumber, String[] paths);
+
+	/** Delivers a persisted SAF download tree URI and virtual directory to the native thread. */
+	static native void nativeSftpDownloadDirPicked(int viewNumber, String treeUri, String virtualDir);
+
+	/** Returns the application context attached to the bridge. */
+	static Context getAppContext() {
+		return applicationContext;
+	}
+
 	/** Wraps a passphrase with the Keystore's key; the answer comes through nativeSecret. */
 	static void secretWrap(int request, byte[] plain) {
 		Secrets.wrap(request, plain);
@@ -71,6 +82,26 @@ final class MikutermBridge {
 				} catch (RuntimeException e) {
 					/* The service could not be updated; the native side does not wait. */
 				}
+			}
+		});
+	}
+
+	/** Launches the SAF document picker for uploading files to an SFTP tab. */
+	static void sftpPickUpload(final int viewNumber) {
+		MAIN.post(new Runnable() {
+			@Override
+			public void run() {
+				SftpStorage.launchUploadPicker(current.get(), viewNumber);
+			}
+		});
+	}
+
+	/** Launches the SAF folder picker for changing the SFTP download directory. */
+	static void sftpPickDownloadDir(final int viewNumber) {
+		MAIN.post(new Runnable() {
+			@Override
+			public void run() {
+				SftpStorage.launchDownloadDirPicker(current.get(), viewNumber);
 			}
 		});
 	}

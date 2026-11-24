@@ -21,6 +21,10 @@
 #include "apps/terminal-android/jni/mikuterm-android.h"
 
 #include "mikuterm.h"
+#include "session.h"
+#include "sftp-link.h"
+#include "sftp-view.h"
+#include "sftp-worker.h"
 #include "x11-thread.h"
 
 #include "userland/desktop/terminal/run.h"
@@ -104,6 +108,13 @@ static void main_connector_init(struct mikuterm_connector *connector, const stru
 #endif
 static void main_forget_passphrases(void *data);
 static void main_ended(void *data, const struct terminal_run_result *result);
+static int main_can_open_sftp(void *data, const struct terminal_connection *connection);
+static int main_open_sftp(void *data, struct terminal_connection *connection);
+static void main_sftp_on_upload(void *data, struct sftp_view *view);
+static void main_sftp_on_change_download_dir(void *data, struct sftp_view *view);
+static struct sftp_view *main_find_sftp_view(uint32_t view_number);
+static void main_load_sftp_download_uri(void);
+static void main_save_sftp_download_uri(const char *uri);
 static int main_connector_open(void *data, struct kl_app *app, uint32_t id, unsigned columns, unsigned rows, unsigned width, unsigned height, char *title, size_t size, struct terminal_connection **connection);
 static size_t main_session_read(struct terminal_connection *connection, unsigned char *buffer, size_t size);
 static int main_session_write(struct terminal_connection *connection, const unsigned char *bytes, size_t size, size_t *written);
@@ -160,6 +171,7 @@ mikuterm_android_main(void)
 	/* The user's settings, and the View menu's kept over them. */
 	main_read_conf(&main_state.conf);
 	mikuterm_settings_defaults(&main_state.conf);
+	main_load_sftp_download_uri();
 
 	/* The fonts: the user's choice or the program's own, and the companion the program's. */
 	error = mikuterm_font(main_state.font, sizeof(main_state.font), main_state.conf.font);
@@ -223,6 +235,9 @@ mikuterm_android_main(void)
 	run.token = "mikuterm";
 	run.about = MAIN_ABOUT;
 	run.input_method_menu = 0;
+	run.open_sftp_menu = 1;
+	run.can_open_sftp = main_can_open_sftp;
+	run.open_sftp = main_open_sftp;
 	run.ambiguous_wide_key = 0;
 	run.fullscreen_alt_enter = 0;
 	run.forget_passphrases = main_forget_passphrases;
@@ -303,6 +318,48 @@ mikuterm_android_post(
 		if (main_app != NULL)
 			(void)kl_app_post(main_app, 0U, NULL);
 		return 1;
+	case MIKUTERM_POST_SFTP_UPLOAD: {
+		struct mikuterm_post_sftp_upload *up = data;
+		struct sftp_view *view;
+		size_t i;
+
+		if (up != NULL) {
+			view = main_find_sftp_view(up->view_number);
+			if (view != NULL && view->worker != NULL) {
+				for (i = 0U; i < up->count; i++)
+					(void)sftp_worker_enqueue_upload(view->worker, up->paths[i], view->current_path, 0, NULL);
+				view->dirty = 1;
+				if (main_app != NULL)
+					(void)kl_app_post(main_app, 0U, NULL);
+			}
+			for (i = 0U; i < up->count; i++)
+				free(up->paths[i]);
+			free(up->paths);
+			free(up);
+		}
+		return 1;
+	}
+	case MIKUTERM_POST_SFTP_DOWNLOAD_DIR: {
+		struct mikuterm_post_sftp_dir *dir = data;
+		struct sftp_view *view;
+
+		if (dir != NULL) {
+			if (dir->tree_uri != NULL) {
+				sftp_local_android_set_download_uri(dir->tree_uri);
+				main_save_sftp_download_uri(dir->tree_uri);
+			}
+			view = main_find_sftp_view(dir->view_number);
+			if (view != NULL) {
+				view->dirty = 1;
+				if (main_app != NULL)
+					(void)kl_app_post(main_app, 0U, NULL);
+			}
+			free(dir->tree_uri);
+			free(dir->virtual_dir);
+			free(dir);
+		}
+		return 1;
+	}
 	default:
 		break;
 	}
@@ -442,6 +499,204 @@ main_forget_passphrases(
 
 	/* Every passphrase kept goes. */
 	(void)mikuterm_passphrases_forget_all();
+}
+
+/* Unwraps a main_session connection to its inner mikuterm_session connection. */
+static struct terminal_connection *
+main_unwrap_connection(
+	const struct terminal_connection *connection)
+{
+	if (connection != NULL && connection->ops == &main_session_ops)
+		return ((const struct main_session *)connection)->inner;
+	return (struct terminal_connection *)(uintptr_t)connection;
+}
+
+/* Reports whether Shell > Open SFTP is available for connection. */
+static int
+main_can_open_sftp(
+	void *data,
+	const struct terminal_connection *connection)
+{
+	(void)data;
+	return mikuterm_session_can_open_sftp(main_unwrap_connection(connection));
+}
+
+/* Opens an SFTP browser tab on the active SSH connection. */
+static int
+main_open_sftp(
+	void *data,
+	struct terminal_connection *connection)
+{
+	struct main_state *st;
+	struct terminal_connection *inner;
+	struct mikuterm_session *session;
+	struct sftp_link *link;
+	struct terminal_connection *view_conn;
+	struct sftp_view *view;
+	char host[MIKUTERM_HOST_MAX];
+	int error;
+
+	st = data;
+	inner = main_unwrap_connection(connection);
+	if (!mikuterm_session_can_open_sftp(inner))
+		return 0;
+	session = (struct mikuterm_session *)inner;
+
+	error = sftp_link_create(session->waker, &link);
+	if (error != 0)
+		return 0;
+
+	mikuterm_session_host(inner, host, sizeof(host));
+	view_conn = NULL;
+	error = sftp_view_create(
+		session->app,
+		session,
+		link,
+		host,
+		st->conf.sftp_preserve_times,
+		st->conf.sftp_show_hidden,
+		st->page_font,
+		st->page_fallback,
+		&view_conn);
+	if (error != 0) {
+		sftp_link_release(link);
+		return 0;
+	}
+
+	view = (struct sftp_view *)view_conn;
+	view->on_upload = main_sftp_on_upload;
+	view->on_change_download_dir = main_sftp_on_change_download_dir;
+	view->platform_data = view;
+
+	error = mikuterm_session_open_sftp(inner, view_conn, link);
+	sftp_link_release(link);
+	if (error != 0) {
+		view_conn->ops->close(view_conn);
+		return 0;
+	}
+	return 0;
+}
+
+static void
+main_sftp_on_upload(
+	void *data,
+	struct sftp_view *view)
+{
+	(void)data;
+	if (view != NULL)
+		(void)mikuterm_java_sftp_pick_upload(view->number);
+}
+
+static void
+main_sftp_on_change_download_dir(
+	void *data,
+	struct sftp_view *view)
+{
+	(void)data;
+	if (view != NULL)
+		(void)mikuterm_java_sftp_pick_download_dir(view->number);
+}
+
+static struct sftp_view *
+main_find_sftp_view(
+	uint32_t view_number)
+{
+	struct main_session *s;
+	struct terminal_connection *vc;
+	struct sftp_view *v;
+
+	for (s = main_sessions; s != NULL; s = s->next) {
+		if (s->inner == NULL)
+			continue;
+		vc = mikuterm_session_sftp_view(s->inner);
+		if (vc != NULL) {
+			v = (struct sftp_view *)vc;
+			if (v->number == view_number)
+				return v;
+		}
+	}
+	return NULL;
+}
+
+static void
+main_load_sftp_download_uri(void)
+{
+	char path[MIKUTERM_PATH_MAX];
+	char *text;
+	size_t text_size;
+	const char *p;
+	const char *end;
+	const char *eol;
+	size_t klen;
+	size_t vlen;
+	char uri[MIKUTERM_PATH_MAX];
+	int error;
+
+	error = mikuterm_path(path, sizeof(path), "config/state.conf");
+	if (error != 0)
+		return;
+	text = NULL;
+	text_size = 0U;
+	if (mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &text_size) != 0 || text == NULL)
+		return;
+
+	p = text;
+	end = text + text_size;
+	klen = strlen("SftpDownloadUri=");
+	while (p < end) {
+		eol = memchr(p, '\n', (size_t)(end - p));
+		if (eol == NULL)
+			eol = end;
+		if ((size_t)(eol - p) > klen && strncmp(p, "SftpDownloadUri=", klen) == 0) {
+			vlen = (size_t)(eol - (p + klen));
+			if (vlen > 0U && p[klen + vlen - 1U] == '\r')
+				vlen--;
+			if (vlen < sizeof(uri)) {
+				memcpy(uri, p + klen, vlen);
+				uri[vlen] = '\0';
+				sftp_local_android_set_download_uri(uri);
+			}
+		}
+		p = (eol < end) ? eol + 1 : end;
+	}
+	free(text);
+}
+
+static void
+main_save_sftp_download_uri(
+	const char *uri)
+{
+	char path[MIKUTERM_PATH_MAX];
+	char *text;
+	char *made;
+	size_t text_size;
+	size_t made_size;
+	int error;
+
+	if (uri == NULL)
+		return;
+	if (mikuterm_path(path, sizeof(path), "config/state.conf") != 0)
+		return;
+	text = NULL;
+	text_size = 0U;
+	error = mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &text_size);
+	if (error != 0 && error != ENOENT)
+		return;
+	error = mikuterm_conf_set(text != NULL ? text : "", text_size, "SftpDownloadUri", uri, &made, &made_size);
+	free(text);
+	if (error == 0) {
+		(void)mikuterm_file_replace(path, made, made_size);
+		free(made);
+	}
+}
+
+/* Android closes SFTP tabs without blocking the native thread on a synchronous dialog. */
+int
+sftp_view_platform_confirm_close(
+	size_t active_transfers)
+{
+	(void)active_transfers;
+	return 1;
 }
 
 /*

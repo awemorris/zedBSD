@@ -41,6 +41,14 @@ public class MikutermActivity extends KeilandActivity {
 	}
 
 	@Override
+	protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+		if (SftpStorage.onActivityResult(this, requestCode, resultCode, data)) {
+			return;
+		}
+		super.onActivityResult(requestCode, resultCode, data);
+	}
+
+	@Override
 	protected void onDestroy() {
 		MikutermBridge.detach(this);
 		super.onDestroy();
