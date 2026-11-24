@@ -231,22 +231,6 @@ static const struct kl_file_filter main_filters[] = {
 	{ "All Files", NULL }
 };
 
-static size_t main_units_position(void *data, double x, double y);
-static void main_units_caret(void *data, size_t position, struct kl_rect *rect);
-static void main_units_word(void *data, size_t position, size_t *start, size_t *end);
-
-/*
- * The text's answers to the fingers' selection in the canvas's units (the
- * editor's own answers are in the window's pixels), for drawing the
- * handles on the canvas at the window's scale.  The table is constant for
- * the program's life.
- */
-static const struct kl_text_view main_units_view = {
-	main_units_position,
-	main_units_caret,
-	main_units_word
-};
-
 static int main_parse(int argc, char **argv, struct main_options *options);
 static const char *main_value(const char *argument, const char *name);
 static int main_number(const char *text, unsigned maximum, unsigned *value);
@@ -395,6 +379,8 @@ main(
 	main_input = kl_ui_create();
 	if (main_input == NULL)
 		te_log("TOUCH failed errno=%d", ENOMEM);
+	else
+		kl_ui_set_scale(main_input, main_app.scale);
 
 	/* The dialogs' input, in units at the window's scale; without memory for it the dialogs take no input. */
 	main_panel_input = kl_ui_create();
@@ -2138,6 +2124,8 @@ main_rescale(
 	/* The widgets' canvas and input at the scale. */
 	if (main_handles_made)
 		kl_canvas_set_scale(&main_handles, main_app.scale);
+	if (main_input != NULL)
+		kl_ui_set_scale(main_input, main_app.scale);
 	if (main_panel_input != NULL)
 		kl_ui_set_scale(main_panel_input, main_app.scale);
 
@@ -2199,18 +2187,28 @@ main_touch(
 /*
  * Draws the fingers' handles over the text on the canvas at the window's
  * scale, within the text and a knob's size around it: the editor's
- * answers, which are in the window's pixels, are turned into the canvas's
- * units.
+ * caret rectangles (in window pixels) are placed in the canvas's units
+ * without integer rounding so each handle stem aligns with its caret.
  */
 static void
 main_handles_draw(void)
 {
-	struct kl_text_touch drawn;
+	struct kl_rect caret;
 	struct kl_rect clip;
 	struct te_rect text;
+	const struct kl_theme *theme;
+	size_t ends[2];
 	double factor;
 	double origin_x;
 	double origin_y;
+	float x;
+	float top;
+	float bottom;
+	int index;
+
+	/* Handles only for a selection, not a caret. */
+	if (!main_app.touch.handles || main_app.touch.anchor == main_app.touch.caret)
+		return;
 
 	/* The text in the canvas's units, and a knob's size around it. */
 	te_app_text_rect(&main_app, &text);
@@ -2219,64 +2217,25 @@ main_handles_draw(void)
 	clip.width += 2 * KL_TEXT_HANDLE;
 	clip.height += KL_TEXT_HANDLE;
 
-	/* The text's scrolled origin in units. */
-	factor = (double)KL_SCALE_BASE / (double)main_app.scale;
-	origin_x = ((double)text.x - main_app.scroll_x) * factor;
-	origin_y = ((double)text.y - main_app.scroll_y) * factor;
-
-	/* The fingers' selection as it is, answered in units. */
-	drawn = main_app.touch;
-	drawn.view = &main_units_view;
-	drawn.data = &main_app;
-
-	/* The handles, within the clip. */
-	kl_canvas_clip_push(&main_handles, &clip);
-	kl_text_touch_draw_handles(&drawn, &main_handles, origin_x, origin_y, kl_theme_default());
-	kl_canvas_clip_pop(&main_handles);
-}
-
-/* The handles' answer: the text position nearest a point in the content's units. */
-static size_t
-main_units_position(
-	void *data,
-	double x,
-	double y)
-{
-	double factor;
-	size_t position;
-
-	/* The point in the window's pixels, where the editor answers. */
+	/* The text's scrolled origin in units, and the scale factor from units to pixels. */
 	factor = (double)main_app.scale / (double)KL_SCALE_BASE;
-	position = main_app.touch.view->position_at(data, x * factor, y * factor);
+	origin_x = ((double)text.x - main_app.scroll_x) / factor;
+	origin_y = ((double)text.y - main_app.scroll_y) / factor;
 
-	/* Reports the position. */
-	return position;
-}
-
-/* The handles' answer: the caret's rectangle at a position, in the content's units (the smallest that covers its pixels). */
-static void
-main_units_caret(
-	void *data,
-	size_t position,
-	struct kl_rect *rect)
-{
-	struct kl_rect pixels;
-
-	/* The editor's caret in the window's pixels, then in units. */
-	main_app.touch.view->caret_rect(data, position, &pixels);
-	kl_canvas_logical(&main_handles, &pixels, rect);
-}
-
-/* The handles' answer: the word around a position (positions are the same in pixels and units). */
-static void
-main_units_word(
-	void *data,
-	size_t position,
-	size_t *start,
-	size_t *end)
-{
-	/* The editor's word. */
-	main_app.touch.view->word_at(data, position, start, end);
+	/* Each end's stem and knob, within the clip. */
+	theme = kl_theme_default();
+	ends[0] = main_app.touch.anchor;
+	ends[1] = main_app.touch.caret;
+	kl_canvas_clip_push(&main_handles, &clip);
+	for (index = 0; index < 2; index++) {
+		main_app.touch.view->caret_rect(&main_app, ends[index], &caret);
+		x = (float)(origin_x + (double)caret.x / factor);
+		top = (float)(origin_y + (double)caret.y / factor);
+		bottom = top + (float)((double)caret.height / factor);
+		kl_canvas_line(&main_handles, x, top, x, bottom, 2.0f, theme->accent);
+		kl_canvas_circle(&main_handles, x, bottom + (float)KL_TEXT_HANDLE / 2.0f, (float)KL_TEXT_HANDLE / 2.0f, theme->accent);
+	}
+	kl_canvas_clip_pop(&main_handles);
 }
 
 /* Gives a rectangle of the window's pixels in the canvas's units (the smallest that covers it). */

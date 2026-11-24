@@ -366,6 +366,15 @@ void keiui_ui_inset_note(uint32_t width, uint32_t height, int right, int bottom,
 /* Begins a finger's drag of a named end's handle (text-touch.c; KL_TEXT_HANDLE_ANCHOR or _CARET), at a point of the view's content. */
 void keiui_text_touch_hold(struct kl_text_touch *touch, int end, double x, double y);
 
+/* Begins a touch drag on a text view whose coordinates and constants are at the given scale (in 96ths). */
+void keiui_text_touch_drag_begin(struct kl_text_touch *touch, double x, double y, unsigned scale);
+
+/* Computes self-scroll speed near a text view's edges at the given scale (in 96ths). */
+int keiui_text_touch_edge(const struct kl_text_touch *touch, const struct kl_scroll *scroll, double *vx, double *vy, unsigned scale);
+
+/* Marks that kl_ui_window_input scaled input into logical units on this UI state. */
+void keiui_ui_mark_window_input(struct kl_ui *ui);
+
 /* Reports the time of the frame being drawn (ui.c, the time kl_ui_begin was given). */
 uint64_t keiui_ui_now(const struct kl_ui *ui);
 

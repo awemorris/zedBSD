@@ -447,6 +447,7 @@ kl_ui_window_input(
 	double factor;
 
 	/* The input in units: its place and the wheel's distances over the window's scale (the same at 100 %). */
+	keiui_ui_mark_window_input(ui);
 	event = pixels;
 	scale = keiui_ui_scale(ui);
 	if (scale != KL_SCALE_BASE) {
