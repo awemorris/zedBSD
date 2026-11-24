@@ -12,6 +12,7 @@
 #ifndef KERN_KERN_PROCESS_H
 #define KERN_KERN_PROCESS_H
 
+#include <uapi/limits.h>
 #include <uapi/types.h>
 #include <stdint.h>
 #include <uapi/signal.h>
@@ -154,6 +155,8 @@ struct process {
 	char command_initial[64];
 	/* The command line exec gave, argv joined by spaces and cut to fit (BUG-274). */
 	char arguments[256];
+	/* The executable path recorded at exec, or empty when unavailable. */
+	char exec_path[PATH_MAX];
 
 	/*
 	 * Tracing.

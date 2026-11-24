@@ -108,6 +108,7 @@ static int exec_thread_retired(const struct thread *thread);
 static int exec_sandbox_start(struct process *parent, struct sandbox_spawn_plan *plan, struct exec_sandbox_build *build);
 static void exec_sandbox_limit(struct rlimit_record *record, uint64_t requested);
 static void exec_set_arguments(struct process *process, char *const argv[]);
+static void exec_record_path(struct process *process, const char *path);
 
 /*
  * Parses a #! line at the start of a file.
@@ -692,6 +693,7 @@ process_spawn_from(
 	kern_strncpy(process->command, argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
 	exec_set_arguments(process, argv);
+	exec_record_path(process, path);
 
 	/* Kept apart so that setproctitle can put the original back. */
 	kern_memcpy(process->command_initial, process->command,
@@ -890,6 +892,7 @@ exec_sandbox_start(
 	kern_strncpy(process->command, plan->argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
 	exec_set_arguments(process, plan->argv);
+	exec_record_path(process, plan->argv[0]);
 	kern_memcpy(process->command_initial, process->command, sizeof(process->command_initial));
 	error = thread_create(process, image.entry, sp, &thread);
 	if (error != 0)
@@ -1718,6 +1721,7 @@ process_exec_file(
 	kern_strncpy(process->command, argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
 	exec_set_arguments(process, argv);
+	exec_record_path(process, path);
 
 	/* Kept apart so that setproctitle can put the original back. */
 	kern_memcpy(process->command_initial, process->command,
@@ -1859,4 +1863,59 @@ exec_set_arguments(
 
 	/* Succeeded: the line ends where it was cut. */
 	process->arguments[used] = '\0';
+}
+
+/* Records the executed path as an absolute path when possible. */
+static void
+exec_record_path(
+	struct process *process,
+	const char *path)
+{
+	char cwd[PATH_MAX];
+	size_t cwd_len;
+	size_t path_len;
+	size_t used;
+	size_t room;
+
+	/* Clears the path when none was given. */
+	if (process == NULL || path == NULL || path[0] == '\0') {
+		if (process != NULL)
+			process->exec_path[0] = '\0';
+		return;
+	}
+
+	/* Keeps an absolute path directly, truncated to fit PATH_MAX. */
+	room = sizeof(process->exec_path) - 1U;
+	if (path[0] == '/') {
+		path_len = kern_strlen(path);
+		if (path_len > room)
+			path_len = room;
+		kern_memcpy(process->exec_path, path, path_len);
+		process->exec_path[path_len] = '\0';
+		return;
+	}
+
+	/* Prepends the working directory for a relative path when available. */
+	if (process->cwdi != NULL && fs_getcwd(process->cwdi, cwd, sizeof(cwd)) == 0) {
+		cwd_len = kern_strlen(cwd);
+		used = cwd_len;
+		if (used > room)
+			used = room;
+		kern_memcpy(process->exec_path, cwd, used);
+		if (used < room && (used == 0 || process->exec_path[used - 1U] != '/'))
+			process->exec_path[used++] = '/';
+		path_len = kern_strlen(path);
+		if (path_len > room - used)
+			path_len = room - used;
+		kern_memcpy(process->exec_path + used, path, path_len);
+		process->exec_path[used + path_len] = '\0';
+		return;
+	}
+
+	/* Falls back to the path as given when cwd cannot be resolved. */
+	path_len = kern_strlen(path);
+	if (path_len > room)
+		path_len = room;
+	kern_memcpy(process->exec_path, path, path_len);
+	process->exec_path[path_len] = '\0';
 }

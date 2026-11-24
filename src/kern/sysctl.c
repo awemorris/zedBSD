@@ -28,6 +28,9 @@
 #include "kern/clock.h"
 #include "kern/net/tcp-socket.h"
 #include "kern/desktop-balancer.h"
+#include "kern/process.h"
+#include "kern/thread.h"
+#include "kern/vmspace.h"
 #include <kern/kcrt.h>
 
 #include <uapi/errno.h>
@@ -521,6 +524,37 @@ kern_sysctl(
 		}
 		selector = kern_boot_source_selector(name[1] == KERN_BOOT_CONFIGURATION);
 		return sysctl_output(oldp, oldlenp, selector, kern_strlen(selector) + 1);
+	}
+
+	/* Reports the current process's executable path or initial stack bounds. */
+	if (namelen == 4 && name[0] == CTL_KERN && name[1] == KERN_PROC &&
+	    (name[2] == KERN_PROC_PATHNAME || name[2] == KERN_PROC_STACK)) {
+		struct process *process;
+		struct kern_proc_stack stack_info;
+
+		if (newp != NULL || newlen != 0)
+			return EPERM;
+		process = (curthread != NULL) ? curthread->proc : NULL;
+		if (process == NULL)
+			return EINVAL;
+		if ((int)name[3] != -1 && (pid_t)name[3] != process->pid)
+			return ESRCH;
+		if (name[2] == KERN_PROC_PATHNAME) {
+			if (process->exec_path[0] == '\0')
+				return ENOENT;
+			return sysctl_output(oldp, oldlenp, process->exec_path,
+			    kern_strlen(process->exec_path) + 1U);
+		}
+		if (process->vmspace == NULL ||
+		    process->vmspace->stack_top <= process->vmspace->stack_bottom)
+			return ENOENT;
+		mutex_lock(&process->vmspace->lock);
+		stack_info.stack_bottom = (uint64_t)process->vmspace->stack_bottom;
+		stack_info.stack_top = (uint64_t)process->vmspace->stack_top;
+		stack_info.guard_size =
+		    (uint64_t)(process->vmspace->stack_bottom - process->vmspace->stack_guard_bottom);
+		mutex_unlock(&process->vmspace->lock);
+		return sysctl_output(oldp, oldlenp, &stack_info, sizeof(stack_info));
 	}
 
 	/* Handles the kernel leaves. */

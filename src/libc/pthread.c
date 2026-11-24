@@ -21,6 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/sysctl.h>
 #include <time.h>
 #include <threads.h>
 
@@ -41,6 +42,10 @@ struct pthread_tcb {
 	pthread_t tid;
 	void *stack;
 	size_t stack_size;
+	void *usable_stack;
+	size_t usable_stack_size;
+	size_t guard_size;
+	struct sched_param schedparam;
 	void *(*start)(void *);
 	void *argument;
 	const void *keys[KEY_MAX];
@@ -471,6 +476,11 @@ pthread_create(
 	memset(tcb, 0, sizeof(*tcb));
 	tcb->stack = stack;
 	tcb->stack_size = mapping_size;
+	tcb->usable_stack = usable_stack;
+	tcb->usable_stack_size = size;
+	tcb->guard_size = guard;
+	if (attributes != NULL)
+		tcb->schedparam = attributes->schedparam;
 	tcb->owns_stack = (unsigned)owns_stack;
 	tcb->start = start;
 	tcb->argument = argument;
@@ -936,6 +946,90 @@ pthread_getname_np(
 
 	/* Succeeded: the name is in the buffer. */
 	return 0;
+}
+
+/*
+ * Fills a thread attributes structure with the attributes of an existing
+ * thread (GNU pthread_getattr_np).
+ */
+int
+pthread_getattr_np(
+	pthread_t thread,
+	pthread_attr_t *attr)
+{
+	struct pthread_tcb *tcb;
+	struct kern_proc_stack stack_info;
+	int mib[4];
+	size_t info_len;
+	int is_main;
+	int error;
+
+	/* An attributes object has to be given. */
+	if (attr == NULL)
+		return EINVAL;
+
+	/* Looks up the thread under the registry lock. */
+	ensure_main();
+	error = ESRCH;
+	is_main = 0;
+	word_lock(&registry_lock);
+
+	tcb = registry_find_locked(thread);
+	if (tcb != NULL) {
+		pthread_attr_init(attr);
+		attr->detachstate = tcb->detached ?
+		    PTHREAD_CREATE_DETACHED : PTHREAD_CREATE_JOINABLE;
+		attr->schedparam = tcb->schedparam;
+		if (tcb == &main_tcb) {
+			is_main = 1;
+			error = 0;
+		} else {
+			attr->stackaddr = tcb->usable_stack;
+			attr->stacksize = tcb->usable_stack_size;
+			attr->guardsize = tcb->guard_size;
+			attr->stackset = 1;
+			error = 0;
+		}
+	}
+
+	word_unlock(&registry_lock);
+
+	if (error != 0)
+		return error;
+
+	/* Queries the kernel for the initial thread's stack bounds. */
+	if (is_main) {
+		mib[0] = CTL_KERN;
+		mib[1] = KERN_PROC;
+		mib[2] = KERN_PROC_STACK;
+		mib[3] = -1;
+		info_len = sizeof(stack_info);
+		if (sysctl(mib, 4U, &stack_info, &info_len, NULL, 0U) != 0)
+			return errno;
+		if (info_len != sizeof(stack_info) ||
+		    stack_info.stack_top <= stack_info.stack_bottom)
+			return ENOENT;
+		attr->stackaddr = (void *)(uintptr_t)stack_info.stack_bottom;
+		attr->stacksize = (size_t)(stack_info.stack_top - stack_info.stack_bottom);
+		attr->guardsize = (size_t)stack_info.guard_size;
+		attr->stackset = 1;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Fills an initialized thread attributes structure with the attributes of an
+ * existing thread (BSD pthread_attr_get_np).
+ */
+int
+pthread_attr_get_np(
+	pthread_t thread,
+	pthread_attr_t *attr)
+{
+	/* Delegates to pthread_getattr_np, which populates every field. */
+	return pthread_getattr_np(thread, attr);
 }
 
 /*

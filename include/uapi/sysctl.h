@@ -517,6 +517,24 @@ struct memory_stats {
  * struct_size: a later version only adds fields at the end.
  */
 #define KERN_DESKTOP_BALANCER 11
+/*
+ * kern.proc: per-process information indexed by pid (-1 for the caller).
+ * KERN_PROC_PATHNAME reports the executable's path; KERN_PROC_STACK reports
+ * the initial thread's stack range as a struct kern_proc_stack.
+ */
+#define KERN_PROC		12
+#define KERN_PROC_PATHNAME	12
+#define KERN_PROC_STACK		13
+
+/* The initial thread's stack bounds reported by KERN_PROC_STACK. */
+struct kern_proc_stack {
+	uint64_t stack_bottom;
+	uint64_t stack_top;
+	uint64_t guard_size;
+};
+
+_Static_assert(sizeof(struct kern_proc_stack) == 24U,
+    "kern.proc.stack ABI must be identical on ILP32 and LP64");
 
 /* The version of the kern.desktop_balancer layout. */
 #define KERN_DESKTOP_BALANCER_VERSION		1U
