@@ -433,6 +433,22 @@
  #else
  # define V8_TARGET_OS_STRING "unknown"
  #endif
+--- a/v8/src/base/debug/stack_trace_posix.cc
++++ b/v8/src/base/debug/stack_trace_posix.cc
+@@ -273,8 +273,13 @@
+   }
+   if (signal == SIGBUS || signal == SIGFPE || signal == SIGILL ||
+       signal == SIGSEGV) {
++#if V8_OS_ZEDBSD
++    internal::itoa_r(static_cast<intptr_t>(info->si_addr), buf, sizeof(buf),
++                     16, 12);
++#else
+     internal::itoa_r(reinterpret_cast<intptr_t>(info->si_addr), buf,
+                      sizeof(buf), 16, 12);
++#endif
+     PrintToStderr(buf);
+   }
+   PrintToStderr("\n");
 --- a/v8/src/base/platform/platform-posix.cc
 +++ b/v8/src/base/platform/platform-posix.cc
 @@ -73,7 +73,7 @@
