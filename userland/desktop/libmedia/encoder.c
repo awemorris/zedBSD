@@ -105,6 +105,7 @@ struct encoder_hvcc_sps {
  * before the NULL.
  */
 static const struct media_encoder_ops *const encoder_backends[] = {
+	&media_h264sw_encoder_ops,
 	NULL,
 };
 

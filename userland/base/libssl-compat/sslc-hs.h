@@ -197,6 +197,11 @@ struct sslc_hs_config {
 	void *callback_context;
 	cryc_random_fn random;
 	void *random_context;
+	int server;
+	const uint8_t *cert_der;
+	size_t cert_der_len;
+	const uint8_t *ec_priv;
+	size_t ec_priv_len;
 };
 
 /* The states (Appendix A.1 for TLS 1.3; RFC 5246 7.3's flow for TLS 1.2). */
@@ -291,6 +296,8 @@ struct sslc_hs {
  * range).  On an error the state is SSLC_HS_FAILED.
  */
 int sslc_hs_start(struct sslc_hs *hs, const struct sslc_hs_config *config, struct sslc_hs_actions *actions);
+int sslc_srv_hs_message(struct sslc_hs *hs, const struct sslc_hs_config *config, uint8_t type, const uint8_t *message, size_t size, struct sslc_hs_actions *actions);
+int sslc_srv_generate_self_signed(const char *cn, cryc_random_fn rnd, void *rnd_ctx, uint8_t **out_cert_der, size_t *out_cert_len, uint8_t **out_priv32);
 
 /*
  * Takes one whole handshake message (header and body, at most

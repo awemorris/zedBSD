@@ -24,6 +24,7 @@
 #include "subsurface.h"
 #include "extras.h"
 #include "ime.h"
+#include "rdp-headless.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -158,6 +159,7 @@ kwl_compose_open(
 	compose = calloc(1, sizeof(*compose));
 	if (compose == NULL)
 		return ENOMEM;
+	compose->headless = server->headless;
 	server->compose = compose;
 
 	/* The queue's lock, before any thread can use the queue. */
@@ -261,6 +263,19 @@ kwl_compose_open(
 
 	/* How long the render thread took to start. */
 	printf("KWL STARTUP step=render-thread ms=%llu\n", (unsigned long long)(kwl_milliseconds() - started));
+
+	if (server->headless) {
+		VkExtent2D zero_extent;
+
+		memset(&zero_extent, 0, sizeof(zero_extent));
+		error = kwl_compose_output_prepare(server);
+		if (error != 0)
+			return error;
+		error = kwl_compose_output_take(server, 0U, NULL, zero_extent, 0U);
+		if (error != 0)
+			return error;
+		return 0;
+	}
 
 	/* The display thread, which changes the output's swapchain from now on (without it the changes run here). */
 	kwl_display_start(server);
@@ -400,6 +415,33 @@ kwl_compose_output_prepare(
 	compose = server->compose;
 	if (compose == NULL || compose->output_prepared)
 		return 0;
+
+	if (server->headless) {
+		compose_rotation_choose(server);
+		compose->output.width = compose->mode_width;
+		compose->output.height = compose->mode_height;
+		compose->output.image_count = 1U;
+		compose->output.format = VK_FORMAT_B8G8R8A8_UNORM;
+		if (compose->pass == VK_NULL_HANDLE) {
+			compose->format = compose->output.format;
+			result = compose_pass(compose);
+			if (result != VK_SUCCESS) {
+				compose_pipelines_destroy(compose);
+				vkDestroyRenderPass(compose->device, compose->pass, NULL);
+				compose->pass = VK_NULL_HANDLE;
+				return EIO;
+			}
+			kwl_batch_open(server);
+		}
+		if (kwl_rdp_open(server, compose->device, compose->physical,
+				 compose->queue, compose->family,
+				 compose->mode_width, compose->mode_height,
+				 (void **)&compose->output.images[0]) != 0)
+			return EIO;
+		compose->rdp = server->rdp;
+		compose->output_prepared = 1;
+		return 0;
+	}
 
 	/*
 	 * The angle displays.conf keeps for the display (or --rotate), which
@@ -602,6 +644,51 @@ kwl_compose_output_take(
 	server->dirty = 1;
 	printf("KWL OUTPUT open width=%u height=%u images=%u format=%d\n", server->width, server->height, compose->output.image_count, (int)compose->format);
 	return 0;
+}
+
+/* Recreates headless offscreen image, framebuffer, and encoder on RESIZE. */
+void
+kwl_compose_headless_resize(
+	struct kwl_server *server,
+	uint32_t width,
+	uint32_t height)
+{
+	struct kwl_compose *compose;
+	VkImage new_img;
+
+	compose = server->compose;
+	if (compose == NULL || !compose->headless)
+		return;
+
+	(void)kwl_compose_complete(server);
+	kwl_rdp_clamp_size(&width, &height);
+	new_img = VK_NULL_HANDLE;
+	if (kwl_rdp_resize(server, width, height, (void **)&new_img) != 0)
+		return;
+	if (new_img == VK_NULL_HANDLE)
+		return;
+
+	if (compose->framebuffers[0] != VK_NULL_HANDLE) {
+		vkDestroyFramebuffer(compose->device, compose->framebuffers[0], NULL);
+		compose->framebuffers[0] = VK_NULL_HANDLE;
+	}
+	if (compose->views[0] != VK_NULL_HANDLE) {
+		vkDestroyImageView(compose->device, compose->views[0], NULL);
+		compose->views[0] = VK_NULL_HANDLE;
+	}
+	if (compose->rendered[0] != VK_NULL_HANDLE) {
+		vkDestroySemaphore(compose->device, compose->rendered[0], NULL);
+		compose->rendered[0] = VK_NULL_HANDLE;
+	}
+
+	compose->output.images[0] = new_img;
+	compose->output.width = width;
+	compose->output.height = height;
+	compose->mode_width = width;
+	compose->mode_height = height;
+	(void)compose_targets(compose);
+	kwl_layers_open(server);
+	server->dirty = 1;
 }
 
 /*
@@ -1149,6 +1236,8 @@ kwl_compose_close(
 
 	/* The hotplug thread stops first: what it would tell is followed by nobody any more. */
 	kwl_output_hotplug_stop(server);
+	kwl_rdp_close(server);
+	kwl_rdp_close(server);
 
 	/* A change of the display running ends, and the display thread stops (the output's close runs here). */
 	kwl_display_stop(server);
@@ -1815,6 +1904,14 @@ compose_display(
 
 	/* Counts the displays before their properties are read. */
 	compose = server->compose;
+	if (server->headless) {
+		compose->mode_width = server->size_width != 0U ? server->size_width : 1280U;
+		compose->mode_height = server->size_height != 0U ? server->size_height : 720U;
+		compose_rotation_choose(server);
+		kwl_output_state(server, &compose->opened);
+		server->refresh = 60000U;
+		return VK_SUCCESS;
+	}
 	count = 0;
 	result = vkGetPhysicalDeviceDisplayPropertiesKHR(compose->physical, &count, NULL);
 	if (result != VK_SUCCESS)
@@ -5754,6 +5851,12 @@ compose_op_acquire_output(
 
 	/* The next image, and how long that took. */
 	compose = context;
+	if (compose->headless) {
+		*image = 0U;
+		*cycles = 0U;
+		*at_us = kwl_log_us();
+		return VK_SUCCESS;
+	}
 	mark = kwl_cycles();
 	result = vkAcquireNextImageKHR(compose->device, compose->output.swapchain, timeout_ns, compose->acquired, VK_NULL_HANDLE, image);
 	*cycles = kwl_cycles() - mark;
@@ -5842,7 +5945,7 @@ compose_op_run(
 	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	wait_count = 0U;
 	signal_count = 0U;
-	if (job->kind == KWL_RENDER_FRAME) {
+	if (job->kind == KWL_RENDER_FRAME && !compose->headless) {
 		waits[0] = compose->acquired;
 		stages[0] = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT;
 		signals[0] = compose->rendered[job->output_image];
@@ -5896,6 +5999,23 @@ compose_op_run(
 	/* A layer's picture presents nothing. */
 	if (job->kind != KWL_RENDER_FRAME) {
 		kwl_queue_unlock(compose);
+		outcome->run_cycles = kwl_cycles() - start;
+		return;
+	}
+
+	if (compose->headless) {
+		kwl_queue_unlock(compose);
+		if (vkWaitForFences(compose->device, 1U, &slot->fence, VK_TRUE,
+				    UINT64_MAX) == VK_SUCCESS) {
+			(void)kwl_rdp_encode_and_send(compose->rdp,
+						      compose->output.images[0],
+						      compose->output.width,
+						      compose->output.height,
+						      kwl_log_us());
+		}
+		outcome->present_result = VK_SUCCESS;
+		outcome->present_cycles = 0U;
+		outcome->presented_us = kwl_log_us();
 		outcome->run_cycles = kwl_cycles() - start;
 		return;
 	}

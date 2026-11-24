@@ -19,4 +19,5 @@ LIBSSL_COMPAT_SOURCES := \
 	userland/base/libssl-compat/sslc-keysched.c \
 	userland/base/libssl-compat/sslc-msg.c \
 	userland/base/libssl-compat/sslc-record.c \
+	userland/base/libssl-compat/sslc-srv.c \
 	userland/base/libssl-compat/sslc-tls.c

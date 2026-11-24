@@ -20,6 +20,7 @@
 #include "ime.h"
 #include "data.h"
 #include "titlebar.h"
+#include "rdp-headless.h"
 #include "userland/desktop/paths.h"
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
 #include <sys/socket.h>
@@ -122,6 +123,7 @@ main(
 	server.auth_fd = -1;
 	server.control_fd = -1;
 	server.seat_fd = -1;
+	server.rdp_fd = -1;
 	server.wake[0] = -1;
 	server.wake[1] = -1;
 	server.font_path = KEILAND_DATADIR "/fonts/keiland.ttf";
@@ -205,6 +207,17 @@ main(
 	/* sessiond's seat socket does not go to the programs the compositor starts; it is waited on with poll. */
 	if (server.seat_fd >= 0)
 		(void)fcntl(server.seat_fd, F_SETFD, FD_CLOEXEC);
+
+	/* Headless RDP socketpair descriptor: non-blocking and closed on exec. */
+	if (server.rdp_fd >= 0) {
+		(void)fcntl(server.rdp_fd, F_SETFD, FD_CLOEXEC);
+		(void)fcntl(server.rdp_fd, F_SETFL, fcntl(server.rdp_fd, F_GETFL) | O_NONBLOCK);
+	}
+	if (server.headless && !server.size_given) {
+		server.size_width = 1280U;
+		server.size_height = 720U;
+		server.size_given = 1U;
+	}
 
 	/* The login screen is the glass look's, and asks sessiond on a descriptor it was given. */
 	if (server.greeter) {
@@ -871,6 +884,23 @@ parse_options(
 			continue;
 		}
 
+		/* Headless offscreen output for RDP sessions. */
+		match = strcmp(argument, "--headless");
+		if (match == 0) {
+			server->headless = 1U;
+			continue;
+		}
+
+		/* Bidirectional socketpair descriptor to rdpd. */
+		match = strncmp(argument, "--rdp-fd=", 9);
+		if (match == 0) {
+			error = unsigned_option(argument + 9, 1023, &number);
+			if (error != 0)
+				return error;
+			server->rdp_fd = (int)number;
+			continue;
+		}
+
 		/* Unknown arguments cannot silently alter the test or service contract. */
 		return EINVAL;
 	}
@@ -1297,6 +1327,10 @@ event_loop(
 		 */
 		if (descriptors[wake_slot].revents != 0)
 			wake_drain(server);
+
+		/* Poll headless RDP control channel for dynamic resize or keyframe requests. */
+		if (server->headless)
+			kwl_rdp_poll(server);
 
 		/*
 		 * A backend that does not wake the loop has its areas read on every

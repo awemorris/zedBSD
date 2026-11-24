@@ -201,18 +201,22 @@ sslc_conn_handshake(
 	if ((conn->flags & SSLC_CONN_FAILED) != 0U)
 		return EPROTO;
 
-	/* The first call sends the ClientHello. */
+	/* The first call sends the ClientHello (client) or waits for it (server). */
 	if ((conn->flags & SSLC_CONN_STARTED) == 0U) {
-		/* Nothing was sent when the start fails, so there is no alert to send. */
-		error = sslc_hs_start(&conn->hs, &conn->config, &actions);
-		if (error != 0)
-			return sslc_conn_fail(conn, error, 0U, 0U);
+		if (conn->config.server == 0) {
+			/* Nothing was sent when the start fails, so there is no alert to send. */
+			error = sslc_hs_start(&conn->hs, &conn->config, &actions);
+			if (error != 0)
+				return sslc_conn_fail(conn, error, 0U, 0U);
 
-		/* STARTED tells the public layer that the ClientHello is in the output. */
-		conn->flags |= SSLC_CONN_STARTED;
-		error = sslc_conn_apply(conn, &actions);
-		if (error != 0)
-			return error;
+			/* STARTED tells the public layer that the ClientHello is in the output. */
+			conn->flags |= SSLC_CONN_STARTED;
+			error = sslc_conn_apply(conn, &actions);
+			if (error != 0)
+				return error;
+		} else {
+			conn->flags |= SSLC_CONN_STARTED;
+		}
 	}
 
 	/* Messages and records until the handshake is over. */
@@ -897,7 +901,15 @@ sslc_conn_feed_messages(
 			return error;
 
 		/* The handshake takes the whole message and says what to do. */
-		error = sslc_hs_message(&conn->hs, conn->message, length, &actions);
+		if (conn->config.server != 0) {
+			error = sslc_srv_hs_message(&conn->hs, &conn->config,
+						    conn->message[0],
+						    conn->message, length,
+						    &actions);
+		} else {
+			error = sslc_hs_message(&conn->hs, conn->message,
+						length, &actions);
+		}
 
 		/* The message is used up either way. */
 		memmove(conn->message, conn->message + length, conn->message_used - length);
