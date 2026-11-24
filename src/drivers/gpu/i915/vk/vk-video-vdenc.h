@@ -87,6 +87,7 @@ struct i915_video_vdenc_encode {
 	uint64_t streamin_buffer;
 	uint64_t streamout_buffer;
 	uint64_t mb_status_buffer;
+	uint64_t ds_recon_buffer;
 
 	uint64_t bitstream_base;
 	uint64_t bitstream_end;
