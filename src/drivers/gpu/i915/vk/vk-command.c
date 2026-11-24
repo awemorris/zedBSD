@@ -888,6 +888,7 @@ i915_command_ops_clear(
 		if (op->kind == I915_GFX_OP_VIDEO_BEGIN ||
 		    op->kind == I915_GFX_OP_VIDEO_CONTROL ||
 		    op->kind == I915_GFX_OP_VIDEO_DECODE ||
+		    op->kind == I915_GFX_OP_VIDEO_ENCODE ||
 		    op->kind == I915_GFX_OP_VIDEO_END) {
 			drv_i915_video_command_free(op->u.video);
 			op->u.video = NULL;
@@ -950,6 +951,8 @@ i915_record_video(
 		kind = I915_GFX_OP_VIDEO_END;
 	else if (opcode == GPU_OP_CMD_CONTROL_VIDEO_CODING)
 		kind = I915_GFX_OP_VIDEO_CONTROL;
+	else if (opcode == GPU_OP_CMD_ENCODE_VIDEO)
+		kind = I915_GFX_OP_VIDEO_ENCODE;
 
 	/* Decodes the command into its record. */
 	error = drv_i915_video_record(session, opcode, reader, &command);
@@ -3170,7 +3173,7 @@ i915_nv12_copy_surface(
 	surface->height = height;
 	surface->pitch = image->pitch;
 	surface->format = format;
-	surface->tiled = 1U;
+	surface->tiled = (image->linear == 0U) ? 1U : 0U;
 	*texel_bytes = bytes;
 
 	/* Succeeded: the rectangle path can read this plane as ordinary texels. */
@@ -3516,6 +3519,54 @@ i915_image_copy_plane(
 
 	/* Copies the region slice by slice. */
 	for (slice = 0U; slice < slice_count; slice++) {
+		if (op->u.image_copy.src->planar != 0U || op->u.image_copy.dst->planar != 0U) {
+			uint32_t src_aspect = region->srcSubresource.aspectMask;
+			uint32_t dst_aspect = region->dstSubresource.aspectMask;
+			const struct i915_gfx_image *simg = op->u.image_copy.src;
+			const struct i915_gfx_image *dimg = op->u.image_copy.dst;
+
+			if (simg->planar == 0U || dimg->planar == 0U)
+				return EINVAL;
+			if (src_aspect != dst_aspect)
+				return EINVAL;
+
+			kern_memset(&src_surface, 0, sizeof(src_surface));
+			kern_memset(&dst_surface, 0, sizeof(dst_surface));
+			if (src_aspect == VK_IMAGE_ASPECT_PLANE_1_BIT) {
+				src_surface.va = drv_i915_gfx_memory_va(simg->memory, simg->offset + simg->chroma_offset);
+				dst_surface.va = drv_i915_gfx_memory_va(dimg->memory, dimg->offset + dimg->chroma_offset);
+				src_surface.width = (simg->width + 1U) / 2U;
+				src_surface.height = (simg->height + 1U) / 2U;
+				dst_surface.width = (dimg->width + 1U) / 2U;
+				dst_surface.height = (dimg->height + 1U) / 2U;
+				src_surface.format = VK_FORMAT_R8G8_UNORM;
+				dst_surface.format = VK_FORMAT_R8G8_UNORM;
+			} else if (src_aspect == VK_IMAGE_ASPECT_PLANE_0_BIT) {
+				src_surface.va = drv_i915_gfx_memory_va(simg->memory, simg->offset);
+				dst_surface.va = drv_i915_gfx_memory_va(dimg->memory, dimg->offset);
+				src_surface.width = simg->width;
+				src_surface.height = simg->height;
+				dst_surface.width = dimg->width;
+				dst_surface.height = dimg->height;
+				src_surface.format = VK_FORMAT_R8_UNORM;
+				dst_surface.format = VK_FORMAT_R8_UNORM;
+			} else {
+				return EINVAL;
+			}
+			if (src_surface.va == 0U || dst_surface.va == 0U)
+				return EINVAL;
+			src_surface.pitch = simg->pitch;
+			dst_surface.pitch = dimg->pitch;
+			src_surface.tiled = (simg->linear == 0U) ? 1U : 0U;
+			dst_surface.tiled = (dimg->linear == 0U) ? 1U : 0U;
+			src_surface.format = drv_i915_gfx_copy_format(src_surface.format);
+			dst_surface.format = drv_i915_gfx_copy_format(dst_surface.format);
+			error = drv_i915_gfx_rect(session, &dst_surface, &dst_rect, &src_surface, &src_rect, NULL, 0);
+			if (error != 0)
+				return error;
+			continue;
+		}
+
 		/* Describes the source level of the slice. */
 		error = i915_image_plane_surface(op->u.image_copy.src, plane, region->srcSubresource.mipLevel, src_slice + slice, &src_surface);
 		if (error != 0)
@@ -4790,6 +4841,7 @@ i915_command_buffer_execute(
 		case I915_GFX_OP_VIDEO_BEGIN:
 		case I915_GFX_OP_VIDEO_CONTROL:
 		case I915_GFX_OP_VIDEO_DECODE:
+		case I915_GFX_OP_VIDEO_ENCODE:
 		case I915_GFX_OP_VIDEO_END:
 			/* A video command on the graphics family breaks the API's rules: the submission is lost. */
 			kern_logf("i915: vk: video command submitted on the graphics queue family\n");

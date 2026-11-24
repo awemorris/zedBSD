@@ -27,6 +27,7 @@
 #include <kern/kmem.h>
 
 #include <libc/vulkan/vulkan_core.h>
+#include <libc/vulkan/vulkan_video.h>
 
 #include <uapi/errno.h>
 #include <stddef.h>
@@ -152,6 +153,7 @@ drv_i915_gfx_create_image(
 		image->layers = info.arrayLayers;
 		image->samples = (uint32_t)info.samples;
 		image->cube = 0U;
+		image->linear = (info.tiling == VK_IMAGE_TILING_LINEAR) ? 1U : 0U;
 		if ((info.flags & VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT) != 0U)
 			image->cube = 1U;
 		(void)drv_i915_gfx_image_layout(image);
@@ -1074,40 +1076,51 @@ i915_gfx_video_image_supported(
 {
 	uint32_t video_usage;
 
-	/* Only a device that offers video decode has NV12 images. */
+	/* Only a device that offers video has NV12 images. */
 	if (!session->vk->video)
 		return 0;
 
-	/* One 2D picture of one sample in Y tiles, whose planes may be viewed in their own formats. */
-	if (info->imageType != VK_IMAGE_TYPE_2D || info->tiling != VK_IMAGE_TILING_OPTIMAL)
+	/* One 2D picture of one sample in Y tiles or linear, whose planes may be viewed in their own formats. */
+	if (info->imageType != VK_IMAGE_TYPE_2D ||
+	    (info->tiling != VK_IMAGE_TILING_OPTIMAL && info->tiling != VK_IMAGE_TILING_LINEAR))
 		return 0;
 	if (info->mipLevels != 1U || info->arrayLayers != 1U || info->samples != VK_SAMPLE_COUNT_1_BIT)
 		return 0;
 	if ((info->flags & ~(uint32_t)(VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | VK_IMAGE_CREATE_EXTENDED_USAGE_BIT)) != 0U)
 		return 0;
 
-	/* Not empty, and not larger than the decoder decodes. */
+	/* Not empty, and not larger than the codec maximum. */
 	if (info->extent.width == 0U || info->extent.height == 0U || info->extent.depth != 1U)
 		return 0;
 	if (info->extent.width > I915_GFX_VIDEO_MAX_EXTENT || info->extent.height > I915_GFX_VIDEO_MAX_EXTENT)
 		return 0;
 
-	/* Used for decode pictures, readback, and sampling through plane views; uploads remain unsupported. */
-	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
-	    VK_IMAGE_USAGE_SAMPLED_BIT;
+	/* Linear NV12 supports GPU/CPU staging and storage; optimal supports decode/encode/DPB/copy/sampling. */
+	if (info->tiling == VK_IMAGE_TILING_LINEAR) {
+		video_usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+			      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+			      VK_IMAGE_USAGE_STORAGE_BIT |
+			      VK_IMAGE_USAGE_SAMPLED_BIT;
+	} else {
+		video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR |
+			      VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR |
+			      VK_IMAGE_USAGE_VIDEO_ENCODE_SRC_BIT_KHR |
+			      VK_IMAGE_USAGE_VIDEO_ENCODE_DPB_BIT_KHR |
+			      VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+			      VK_IMAGE_USAGE_TRANSFER_DST_BIT |
+			      VK_IMAGE_USAGE_SAMPLED_BIT;
+	}
 	if (info->usage == 0U || (info->usage & ~video_usage) != 0U)
 		return 0;
 
-	/* Succeeded: the decoder takes the picture. */
+	/* Succeeded: the codec takes the picture. */
 	return 1;
 }
 
 /*
- * Lays an NV12 picture out as the video decoder writes it:
- * the extent rounded up to whole macroblocks, a pitch of whole Y tiles
- * (128 bytes), the Y plane's rows rounded up to whole tile rows (32), the
- * interleaved CbCr plane (half the rows) below it, also of whole tile
- * rows, and the whole image whole pages.
+ * Lays an NV12 picture out as the video codec or linear producer uses it:
+ * for linear, 64-byte pitch alignment and exact coded-height rows; for Y
+ * tiles, 128-byte pitch and 32-row tile alignment.
  */
 static void
 i915_gfx_nv12_layout(
@@ -1122,14 +1135,22 @@ i915_gfx_nv12_layout(
 	width = i915_gfx_align(image->width, I915_GFX_VIDEO_MB);
 	height = i915_gfx_align(image->height, I915_GFX_VIDEO_MB);
 
-	/* The Y plane: whole tiles across, whole tile rows down. */
-	image->pitch = i915_gfx_align(width, I915_GFX_TILE_Y_BYTES);
-	image->chroma_rows = i915_gfx_align(height, I915_GFX_TILE_Y_ROWS);
-	image->chroma_offset = (uint64_t)image->pitch * image->chroma_rows;
+	if (image->linear != 0U) {
+		image->pitch = i915_gfx_align(width, 64U);
+		image->chroma_rows = height;
+		image->chroma_offset = (uint64_t)image->pitch * image->chroma_rows;
+		chroma_height = height / 2U;
+		bytes = image->chroma_offset + (uint64_t)image->pitch * chroma_height;
+	} else {
+		/* The Y plane: whole tiles across, whole tile rows down. */
+		image->pitch = i915_gfx_align(width, I915_GFX_TILE_Y_BYTES);
+		image->chroma_rows = i915_gfx_align(height, I915_GFX_TILE_Y_ROWS);
+		image->chroma_offset = (uint64_t)image->pitch * image->chroma_rows;
 
-	/* The CbCr plane below it: half the rows, whole tile rows; the whole image whole pages. */
-	chroma_height = i915_gfx_align(height / 2U, I915_GFX_TILE_Y_ROWS);
-	bytes = image->chroma_offset + (uint64_t)image->pitch * chroma_height;
+		/* The CbCr plane below it: half the rows, whole tile rows; the whole image whole pages. */
+		chroma_height = i915_gfx_align(height / 2U, I915_GFX_TILE_Y_ROWS);
+		bytes = image->chroma_offset + (uint64_t)image->pitch * chroma_height;
+	}
 	image->bytes = (bytes + I915_GFX_PAGE - 1U) & ~(uint64_t)(I915_GFX_PAGE - 1U);
 	image->planar = 1U;
 	image->slice_rows = 0U;

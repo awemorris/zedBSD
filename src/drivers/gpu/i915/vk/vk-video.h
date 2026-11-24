@@ -27,7 +27,7 @@
 struct i915_gfx_op;
 
 /* The last opcode of the video range: the commands routed here run up to it. */
-#define I915_VK_VIDEO_OP_LAST		GPU_OP_CMD_DECODE_VIDEO
+#define I915_VK_VIDEO_OP_LAST		GPU_OP_CMD_ENCODE_VIDEO
 
 /* The last opcode the dispatcher routes here; the ones after it are recordings. */
 #define I915_VK_VIDEO_OP_LAST_ROUTED	GPU_OP_DESTROY_VIDEO_SESSION_PARAMETERS
