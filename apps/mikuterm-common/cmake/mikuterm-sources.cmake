@@ -45,9 +45,13 @@ function(mikuterm_read_sources variable file name)
 endfunction()
 
 set(MIKUTERM_COMMON_NAMES
-	conf settings-file connection-ssh known-hosts ssh-thread forward remote-command launch page)
+	conf settings-file connection-ssh known-hosts ssh-thread forward remote-command launch page sftp-link)
 list(TRANSFORM MIKUTERM_COMMON_NAMES PREPEND ${MIKUTERM_COMMON_DIR}/ OUTPUT_VARIABLE MIKUTERM_COMMON_SOURCES)
 list(TRANSFORM MIKUTERM_COMMON_SOURCES APPEND .c)
+
+set(MIKUTERM_COMMON_SFTP_SOURCES
+	${MIKUTERM_COMMON_DIR}/sftp-worker.c
+	${MIKUTERM_COMMON_DIR}/sftp-transfer.c)
 
 set(MIKUTERM_COMMON_X11_NAMES x11-link x11-host x11-serve x11-tab x11-noglx x11-touch)
 list(TRANSFORM MIKUTERM_COMMON_X11_NAMES PREPEND ${MIKUTERM_COMMON_DIR}/ OUTPUT_VARIABLE MIKUTERM_COMMON_X11_SOURCES)
@@ -73,8 +77,9 @@ list(TRANSFORM MIKUTERM_TERMINAL_SOURCES APPEND .c)
 
 # The SSH library's modules the client engine needs, and the engine (not the programs' files).
 set(MIKUTERM_SSH_NAMES
-	buf packet cipher crypto bcrypt kex transport auth channel key hostfile config common client-engine)
+	buf packet cipher crypto bcrypt kex transport auth channel key hostfile config common client-engine sftp)
 list(TRANSFORM MIKUTERM_SSH_NAMES PREPEND ${MIKUTERM_ROOT}/userland/base/ssh/ssh- OUTPUT_VARIABLE MIKUTERM_SSH_SOURCES)
 list(TRANSFORM MIKUTERM_SSH_SOURCES APPEND .c)
+list(APPEND MIKUTERM_SSH_SOURCES ${MIKUTERM_ROOT}/userland/base/ssh/sftp-client.c)
 
 set(MIKUTERM_VERSION_IN ${MIKUTERM_COMMON_DIR}/mikuterm-version.h.in)

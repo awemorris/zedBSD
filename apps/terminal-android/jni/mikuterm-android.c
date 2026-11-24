@@ -378,6 +378,7 @@ main_connector_init(
 	connect.x11_scale = conf->x11_scale;
 	connect.x11_render_cpu = conf->x11_render_cpu;
 	connect.x11_primary = conf->x11_primary;
+	connect.sftp = conf->sftp;
 	connect.notice = conf->problems;
 	mikuterm_connector_init(connector, &connect);
 }

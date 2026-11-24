@@ -638,6 +638,10 @@ page_item_set(
 	state->connector->options.x11_render_cpu = conf.x11_render_cpu;
 	state->conf->x11_primary = conf.x11_primary;
 	state->connector->options.x11_primary = conf.x11_primary;
+	state->conf->sftp = conf.sftp;
+	state->connector->options.sftp = conf.sftp;
+	state->conf->sftp_preserve_times = conf.sftp_preserve_times;
+	state->conf->sftp_show_hidden = conf.sftp_show_hidden;
 	printf("MIKUTERM SETTINGS saved %s\n", keyword);
 	fflush(stdout);
 

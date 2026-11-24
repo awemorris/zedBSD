@@ -71,7 +71,10 @@ enum conf_keyword {
 	CONF_X11_SCALE = 12,
 	CONF_X11_RENDER = 13,
 	CONF_X11_PRIMARY = 14,
-	CONF_KEYWORDS = 15
+	CONF_SFTP = 15,
+	CONF_SFTP_PRESERVE_TIMES = 16,
+	CONF_SFTP_SHOW_HIDDEN = 17,
+	CONF_KEYWORDS = 18
 };
 
 /*
@@ -99,7 +102,10 @@ static const struct conf_name conf_names[CONF_KEYWORDS] = {
 	{ "WslPort", 0 },
 	{ "X11Scale", 0 },
 	{ "X11Render", 0 },
-	{ "X11PrimaryToClipboard", 0 }
+	{ "X11PrimaryToClipboard", 0 },
+	{ "Sftp", 0 },
+	{ "SftpPreserveTimes", 0 },
+	{ "SftpShowHidden", 1 }
 };
 
 /* The themes' names, in the order of TERMINAL_THEME_*. */
@@ -146,6 +152,11 @@ mikuterm_conf_defaults(
 	conf->x11_scale = 0;
 	conf->x11_render_cpu = 0;
 	conf->x11_primary = 0;
+
+	/* SFTP: disabled by default until its UI is present; preserve modification times and show hidden entries. */
+	conf->sftp = 0;
+	conf->sftp_preserve_times = 1;
+	conf->sftp_show_hidden = 1;
 }
 
 /*
@@ -308,6 +319,15 @@ mikuterm_conf_text(
 		break;
 	case CONF_X11_PRIMARY:
 		written = snprintf(value, size, "%s", conf->x11_primary ? "yes" : "no");
+		break;
+	case CONF_SFTP:
+		written = snprintf(value, size, "%s", conf->sftp ? "yes" : "no");
+		break;
+	case CONF_SFTP_PRESERVE_TIMES:
+		written = snprintf(value, size, "%s", conf->sftp_preserve_times ? "yes" : "no");
+		break;
+	case CONF_SFTP_SHOW_HIDDEN:
+		written = snprintf(value, size, "%s", conf->sftp_show_hidden ? "yes" : "no");
 		break;
 	default:
 		written = snprintf(value, size, "%u", conf->connect_timeout);
@@ -765,6 +785,26 @@ conf_value(
 		*why = "X11PrimaryToClipboard is yes or no";
 		if (status == 0)
 			conf->x11_primary = yes;
+		break;
+	case CONF_SFTP:
+		status = conf_yes(value, &yes);
+		*why = "Sftp is yes or no";
+		if (status == 0)
+			conf->sftp = yes;
+		break;
+	case CONF_SFTP_PRESERVE_TIMES:
+		status = conf_yes(value, &yes);
+		*why = "SftpPreserveTimes is yes or no";
+		if (status == 0)
+			conf->sftp_preserve_times = yes;
+		break;
+	case CONF_SFTP_SHOW_HIDDEN:
+		status = conf_yes(value, &yes);
+		*why = "SftpShowHidden is yes or no";
+		if (status == 0) {
+			conf->sftp_show_hidden = yes;
+			conf->sftp_show_hidden_given = 1;
+		}
 		break;
 	default:
 		status = conf_number(value, 0U, CONF_CONNECT_TIMEOUT_MAX, &number);

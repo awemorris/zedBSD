@@ -141,6 +141,7 @@ wWinMain(
 	connect.x11_scale = main_state.conf.x11_scale;
 	connect.x11_render_cpu = main_state.conf.x11_render_cpu;
 	connect.x11_primary = main_state.conf.x11_primary;
+	connect.sftp = main_state.conf.sftp;
 	connect.notice = main_state.conf.problems;
 	mikuterm_connector_init(&main_state.connector, &connect);
 

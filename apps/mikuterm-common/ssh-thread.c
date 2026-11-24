@@ -36,6 +36,7 @@
 #include "proxy.h"
 #include "proxy-command.h"
 #include "remote-command.h"
+#include "sftp-link.h"
 #include "x11-host.h"
 #include "mikuterm-version.h"
 
@@ -297,6 +298,7 @@ struct thread_link {
 	struct ssh_buf command;
 	struct forward_state *forwards;
 	int forward_failed;
+	struct sftp_link *sftp_link;
 	struct proxy *proxy;
 };
 
@@ -1881,6 +1883,7 @@ thread_attempt(
 	options.password = link->config.password;
 	options.session = 1;
 	options.pty = 1;
+	options.more_sessions = session->sftp ? 1 : 0;
 	options.term = session->term;
 	options.modes = NULL;
 	options.command = NULL;
@@ -1929,10 +1932,15 @@ thread_attempt(
 		return THREAD_FAILED;
 	}
 
-	/* The conversation until the end; the X server and the forwardings end with it. */
+	/* The conversation until the end; the X server, SFTP relay and the forwardings end with it. */
 	status = thread_converse(link);
 	if (link->x11)
 		x11_host_end(&link->x11_host, link->engine);
+	if (link->sftp_link != NULL) {
+		sftp_link_end(link->sftp_link);
+		sftp_link_release(link->sftp_link);
+		link->sftp_link = NULL;
+	}
 	thread_forwards_close(link);
 	ssh_engine_close(link->engine);
 	link->engine = NULL;
@@ -2507,6 +2515,18 @@ thread_converse(
 		if (link->forwards != NULL)
 			forward_pump(link->forwards);
 
+		/* Picks up an SFTP relay attached by the UI and moves its bytes and requests. */
+		if (link->sftp_link == NULL) {
+			kl_mutex_lock(&link->session->lock);
+			if (link->session->sftp_link != NULL) {
+				link->sftp_link = link->session->sftp_link;
+				sftp_link_retain(link->sftp_link);
+			}
+			kl_mutex_unlock(&link->session->lock);
+		}
+		if (link->sftp_link != NULL)
+			sftp_link_pump(link->sftp_link, link->engine);
+
 		/* The end: what is left to send goes, briefly. */
 		if (link->closed) {
 			(void)thread_send(link);
@@ -2632,6 +2652,13 @@ thread_events(
 		if (error != 0)
 			break;
 
+		/* An event of the SFTP subsystem channel is the SFTP relay's alone. */
+		if (link->sftp_link != NULL) {
+			sftp_link_event(link->sftp_link, link->engine, &event, &taken);
+			if (taken)
+				continue;
+		}
+
 		/* An event of the forwardings is theirs alone. */
 		thread_forward_event(link, &event, &taken);
 		if (taken)
@@ -2706,6 +2733,8 @@ thread_events(
 				if (open_count != 0U)
 					session_say(session, "\r\nThe shell ended; the connection stays open while forwarded connections remain (close the tab to end them).\r\n");
 			}
+			if (link->sftp_link != NULL && sftp_link_channel_open(link->sftp_link))
+				session_say(session, "\r\nThe shell ended; the connection stays open while SFTP is open (close the tab to end it).\r\n");
 			break;
 		case SSH_ENGINE_CLOSED:
 			thread_closed(link, &event);

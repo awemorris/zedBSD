@@ -77,6 +77,7 @@ list(TRANSFORM MIKUTERM_KEILAND_SOURCES PREPEND ${MIKUTERM_ROOT}/)
 # mikuterm's own files: the Windows ones here, and the ones every build shares (apps/mikuterm-common).
 set(MIKUTERM_SOURCES
 	${MIKUTERM_COMMON_SOURCES}
+	${MIKUTERM_COMMON_SFTP_SOURCES}
 	${MIKUTERM_COMMON_X11_SOURCES}
 	${MIKUTERM_COMMON_PROGRAM_SOURCES}
 	${MIKUTERM_DIR}/main.c
@@ -85,6 +86,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/program.c
 	${MIKUTERM_DIR}/proxy.c
 	${MIKUTERM_DIR}/credential.c
+	${MIKUTERM_DIR}/sftp-local-win32.c
 	${MIKUTERM_DIR}/x11-spawn-win32.c
 	${MIKUTERM_DIR}/x11-child.c
 	${MIKUTERM_DIR}/x11-tab-child.c
