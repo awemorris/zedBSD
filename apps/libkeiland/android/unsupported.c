@@ -655,6 +655,21 @@ kl_file_chooser_open(
 }
 
 /* Not on Android. */
+int
+kl_file_open_dialog(
+	struct kl_window *owner,
+	char *path,
+	size_t size)
+{
+	(void)owner;
+	(void)path;
+	(void)size;
+
+	/* Not on Android. */
+	return ENOTSUP;
+}
+
+/* Not on Android. */
 struct kl_glass *
 kl_glass_create(
 	struct wl_display *display,

@@ -354,6 +354,7 @@ static void run_start_paste(void);
 static void run_drop_paste(void);
 static void run_paste_begin(const char *text, size_t length, int lines);
 static int run_tab_new(const struct terminal_run_options *options, struct run_state *run);
+static int run_tab_connection_open(const struct terminal_run_options *options, struct run_state *run, struct terminal_connection *connection, const char *title);
 static void run_tab_switch(struct run_state *run, unsigned index);
 static int run_tab_close(const struct terminal_run_options *options, struct run_state *run, unsigned index);
 static int run_tab_find(uint32_t id);
@@ -548,6 +549,7 @@ run_start(
 	if (status != 0)
 		return -1;
 	run_window.open_sftp_item = options->open_sftp_menu;
+	run_window.open_vi_item = options->open_vi_menu;
 	run_window.refuse_terminal_drop = options->refuse_terminal_drop;
 
 	/* A window on a screen of another scale than the one asked has the font at its scale (a size the font cannot give keeps the old one). */
@@ -1360,6 +1362,22 @@ run_menu_actions(
 			    run_tabs[run_active].view == NULL)
 				status = options->open_sftp(options->data, run->connection);
 			break;
+		case TERMINAL_ACTION_OPEN_VI:
+			/* Opens a file in an embedded vi tab. */
+			if (options->open_vi != NULL) {
+				struct terminal_connection *vi_conn;
+				char vi_title[TERMINAL_TITLE];
+				int vi_err;
+
+				vi_conn = NULL;
+				vi_title[0] = '\0';
+				vi_err = options->open_vi(options->data, &run_window, run->columns, run->rows, NULL, vi_title, sizeof(vi_title), &vi_conn);
+				if (vi_err == 0 && vi_conn != NULL)
+					status = run_tab_connection_open(options, run, vi_conn, vi_title);
+				else if (vi_err != 0 && vi_err != ECANCELED)
+					status = -1;
+			}
+			break;
 		case TERMINAL_ACTION_ABOUT:
 			/* A line about the terminal on the screen (there are no dialogs). */
 			if (options->about != NULL)
@@ -1886,6 +1904,58 @@ run_tab_new(
 	run_tab_count++;
 
 	/* Succeeded: it is the active one. */
+	run_tab_switch(run, run_tab_count - 1U);
+	printf("ZTERM TAB new run=%s id=%u count=%u\n", options->token, tab->id, run_tab_count);
+	fflush(stdout);
+	return 0;
+}
+
+/*
+ * Opens a normal terminal grid tab for an already-created connection and
+ * makes it the active one.  Closes connection without error if the window
+ * already holds TERMINAL_TABS.
+ */
+static int
+run_tab_connection_open(
+	const struct terminal_run_options *options,
+	struct run_state *run,
+	struct terminal_connection *connection,
+	const char *title)
+{
+	struct terminal_screen *screen;
+	struct run_tab *tab;
+
+	if (connection == NULL || run_tab_count == TERMINAL_TABS) {
+		if (connection != NULL)
+			connection->ops->close(connection);
+		printf("ZTERM TAB refused run=%s count=%u\n", options->token, run_tab_count);
+		fflush(stdout);
+		return 0;
+	}
+
+	screen = malloc(sizeof(*screen));
+	if (screen == NULL) {
+		connection->ops->close(connection);
+		errno = ENOMEM;
+		return -1;
+	}
+
+	terminal_screen_init(screen, run->columns, run->rows);
+	terminal_screen_set_ambiguous_wide(screen, run->ambiguous_wide);
+
+	tab = &run_tabs[run_tab_count];
+	memset(tab, 0, sizeof(*tab));
+	tab->screen = screen;
+	tab->connection = connection;
+	tab->id = run_tab_next;
+	if (title != NULL && title[0] != '\0')
+		run_title_copy(tab->title, sizeof(tab->title), title);
+	else
+		(void)snprintf(tab->title, sizeof(tab->title), "Terminal %u", tab->id);
+	run_tab_next++;
+	run_tab_count++;
+
+	run_tell_size(run, connection);
 	run_tab_switch(run, run_tab_count - 1U);
 	printf("ZTERM TAB new run=%s id=%u count=%u\n", options->token, tab->id, run_tab_count);
 	fflush(stdout);
@@ -3453,8 +3523,10 @@ run_tabs_take(
 				break;
 			if (opened->ops->view != NULL)
 				status = run_tab_view_open(options, run, opened);
-			else
+			else if (opened->ops->picture != NULL)
 				status = run_tab_picture_open(options, run, opened);
+			else
+				status = run_tab_connection_open(options, run, opened, NULL);
 			if (status != 0)
 				return -1;
 		}

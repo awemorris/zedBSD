@@ -47,6 +47,7 @@
 #define MENU_CLOSE_TAB		14U
 #define MENU_SETTINGS		15U
 #define MENU_OPEN_SFTP		16U
+#define MENU_OPEN_VI		17U
 
 /* Edit. */
 #define MENU_COPY		20U
@@ -108,6 +109,7 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_NEW_WINDOW, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Window", TERMINAL_ACTION_NEW_WINDOW, KL_MENU_ROLE_NEW, KL_MENU_CTRL | KL_MENU_SHIFT, 'n' },
 	{ MENU_NEW_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Tab", TERMINAL_ACTION_NEW_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_ALT, 't' },
 	{ MENU_OPEN_SFTP, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Open SFTP", TERMINAL_ACTION_OPEN_SFTP, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'o' },
+	{ MENU_OPEN_VI, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Open File in vi...", TERMINAL_ACTION_OPEN_VI, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'e' },
 	{ MENU_SETTINGS, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Settings...", TERMINAL_ACTION_SETTINGS, KL_MENU_ROLE_NONE, 0U, MENU_KEY_F12 },
 	{ MENU_SHELL_LINE, MENU_SHELL, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_CLOSE_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Close Tab", TERMINAL_ACTION_CLOSE_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'w' },
@@ -201,6 +203,10 @@ terminal_menu_open(
 
 		/* A program without SFTP has no Open SFTP item. */
 		if (menu_items[index].id == MENU_OPEN_SFTP && !window->open_sftp_item)
+			continue;
+
+		/* A program without an embedded vi editor has no Open File in vi item. */
+		if (menu_items[index].id == MENU_OPEN_VI && !window->open_vi_item)
 			continue;
 
 		/* The item, after the ones before it. */
