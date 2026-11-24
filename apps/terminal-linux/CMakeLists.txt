@@ -70,6 +70,16 @@ mikuterm_read_sources(MIKUTERM_PNG_SOURCES userland/desktop/libpng-compat/source
 mikuterm_read_sources(MIKUTERM_Z_SOURCES userland/base/libz-compat/sources.mk LIBZ_COMPAT_SOURCES)
 mikuterm_read_sources(MIKUTERM_CRYPTO_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_SOURCES)
 mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_POSIX_SOURCES)
+mikuterm_read_sources(MIKUTERM_SSL_SOURCES userland/base/libssl-compat/sources.mk LIBSSL_COMPAT_SOURCES)
+mikuterm_read_sources(MIKUTERM_RDP_SOURCES userland/desktop/librdp/sources.mk LIBRDP_SOURCES)
+mikuterm_read_sources(MIKUTERM_MEDIA_ALL_SOURCES userland/desktop/libmedia/sources.mk LIBMEDIA_SOURCES)
+set(MIKUTERM_H264SW_SOURCES "")
+foreach(src IN LISTS MIKUTERM_MEDIA_ALL_SOURCES)
+	if(src MATCHES "/(h264sw-|vcodec-bitreader|vcodec-nal|vcodec-cabac|bits\\.c)" AND NOT src MATCHES "/(h264sw-backend|h264sw-enc)\\.c$")
+		list(APPEND MIKUTERM_H264SW_SOURCES ${src})
+	endif()
+endforeach()
+list(APPEND MIKUTERM_H264SW_SOURCES ${MIKUTERM_ROOT}/userland/desktop/libmedia/media-os-posix.c)
 mikuterm_read_sources(MIKUTERM_KEILAND_SOURCES userland/desktop/libkeiland/sources.mk LIBKEILAND_SOURCES)
 
 # The tree's Wayland client library and the protocols libkeiland speaks.
@@ -91,6 +101,7 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/x11-spawn-posix.c
 	${MIKUTERM_DIR}/x11-child.c
 	${MIKUTERM_COMMON_SOURCES}
+	${MIKUTERM_COMMON_RDP_SOURCES}
 	${MIKUTERM_COMMON_X11_SOURCES}
 	${MIKUTERM_COMMON_NO_WSL_SOURCES})
 
@@ -187,15 +198,20 @@ add_library(mikuterm_z STATIC ${MIKUTERM_Z_SOURCES})
 add_library(mikuterm_png STATIC ${MIKUTERM_PNG_SOURCES})
 add_library(mikuterm_truetype STATIC ${MIKUTERM_TRUETYPE_SOURCES})
 add_library(mikuterm_crypto STATIC ${MIKUTERM_CRYPTO_SOURCES} ${MIKUTERM_CRYPTO_OS_SOURCES})
+add_library(mikuterm_ssl STATIC ${MIKUTERM_SSL_SOURCES})
+add_library(mikuterm_rdp STATIC ${MIKUTERM_RDP_SOURCES})
+add_library(mikuterm_h264sw STATIC ${MIKUTERM_H264SW_SOURCES})
 add_library(mikuterm_ssh STATIC ${MIKUTERM_SSH_SOURCES})
 add_library(mikuterm_wayland STATIC ${MIKUTERM_WAYLAND_SOURCES})
 add_library(mikuterm_keiland STATIC ${MIKUTERM_KEILAND_SOURCES})
 add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
 add_library(mikuterm_xserver STATIC ${MIKUTERM_X11_SOURCES})
-foreach(library z png truetype crypto ssh wayland keiland terminal xserver)
+foreach(library z png truetype crypto ssl rdp h264sw ssh wayland keiland terminal xserver)
 	target_link_libraries(mikuterm_${library} PRIVATE mikuterm_flags)
 endforeach()
+target_include_directories(mikuterm_h264sw PRIVATE ${MIKUTERM_ROOT}/userland/desktop/libmedia)
 target_link_libraries(mikuterm_png PUBLIC mikuterm_z)
+target_link_libraries(mikuterm_ssl PUBLIC mikuterm_crypto)
 target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
 target_link_libraries(mikuterm_keiland PUBLIC mikuterm_truetype mikuterm_png mikuterm_wayland
 	${MIKUTERM_VULKAN_LIBRARY} Threads::Threads ${CMAKE_DL_LIBS} m)
@@ -209,7 +225,7 @@ target_link_libraries(mikuterm_xserver PUBLIC mikuterm_keiland)
 # Codespaces.
 #
 add_executable(mikuterm ${MIKUTERM_SOURCES})
-target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_xserver)
+target_link_libraries(mikuterm PRIVATE mikuterm_flags mikuterm_terminal mikuterm_ssh mikuterm_rdp mikuterm_ssl mikuterm_h264sw mikuterm_xserver)
 target_include_directories(mikuterm PRIVATE ${MIKUTERM_COMMON_DIR})
 # Windows' _stricmp is the C library's strcasecmp (<strings.h>, which <string.h> brings with _GNU_SOURCE).
 target_compile_definitions(mikuterm PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=1 MIKUTERM_HAVE_X11=1 MIKUTERM_HAVE_KEY_PASTE=0 MIKUTERM_APP_ID="${MIKUTERM_APP_ID}" _stricmp=strcasecmp

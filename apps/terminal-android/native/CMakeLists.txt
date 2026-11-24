@@ -32,6 +32,16 @@ mikuterm_read_sources(MIKUTERM_PNG_SOURCES userland/desktop/libpng-compat/source
 mikuterm_read_sources(MIKUTERM_Z_SOURCES userland/base/libz-compat/sources.mk LIBZ_COMPAT_SOURCES)
 mikuterm_read_sources(MIKUTERM_CRYPTO_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_SOURCES)
 mikuterm_read_sources(MIKUTERM_CRYPTO_OS_SOURCES userland/base/libcrypto-compat/sources.mk LIBCRYPTO_COMPAT_POSIX_SOURCES)
+mikuterm_read_sources(MIKUTERM_SSL_SOURCES userland/base/libssl-compat/sources.mk LIBSSL_COMPAT_SOURCES)
+mikuterm_read_sources(MIKUTERM_RDP_SOURCES userland/desktop/librdp/sources.mk LIBRDP_SOURCES)
+mikuterm_read_sources(MIKUTERM_MEDIA_ALL_SOURCES userland/desktop/libmedia/sources.mk LIBMEDIA_SOURCES)
+set(MIKUTERM_H264SW_SOURCES "")
+foreach(src IN LISTS MIKUTERM_MEDIA_ALL_SOURCES)
+	if(src MATCHES "/(h264sw-|vcodec-bitreader|vcodec-nal|vcodec-cabac|bits\\.c)" AND NOT src MATCHES "/(h264sw-backend|h264sw-enc)\\.c$")
+		list(APPEND MIKUTERM_H264SW_SOURCES ${src})
+	endif()
+endforeach()
+list(APPEND MIKUTERM_H264SW_SOURCES ${MIKUTERM_ROOT}/userland/desktop/libmedia/media-os-posix.c)
 
 # libkeiland: the files every system shares with the POSIX platform layer, and the Android layer.
 set(MIKUTERM_KEILAND_COMMON ${KEILAND_COMMON_SOURCES} ${KEILAND_POSIX_SOURCES})
@@ -84,19 +94,24 @@ add_library(mikuterm_z STATIC ${MIKUTERM_Z_SOURCES})
 add_library(mikuterm_png STATIC ${MIKUTERM_PNG_SOURCES})
 add_library(mikuterm_truetype STATIC ${MIKUTERM_TRUETYPE_SOURCES})
 add_library(mikuterm_crypto STATIC ${MIKUTERM_CRYPTO_SOURCES} ${MIKUTERM_CRYPTO_OS_SOURCES})
+add_library(mikuterm_ssl STATIC ${MIKUTERM_SSL_SOURCES})
+add_library(mikuterm_rdp STATIC ${MIKUTERM_RDP_SOURCES})
+add_library(mikuterm_h264sw STATIC ${MIKUTERM_H264SW_SOURCES})
 add_library(mikuterm_ssh STATIC ${MIKUTERM_SSH_SOURCES})
 add_library(keiland_common STATIC ${MIKUTERM_KEILAND_COMMON})
 add_library(keiland_android STATIC ${MIKUTERM_KEILAND_ANDROID})
 add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
 add_library(mikuterm_xserver STATIC ${MIKUTERM_XSERVER_SOURCES})
 add_library(mikuterm_common STATIC ${MIKUTERM_COMMON_SOURCES} ${MIKUTERM_COMMON_NO_WSL_SOURCES}
-	${MIKUTERM_COMMON_X11_SOURCES} ${MIKUTERM_COMMON_X11_THREAD_SOURCES})
-foreach(library mikuterm_z mikuterm_png mikuterm_truetype mikuterm_crypto mikuterm_ssh keiland_common keiland_android
-	mikuterm_terminal mikuterm_xserver mikuterm_common)
+	${MIKUTERM_COMMON_RDP_SOURCES} ${MIKUTERM_COMMON_X11_SOURCES} ${MIKUTERM_COMMON_X11_THREAD_SOURCES})
+foreach(library mikuterm_z mikuterm_png mikuterm_truetype mikuterm_crypto mikuterm_ssl mikuterm_rdp mikuterm_h264sw
+	mikuterm_ssh keiland_common keiland_android mikuterm_terminal mikuterm_xserver mikuterm_common)
 	target_link_libraries(${library} PRIVATE mikuterm_flags)
 endforeach()
+target_include_directories(mikuterm_h264sw PRIVATE ${MIKUTERM_ROOT}/userland/desktop/libmedia)
 target_include_directories(keiland_android PRIVATE ${MIKUTERM_ROOT}/apps/libkeiland/android)
 target_link_libraries(mikuterm_png PUBLIC mikuterm_z)
+target_link_libraries(mikuterm_ssl PUBLIC mikuterm_crypto)
 target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
 target_link_libraries(keiland_common PUBLIC mikuterm_truetype mikuterm_png)
 target_link_libraries(keiland_android PUBLIC keiland_common)
@@ -146,7 +161,7 @@ target_compile_definitions(mikuterm PRIVATE
 	MIKUTERM_HAVE_KEY_PASTE=1
 	_stricmp=strcasecmp)
 target_compile_options(mikuterm PRIVATE -std=gnu11 -Wall -Wextra -Werror -fvisibility=hidden)
-target_link_libraries(mikuterm PRIVATE mikuterm_common mikuterm_terminal keiland_android mikuterm_xserver)
+target_link_libraries(mikuterm PRIVATE mikuterm_common mikuterm_terminal mikuterm_rdp mikuterm_ssl mikuterm_h264sw keiland_android mikuterm_xserver)
 
 # The system's native-activity loader looks the entry point up in the library, and the runtime
 # looks JNI_OnLoad up, so both stay in the library's symbols even though nothing in the library
