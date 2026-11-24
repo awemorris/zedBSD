@@ -200,12 +200,11 @@ rdpd_session_start(
 	char opt_height[32];
 	char opt_fd[32];
 	char opt_sock[160];
+	char *comp_argv[10];
+	int argc;
 	pid_t comp_pid;
-	pid_t sess_pid;
 	int rc;
 	int err;
-	char *comp_argv[8];
-	char *sess_argv[2];
 	memset(sess, 0, sizeof(*sess));
 	sess->rdp_fd = -1;
 	sess->width = 1280U;
@@ -237,19 +236,23 @@ rdpd_session_start(
 		return err;
 	}
 
-	/* Child drops privileges and execs headless wayland. */
+	/* Child drops privileges and execs headless wayland with full desktop look. */
 	if (comp_pid == 0) {
 		close(sv[0]);
 		(void)fcntl(sv[1], F_SETFD, 0);
 		drop_privileges(uid, gid, user, home, shell);
-		comp_argv[0] = (char *)RDPD_WAYLAND_PATH;
-		comp_argv[1] = (char *)"--headless";
-		comp_argv[2] = opt_width;
-		comp_argv[3] = opt_height;
-		comp_argv[4] = opt_fd;
-		comp_argv[5] = opt_sock;
-		comp_argv[6] = (char *)"--session";
-		comp_argv[7] = NULL;
+		argc = 0;
+		comp_argv[argc++] = (char *)RDPD_WAYLAND_PATH;
+		comp_argv[argc++] = (char *)"--headless";
+		comp_argv[argc++] = opt_width;
+		comp_argv[argc++] = opt_height;
+		comp_argv[argc++] = opt_fd;
+		comp_argv[argc++] = opt_sock;
+		comp_argv[argc++] = (char *)"--session";
+		comp_argv[argc++] = (char *)"--glass";
+		if (access("/usr/share/keiland/wallpaper.png", R_OK) == 0)
+			comp_argv[argc++] = (char *)"--wallpaper=/usr/share/keiland/wallpaper.png";
+		comp_argv[argc] = NULL;
 		execv(RDPD_WAYLAND_PATH, comp_argv);
 		_exit(127);
 	}
@@ -258,8 +261,6 @@ rdpd_session_start(
 	close(sv[1]);
 	sess->compositor_pid = comp_pid;
 	sess->rdp_fd = sv[0];
-	(void)sess_pid;
-	(void)sess_argv;
 	return 0;
 }
 
