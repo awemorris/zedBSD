@@ -100,6 +100,9 @@ struct run_state {
 	uint32_t width;
 	uint32_t height;
 
+	/* Nonzero while the last frame could not be shown because every window buffer was busy. */
+	int present_busy;
+
 	/* What failed last, the display's result of it, and why the run ended normally. */
 	const char *operation;
 	int result;
@@ -651,6 +654,8 @@ run_loop(
 		 */
 		if (run_screen->changed && !run_window.page_active && !run_window.picture_active) {
 			wait = terminal_window_frame_wait(&run_window, now);
+			if (run->present_busy && wait == 0)
+				wait = 16;
 			if (wait < timeout)
 				timeout = wait;
 		}
@@ -660,10 +665,16 @@ run_loop(
 			moving = terminal_page_moving();
 			if (moving) {
 				wait = terminal_window_frame_wait(&run_window, now);
+				if (run->present_busy && wait == 0)
+					wait = 16;
 				if (wait < timeout)
 					timeout = wait;
 			}
 		}
+
+		/* A picture's frame waiting for a free window buffer wakes as soon as the compositor returns one. */
+		if (run_window.picture_active && run_screen->changed && run->present_busy && timeout > 16)
+			timeout = 16;
 
 		/* A connection that still has something now (whatever events come) is not waited for. */
 		for (index = 0; index < run_tab_count; index++) {
@@ -890,11 +901,18 @@ run_loop(
 			error = EIO;
 		terminal_window_frame_shown(&run_window, asked, error);
 
+		/* The window's buffers are all still with the compositor: keep the change and wait for one to return. */
+		if (status == EBUSY) {
+			run->present_busy = 1;
+			continue;
+		}
+
 		/* A drawing out of date: the size is taken again, unless that keeps failing. */
 		if (status == EAGAIN) {
 			stale++;
 			if (stale > RUN_STALE_LIMIT)
 				return -1;
+			run->present_busy = 0;
 			run_window.resized = 1;
 			continue;
 		}
@@ -905,6 +923,7 @@ run_loop(
 
 		/* The grid on the window is up to date. */
 		stale = 0U;
+		run->present_busy = 0;
 		run_screen->changed = 0;
 
 		/* The input method's candidates stay next to the cursor as drawn (only a change is sent). */
@@ -3118,8 +3137,16 @@ run_page_frame(
 		error = EIO;
 	terminal_window_frame_shown(&run_window, asked, error);
 
+	/* The window's buffers are all still with the compositor: draw again when one returns. */
+	if (status == EBUSY) {
+		run->present_busy = 1;
+		terminal_page_shown(&run_window);
+		return 0;
+	}
+
 	/* A drawing out of date is remade, and the page drawn again. */
 	if (status == EAGAIN) {
+		run->present_busy = 0;
 		run_window.resized = 1;
 		terminal_page_shown(&run_window);
 		return 0;
@@ -3130,6 +3157,7 @@ run_page_frame(
 		return -1;
 
 	/* Succeeded: the page is on the window. */
+	run->present_busy = 0;
 	return 0;
 }
 
@@ -3529,8 +3557,15 @@ run_picture_frame(
 		error = EIO;
 	terminal_window_frame_shown(&run_window, asked, error);
 
+	/* The window's buffers are all still with the compositor: draw again when one returns. */
+	if (status == EBUSY) {
+		run->present_busy = 1;
+		return 0;
+	}
+
 	/* A drawing out of date is remade, and the picture drawn again. */
 	if (status == EAGAIN) {
+		run->present_busy = 0;
 		run_window.resized = 1;
 		return 0;
 	}
@@ -3540,6 +3575,7 @@ run_picture_frame(
 		return -1;
 
 	/* Succeeded: the picture is on the window. */
+	run->present_busy = 0;
 	run_screen->changed = 0;
 	return 0;
 }

@@ -21,12 +21,14 @@
 #include <string.h>
 
 /*
- * The drawing of one window: the painting, the window it shows on, and
- * the call that failed last with its errno value (0 until one fails).
+ * The drawing of one window: the painting, the window it shows on,
+ * whether the frame painted last has not been shown yet, and the call
+ * that failed last with its errno value (0 until one fails).
  */
 struct terminal_display {
 	struct terminal_cpu cpu;
 	struct kl_window *window;
+	int pending;
 	const char *operation;
 	int result;
 };
@@ -109,7 +111,8 @@ terminal_display_resize(
  * Paints the grid, and over it the composed text, and shows the parts
  * that changed.
  *
- * Returns 0, EAGAIN when the window's size changed (the caller resizes and
+ * Returns 0, EBUSY when the window has no free buffer to show the frame
+ * yet, EAGAIN when the window's size changed (the caller resizes and
  * draws again), or an errno value.
  */
 int
@@ -120,23 +123,38 @@ terminal_display_draw(
 	const struct terminal_window *window)
 {
 	struct kl_rect parts[TERMINAL_CPU_BANDS];
+	const struct kl_rect *shown;
 	unsigned count;
 	int changed;
 	int error;
 
 	/* The frame's quads painted where they changed. */
 	changed = terminal_cpu_draw(&display->cpu, screen, font, window, parts, &count);
-	if (!changed)
+	if (!changed && !display->pending)
 		return 0;
 
-	/* The parts shown (all of it for none). */
+	/* A frame whose last showing did not go out is shown whole. */
+	shown = parts;
+	if (display->pending) {
+		shown = NULL;
+		count = 0U;
+	}
+
+	/* The parts shown (all of it for none); a window with no free buffer asks to try again later. */
 	display->operation = "kl_window_present_parts";
-	error = kl_window_present_parts(display->window, display->cpu.pixels, (size_t)display->cpu.width, parts, count);
+	error = kl_window_present_parts(display->window, display->cpu.pixels, (size_t)display->cpu.width, shown, count);
 	display->result = error;
-	if (error != 0)
+	if (error == EAGAIN) {
+		display->pending = 1;
+		return EBUSY;
+	}
+	if (error != 0) {
+		display->pending = 1;
 		return error;
+	}
 
 	/* Succeeded: the grid is on the window. */
+	display->pending = 0;
 	return 0;
 }
 
@@ -145,8 +163,9 @@ terminal_display_draw(
  * another) in the grid's place; the next grid is painted whole, since the
  * window no longer shows the last one.
  *
- * Returns 0, EAGAIN when the frame is not the size the window is shown at
- * (the caller resizes and paints again), or an errno value.
+ * Returns 0, EBUSY when the window has no free buffer to show the frame
+ * yet, EAGAIN when the frame is not the size the window is shown at (the
+ * caller resizes and paints again), or an errno value.
  */
 int
 terminal_display_page(
@@ -161,15 +180,18 @@ terminal_display_page(
 	if (width != display->cpu.width || height != display->cpu.height)
 		return EAGAIN;
 
-	/* The whole frame shown. */
+	/* The whole frame shown; a window with no free buffer asks to try again later. */
 	display->operation = "kl_window_present";
 	error = kl_window_present(display->window, pixels, (size_t)width);
 	display->result = error;
+	if (error == EAGAIN)
+		return EBUSY;
 	if (error != 0)
 		return error;
 
 	/* Succeeded: the next grid covers the page whole. */
 	display->cpu.whole = 1;
+	display->pending = 0;
 	return 0;
 }
 
