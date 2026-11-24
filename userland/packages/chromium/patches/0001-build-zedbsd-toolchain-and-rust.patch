@@ -383,6 +383,37 @@
 +x86_64-unknown-zedbsd
  powerpc64le-unknown-linux-gnu
  s390x-unknown-linux-gnu
+--- a/build/rust/std/BUILD.gn
++++ b/build/rust/std/BUILD.gn
+@@ -145,6 +145,8 @@
+     # rolling the Rust toolchain?
+     if (is_android) {
+       libs = [ "dl" ]
++    } else if (target_os == "zedbsd") {
++      libs = []
+     } else if (target_os == "freebsd") {
+       libs = [
+         "execinfo",
+--- a/build/rust/std/rules/BUILD.gn
++++ b/build/rust/std/rules/BUILD.gn
+@@ -1564,6 +1564,7 @@
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/vendor/libc-0.2.189/src/unix/solarish/x86.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/vendor/libc-0.2.189/src/unix/solarish/x86_64.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/vendor/libc-0.2.189/src/unix/solarish/x86_common.rs",
++    "//third_party/rust-toolchain/lib/rustlib/src/rust/library/vendor/libc-0.2.189/src/unix/zedbsd/mod.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/vendor/libc-0.2.189/src/vxworks/aarch64.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/vendor/libc-0.2.189/src/vxworks/arm.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/vendor/libc-0.2.189/src/vxworks/mod.rs",
+@@ -2468,6 +2469,9 @@
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/windows/net/mod.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/windows/net/stream.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/windows/process.rs",
++    "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/zedbsd/fs.rs",
++    "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/zedbsd/mod.rs",
++    "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/zedbsd/raw.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/windows/raw.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/windows/thread.rs",
+     "//third_party/rust-toolchain/lib/rustlib/src/rust/library/std/src/os/xous/ffi.rs",
 --- /dev/null
 +++ b/build/rust/x86_64-unknown-zedbsd.json
 @@ -0,0 +1,42 @@
@@ -400,7 +431,7 @@
 +  "linker-flavor": "gnu-cc",
 +  "llvm-target": "x86_64-unknown-zedbsd",
 +  "max-atomic-width": 64,
-+  "os": "freebsd",
++  "os": "zedbsd",
 +  "plt-by-default": false,
 +  "position-independent-executables": true,
 +  "pre-link-args": {
