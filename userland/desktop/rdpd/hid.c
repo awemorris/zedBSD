@@ -288,8 +288,8 @@ rdpd_hid_open(
 	uint32_t height)
 {
 	struct input_bridge_setup setup;
+	struct input_bridge_device dev;
 	size_t dlen;
-	uint32_t dev;
 	ssize_t wr;
 	int err;
 	int rc;
@@ -330,10 +330,10 @@ rdpd_hid_open(
 	}
 
 	/* Queries the assigned /dev/input/eventN index. */
-	dev = 0U;
+	memset(&dev, 0, sizeof(dev));
 	rc = ioctl(hid->fd, INPUT_BRIDGE_GET_DEVICE, &dev);
-	if (rc == 0)
-		hid->event_dev = dev;
+	if (rc == 0 && dev.event >= 0)
+		hid->event_dev = (uint32_t)dev.event;
 	return 0;
 }
 

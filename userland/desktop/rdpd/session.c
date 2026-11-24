@@ -78,7 +78,7 @@ rdpd_auth_user(
 	int rc;
 	int d1;
 	int d2;
-	char *argv[3];
+	char *argv[2];
 	pid_t wp;
 	int exited;
 	int exit_code;
@@ -119,17 +119,17 @@ rdpd_auth_user(
 		close(in_pipe[0]);
 		close(out_pipe[1]);
 		argv[0] = (char *)RDPD_PASSKEY_PATH;
-		argv[1] = (char *)"check";
-		argv[2] = NULL;
+		argv[1] = NULL;
 		execv(RDPD_PASSKEY_PATH, argv);
 		_exit(127);
 	}
 
-	/* Sends user and password lines and waits for passkey exit code. */
+	/* Sends 4-line passkey auth request and waits for exit code. */
 	close(in_pipe[0]);
 	close(out_pipe[1]);
+	(void)write_str_fd(in_pipe[1], "auth\n", 5U);
 	(void)write_str_fd(in_pipe[1], user, strlen(user));
-	(void)write_str_fd(in_pipe[1], "\n", 1U);
+	(void)write_str_fd(in_pipe[1], "\npassword\n", 10U);
 	(void)write_str_fd(in_pipe[1], password, strlen(password));
 	(void)write_str_fd(in_pipe[1], "\n", 1U);
 	close(in_pipe[1]);
