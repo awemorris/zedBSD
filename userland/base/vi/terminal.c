@@ -15,13 +15,15 @@
 #include "userland/base/vi/vi.h"
 
 #include <errno.h>
-#include <poll.h>
-#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
+#ifndef _WIN32
+#include <poll.h>
+#include <signal.h>
 #include <sys/ioctl.h>
 #include <time.h>
 #include <unistd.h>
+#endif
 
 /*
  * How long a key sequence may pause after ESC, in milliseconds.  A longer
@@ -30,8 +32,16 @@
 #define TERMINAL_ESCAPE_WAIT 50
 
 /* The longest key sequence read after ESC [ or ESC O. */
+#ifdef _WIN32
+#define TERMINAL_SEQUENCE_LENGTH 32
+#else
 #define TERMINAL_SEQUENCE_LENGTH 8
+#endif
 
+#ifdef _WIN32
+int vi_win32_read_byte(struct vi_terminal *terminal, int wait, unsigned char *byte);
+#define read_byte vi_win32_read_byte
+#else
 /*
  * One control string vi uses, with the VT100 string that stands in for
  * it when the terminal has no description.
@@ -69,9 +79,11 @@ static int terminal_described_columns;
 
 static int load_description(struct vi_terminal *terminal);
 static int read_byte(struct vi_terminal *terminal, int wait, unsigned char *byte);
+#endif
 static int read_sequence(struct vi_terminal *terminal, unsigned char introducer);
 static int sequence_key(const unsigned char *sequence, size_t length);
 
+#ifndef _WIN32
 /*
  * Checks that vi runs on a terminal and learns how to drive it.
  *
@@ -222,6 +234,7 @@ vi_terminal_measure(
 	if (terminal->columns < VI_MINIMUM_COLUMNS)
 		terminal->columns = VI_MINIMUM_COLUMNS;
 }
+#endif /* !_WIN32 */
 
 /*
  * Adds bytes to the output that the next flush writes.
@@ -296,6 +309,7 @@ vi_terminal_command(
 	vi_terminal_put(terminal, capability, length);
 }
 
+#ifndef _WIN32
 /*
  * Writes the collected output to the terminal.
  *
@@ -327,6 +341,7 @@ vi_terminal_flush(
 	/* The buffer is empty again. */
 	terminal->output_length = 0;
 }
+#endif /* !_WIN32 */
 
 /*
  * Reads one key.
@@ -383,6 +398,7 @@ vi_terminal_read_key(
 	return VI_KEY_ESCAPE;
 }
 
+#ifndef _WIN32
 /*
  * Tells whether a key is already waiting, so that drawing can wait until
  * typed-ahead or pasted keys are taken.
@@ -569,6 +585,7 @@ read_byte(
 	/* Succeeded: one byte read. */
 	return 1;
 }
+#endif /* !_WIN32 */
 
 /*
  * Reads the rest of a key sequence after ESC [ or ESC O and names the key.
@@ -605,6 +622,30 @@ read_sequence(
 		if (byte >= 0x40 && byte <= 0x7e)
 			break;
 	}
+
+#ifdef _WIN32
+	/* In-band resize report from parent terminal: CSI 8 ; rows ; cols t. */
+	if (terminal->pipe_mode && length >= 7U && length < TERMINAL_SEQUENCE_LENGTH &&
+	    sequence[0] == '[' && sequence[1] == '8' && sequence[2] == ';' &&
+	    sequence[length - 1U] == 't') {
+		unsigned long rows;
+		unsigned long cols;
+		char *end_rows;
+		char *end_cols;
+
+		sequence[length] = '\0';
+		rows = strtoul((const char *)(sequence + 3), &end_rows, 10);
+		if (end_rows != NULL && *end_rows == ';') {
+			cols = strtoul(end_rows + 1, &end_cols, 10);
+			if (end_cols != NULL && *end_cols == 't' && rows > 0UL && cols > 0UL) {
+				terminal->pipe_rows = (int)rows;
+				terminal->pipe_columns = (int)cols;
+				terminal->resize_pending = 1;
+				return -1;
+			}
+		}
+	}
+#endif
 
 	/* Names the key the whole sequence stands for. */
 	key = sequence_key(sequence, length);

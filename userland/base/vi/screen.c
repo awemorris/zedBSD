@@ -85,7 +85,9 @@ struct row_text {
 static size_t decode(const char *text, size_t length, size_t offset, unsigned long *code);
 static void read_unit(const char *text, size_t length, size_t offset, size_t logical, struct unit *unit);
 static int ambiguous_wide_enabled(void);
+#ifndef _WIN32
 static int is_ambiguous(unsigned long code);
+#endif
 static int code_width(unsigned long code);
 static int place(struct layout *layout, int width, int *row, int *column);
 static void layout_start(struct layout *layout, const struct vi_line *line, int columns);
@@ -580,6 +582,7 @@ ambiguous_wide_enabled(
 	return 0;
 }
 
+#ifndef _WIN32
 /* Tells whether a code point is East Asian Ambiguous. */
 static int
 is_ambiguous(
@@ -610,12 +613,22 @@ is_ambiguous(
 	/* No range holds the code point. */
 	return 0;
 }
+#endif
 
 /* Gives the columns a code point takes on the terminal, or -1 if it cannot be shown. */
 static int
 code_width(
 	unsigned long code)
 {
+#ifdef _WIN32
+	if (code < 0x20UL || (code >= 0x7fUL && code <= 0x9fUL))
+		return -1;
+	if (terminal_width_combining((uint32_t)code))
+		return 0;
+	if (terminal_width_wide((uint32_t)code, ambiguous_wide_enabled()))
+		return 2;
+	return 1;
+#else
 	int width;
 
 	/* The C library knows the widths, CJK being two columns. */
@@ -625,6 +638,7 @@ code_width(
 
 	/* Succeeded: the width. */
 	return width;
+#endif
 }
 
 /*
