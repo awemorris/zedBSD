@@ -18,12 +18,15 @@
 
 #include <errno.h>
 #include <locale.h>
+#ifndef _WIN32
 #include <signal.h>
+#include <unistd.h>
+#endif
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
+#ifndef _WIN32
 /*
  * The signals that arrived since they were last handled.
  *
@@ -34,6 +37,7 @@ static volatile sig_atomic_t vi_resize_requested;
 static volatile sig_atomic_t vi_continue_requested;
 static volatile sig_atomic_t vi_suspend_requested;
 static volatile sig_atomic_t vi_stop_requested;
+#endif
 
 /*
  * The editing session, which is large and lives for the whole run.  The
@@ -41,17 +45,19 @@ static volatile sig_atomic_t vi_stop_requested;
  */
 static struct vi_editor vi_session;
 
-static int parse_arguments(int argc, char **argv, const char **path, const char **start);
+static int parse_arguments(int argc, char **argv, const char **path, const char **start, int *mikuterm_mode);
 static void usage(void);
-static int start_editor(struct vi_editor *editor, const char *path, const char *start);
+static int start_editor(struct vi_editor *editor, const char *path, const char *start, int mikuterm_mode);
 static void place_start(struct vi_editor *editor, const char *start);
+#ifndef _WIN32
 static void install_handlers(struct vi_terminal *terminal);
 static void install_handler(int number, void (*handler)(int));
-static void restore_at_exit(void);
 static void resize_handler(int number);
 static void continue_handler(int number);
 static void suspend_handler(int number);
 static void stop_handler(int number);
+#endif
+static void restore_at_exit(void);
 
 /*
  * Edits the file named on the command line.
@@ -64,6 +70,7 @@ main(
 	struct vi_editor *editor;
 	const char *path;
 	const char *start;
+	int mikuterm_mode;
 	int modified;
 	int status;
 	int key;
@@ -72,15 +79,19 @@ main(
 	editor = &vi_session;
 
 	/* Text is UTF-8 whatever the environment says; this gives wcwidth its tables. */
+#ifdef _WIN32
+	(void)setlocale(LC_CTYPE, ".UTF-8");
+#else
 	(void)setlocale(LC_CTYPE, "C.UTF-8");
+#endif
 
 	/* Reads the options and the file name. */
-	status = parse_arguments(argc, argv, &path, &start);
+	status = parse_arguments(argc, argv, &path, &start, &mikuterm_mode);
 	if (status != 0)
 		return status;
 
 	/* Reads the file and readies the terminal. */
-	status = start_editor(editor, path, start);
+	status = start_editor(editor, path, start, mikuterm_mode);
 	if (status != 0)
 		return status;
 
@@ -138,6 +149,22 @@ int
 vi_signal_pending(
 	struct vi_editor *editor)
 {
+#ifdef _WIN32
+	if (editor->terminal.stop_pending) {
+		editor->quit = 1;
+		editor->exit_status = 1;
+		return 1;
+	}
+
+	if (editor->terminal.resize_pending) {
+		editor->terminal.resize_pending = 0;
+		vi_terminal_measure(&editor->terminal);
+		vi_terminal_command(&editor->terminal, editor->terminal.clear_string);
+		vi_screen_invalidate(editor);
+	}
+
+	return 0;
+#else
 	int error;
 
 	/* A hangup or a termination ends the session; unwritten changes go to a recovery file. */
@@ -177,6 +204,7 @@ vi_signal_pending(
 
 	/* Goes on waiting for a key. */
 	return 0;
+#endif
 }
 
 /*
@@ -187,6 +215,9 @@ void
 vi_suspend(
 	struct vi_editor *editor)
 {
+#ifdef _WIN32
+	vi_bell(editor);
+#else
 	sigset_t stop_set;
 	int error;
 
@@ -219,6 +250,7 @@ vi_suspend(
 	vi_terminal_measure(&editor->terminal);
 	vi_terminal_command(&editor->terminal, editor->terminal.clear_string);
 	vi_screen_invalidate(editor);
+#endif
 }
 
 /* Reads the command line: [+number | +] [--] [file]. */
@@ -227,7 +259,8 @@ parse_arguments(
 	int argc,
 	char **argv,
 	const char **path,
-	const char **start)
+	const char **start,
+	int *mikuterm_mode)
 {
 	int index;
 	int options_done;
@@ -236,6 +269,7 @@ parse_arguments(
 	/* Starts with no file, no start place, and options still allowed. */
 	*path = NULL;
 	*start = NULL;
+	*mikuterm_mode = 0;
 	options_done = 0;
 
 	/* Reads each argument in turn. */
@@ -246,6 +280,14 @@ parse_arguments(
 				*start = argv[index] + 1;
 				continue;
 			}
+
+#ifdef _WIN32
+			compare = strcmp(argv[index], "--mikuterm");
+			if (compare == 0) {
+				*mikuterm_mode = 1;
+				continue;
+			}
+#endif
 
 			/* The two hyphens end the options, so a file name may begin with a hyphen. */
 			compare = strcmp(argv[index], "--");
@@ -289,12 +331,18 @@ static int
 start_editor(
 	struct vi_editor *editor,
 	const char *path,
-	const char *start)
+	const char *start,
+	int mikuterm_mode)
 {
 	int error;
 
 	/* An empty session in command mode. */
 	memset(editor, 0, sizeof(*editor));
+#ifdef _WIN32
+	editor->terminal.mikuterm_mode = mikuterm_mode;
+#else
+	UNUSED_PARAMETER(mikuterm_mode);
+#endif
 	(void)vi_buffer_init(&editor->buffer);
 	vi_undo_init(&editor->undo);
 	editor->mode = VI_MODE_COMMAND;
@@ -345,7 +393,9 @@ start_editor(
 
 	/* Gives the terminal back however vi ends, and takes the signals vi handles. */
 	(void)atexit(restore_at_exit);
+#ifndef _WIN32
 	install_handlers(&editor->terminal);
+#endif
 
 	/* Puts the terminal into the editing mode. */
 	error = vi_terminal_enter(&editor->terminal);
@@ -385,6 +435,16 @@ place_start(
 	vi_cursor_first_nonblank(editor);
 }
 
+/* Gives the terminal back when the program exits by any path. */
+static void
+restore_at_exit(
+	void)
+{
+	/* Leaving twice is harmless; only the first call changes the terminal. */
+	vi_terminal_leave(&vi_session.terminal);
+}
+
+#ifndef _WIN32
 /*
  * Sets the handlers of the signals vi takes, and blocks those signals
  * except while waiting for a key, so that none can arrive between the
@@ -437,15 +497,6 @@ install_handler(
 	(void)sigaction(number, &action, NULL);
 }
 
-/* Gives the terminal back when the program exits by any path. */
-static void
-restore_at_exit(
-	void)
-{
-	/* Leaving twice is harmless; only the first call changes the terminal. */
-	vi_terminal_leave(&vi_session.terminal);
-}
-
 /* Notes a new window size. */
 static void
 resize_handler(
@@ -489,3 +540,4 @@ stop_handler(
 	/* Tells the main loop to end the session and keep unwritten changes. */
 	vi_stop_requested = 1;
 }
+#endif /* !_WIN32 */

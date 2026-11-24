@@ -15,9 +15,11 @@
 #define USERLAND_BASE_VI_VI_H
 
 #include <regex.h>
+#ifndef _WIN32
 #include <signal.h>
-#include <stddef.h>
 #include <termios.h>
+#endif
+#include <stddef.h>
 
 #include "userland/base/common/terminfo.h"
 
@@ -245,9 +247,24 @@ struct vi_register {
  * for a key; the editor's signals are blocked at all other times.
  */
 struct vi_terminal {
+#ifdef _WIN32
+	void *input_handle;
+	void *output_handle;
+	unsigned long saved_input_mode;
+	unsigned long saved_output_mode;
+	unsigned saved_input_cp;
+	unsigned saved_output_cp;
+	int pipe_mode;
+	int mikuterm_mode;
+	int pipe_rows;
+	int pipe_columns;
+	int resize_pending;
+	int stop_pending;
+#else
 	int input;
 	int output;
 	struct termios saved_modes;
+#endif
 	int modes_saved;
 	int raw;
 	int screen_entered;
@@ -266,8 +283,10 @@ struct vi_terminal {
 	size_t output_length;
 	unsigned char pushed_byte;
 	int has_pushed_byte;
+#ifndef _WIN32
 	sigset_t wait_mask;
 	int wait_mask_set;
+#endif
 };
 
 /*
@@ -335,6 +354,9 @@ struct vi_editor {
 	int exit_status;
 	struct vi_screen_row *screen;
 	int screen_rows;
+#ifdef _WIN32
+	int crlf;
+#endif
 };
 
 /* buffer.c */

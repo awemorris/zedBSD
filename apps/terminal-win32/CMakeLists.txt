@@ -153,6 +153,12 @@ foreach(header IN LISTS MIKUTERM_COMPAT_HEADERS)
 	configure_file(${MIKUTERM_ROOT}/include/libc/${header} ${MIKUTERM_INCLUDE}/${header} COPYONLY)
 endforeach()
 
+# The headers vi needs from zedBSD's C library side (<regex.h>, <terminfo.h>), copied apart so
+# that the rest of include/libc is not on the include path.
+set(MIKUTERM_VI_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/vi-include)
+configure_file(${MIKUTERM_ROOT}/include/libc/regex.h ${MIKUTERM_VI_INCLUDE}/regex.h COPYONLY)
+configure_file(${MIKUTERM_ROOT}/include/libc/terminfo.h ${MIKUTERM_VI_INCLUDE}/terminfo.h COPYONLY)
+
 # The version, for the resource and Help > About.
 configure_file(${MIKUTERM_VERSION_IN} ${MIKUTERM_INCLUDE}/mikuterm-version.h @ONLY)
 
@@ -265,6 +271,56 @@ else()
 	target_link_options(mikuterm PRIVATE -static -municode -Wl,--dependent-load-flag=0x800)
 endif()
 
+# TRE regular expressions for vi, with the Windows UTF-8 mbtowc shim.
+set(MIKUTERM_VI_TRE_SOURCES
+	${MIKUTERM_ROOT}/src/libc/regex/regcomp.c
+	${MIKUTERM_ROOT}/src/libc/regex/regerror.c
+	${MIKUTERM_ROOT}/src/libc/regex/regexec.c
+	${MIKUTERM_ROOT}/src/libc/regex/tre-mem.c
+	${MIKUTERM_DIR}/vi-tre-win32.c)
+add_library(vi_tre STATIC ${MIKUTERM_VI_TRE_SOURCES})
+target_include_directories(vi_tre PRIVATE ${MIKUTERM_ROOT} ${MIKUTERM_VI_INCLUDE} ${MIKUTERM_DIR})
+target_compile_definitions(vi_tre PRIVATE VI_TRE_BUILD _WIN32_WINNT=0x0A00 WINVER=0x0A00 UNICODE _UNICODE)
+if(MIKUTERM_MSVC_STYLE)
+	target_compile_options(vi_tre PRIVATE /std:c11 /W3 /utf-8 /FI${MIKUTERM_DIR}/vi-tre-win32.h)
+	target_compile_definitions(vi_tre PRIVATE _CRT_SECURE_NO_WARNINGS _CRT_NONSTDC_NO_WARNINGS)
+	if(MIKUTERM_WERROR)
+		target_compile_options(vi_tre PRIVATE /WX)
+	endif()
+else()
+	target_compile_options(vi_tre PRIVATE
+		-std=gnu11 -Wall -Wextra -Wno-unknown-warning-option -Wno-maybe-uninitialized -Wno-pointer-to-int-cast
+		-include ${MIKUTERM_DIR}/vi-tre-win32.h)
+	if(MIKUTERM_WERROR)
+		target_compile_options(vi_tre PRIVATE -Werror)
+	endif()
+endif()
+
+# The embedded vi editor (runs standalone in Windows Console or as mikuterm's child over pipes).
+set(MIKUTERM_VI_SOURCES
+	${MIKUTERM_ROOT}/userland/base/vi/main.c
+	${MIKUTERM_ROOT}/userland/base/vi/command.c
+	${MIKUTERM_ROOT}/userland/base/vi/ex.c
+	${MIKUTERM_ROOT}/userland/base/vi/search.c
+	${MIKUTERM_ROOT}/userland/base/vi/screen.c
+	${MIKUTERM_ROOT}/userland/base/vi/terminal.c
+	${MIKUTERM_ROOT}/userland/base/vi/buffer.c
+	${MIKUTERM_ROOT}/userland/base/vi/undo.c
+	${MIKUTERM_ROOT}/userland/base/vi/file.c
+	${MIKUTERM_ROOT}/userland/base/common/terminfo.c
+	${MIKUTERM_ROOT}/userland/desktop/terminal/width.c
+	${MIKUTERM_DIR}/vi-terminal-win32.c
+	${MIKUTERM_DIR}/vi-file-win32.c)
+add_executable(vi ${MIKUTERM_VI_SOURCES})
+target_include_directories(vi PRIVATE ${MIKUTERM_ROOT} ${MIKUTERM_VI_INCLUDE})
+target_link_libraries(vi PRIVATE mikuterm_flags vi_tre)
+if(MIKUTERM_MSVC_STYLE)
+	set_property(TARGET vi PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+	target_link_options(vi PRIVATE /DEPENDENTLOADFLAG:0x800)
+else()
+	target_link_options(vi PRIVATE -static -Wl,--dependent-load-flag=0x800)
+endif()
+
 # The fonts of the zip's share\fonts (the names libkeiland and the terminal look for) and their licenses.
 set(MIKUTERM_SHARE
 	"fonts/keiland.ttf=${MIKUTERM_ROOT}/userland/desktop/fonts/Mahora-Regular.ttf"
@@ -278,7 +334,8 @@ set(MIKUTERM_SHARE
 	"licenses/JetBrainsMono-OFL.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/JetBrainsMono-OFL.txt"
 	"licenses/DroidSansFallback-LICENSE.txt=${MIKUTERM_ROOT}/userland/desktop/fonts/DroidSansFallback-LICENSE.txt"
 	"licenses/NotoColorEmoji-OFL-1.1.txt=${MIKUTERM_ROOT}/userland/packages/fonts/noto-color-emoji/OFL-1.1.txt"
-	"licenses/Unicode-License-V3.txt=${MIKUTERM_ROOT}/userland/base/licenses/browser/Unicode-License-V3")
+	"licenses/Unicode-License-V3.txt=${MIKUTERM_ROOT}/userland/base/licenses/browser/Unicode-License-V3"
+	"licenses/TRE-LICENSE.txt=${MIKUTERM_ROOT}/src/libc/regex/LICENSE")
 
 # The folder's own files: the guide, the samples a user edits, and where a user puts fonts.
 set(MIKUTERM_FOLDER_FILES
@@ -314,12 +371,17 @@ add_custom_command(OUTPUT ${MIKUTERM_NOTO_FILE}
 # fonts and the licenses.
 #
 set(MIKUTERM_DIST ${CMAKE_CURRENT_BINARY_DIR}/mikuterm)
-set(MIKUTERM_DIST_OUTPUTS ${MIKUTERM_DIST}/mikuterm.exe)
+set(MIKUTERM_DIST_OUTPUTS ${MIKUTERM_DIST}/mikuterm.exe ${MIKUTERM_DIST}/vi.exe)
 if(MIKUTERM_MSVC_STYLE)
 	add_custom_command(OUTPUT ${MIKUTERM_DIST}/mikuterm.exe
 		COMMAND ${CMAKE_COMMAND} -E make_directory ${MIKUTERM_DIST}
 		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:mikuterm> ${MIKUTERM_DIST}/mikuterm.exe
 		DEPENDS mikuterm
+		VERBATIM)
+	add_custom_command(OUTPUT ${MIKUTERM_DIST}/vi.exe
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${MIKUTERM_DIST}
+		COMMAND ${CMAKE_COMMAND} -E copy $<TARGET_FILE:vi> ${MIKUTERM_DIST}/vi.exe
+		DEPENDS vi
 		VERBATIM)
 else()
 	add_custom_command(OUTPUT ${MIKUTERM_DIST}/mikuterm.exe
@@ -328,6 +390,13 @@ else()
 		COMMAND ${CMAKE_OBJCOPY} --strip-debug --add-gnu-debuglink=${CMAKE_CURRENT_BINARY_DIR}/mikuterm.dbg
 			$<TARGET_FILE:mikuterm> ${MIKUTERM_DIST}/mikuterm.exe
 		DEPENDS mikuterm
+		VERBATIM)
+	add_custom_command(OUTPUT ${MIKUTERM_DIST}/vi.exe
+		COMMAND ${CMAKE_COMMAND} -E make_directory ${MIKUTERM_DIST}
+		COMMAND ${CMAKE_OBJCOPY} --only-keep-debug $<TARGET_FILE:vi> ${CMAKE_CURRENT_BINARY_DIR}/vi.dbg
+		COMMAND ${CMAKE_OBJCOPY} --strip-debug --add-gnu-debuglink=${CMAKE_CURRENT_BINARY_DIR}/vi.dbg
+			$<TARGET_FILE:vi> ${MIKUTERM_DIST}/vi.exe
+		DEPENDS vi
 		VERBATIM)
 endif()
 foreach(pair IN LISTS MIKUTERM_SHARE MIKUTERM_FOLDER_FILES)

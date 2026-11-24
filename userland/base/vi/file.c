@@ -13,6 +13,8 @@
 
 #include "userland/base/vi/vi.h"
 
+#ifndef _WIN32
+
 #include <errno.h>
 #include <fcntl.h>
 #include <limits.h>
@@ -1009,3 +1011,5 @@ dangling_target(
 	/* Succeeded: the caller owns the name. */
 	return 0;
 }
+
+#endif /* !_WIN32 */
