@@ -173,12 +173,10 @@ enc_query(
 {
 	if (count == NULL)
 		return EINVAL;
-
 	if (codec != MEDIA_CODEC_H264) {
 		*count = 0U;
 		return 0;
 	}
-
 	*count = 1U;
 	if (infos != NULL && capacity > 0U) {
 		memset(&infos[0], 0, sizeof(infos[0]));
@@ -207,7 +205,6 @@ enc_query(
 			MEDIA_ENCODER_INPUT_NV12 | MEDIA_ENCODER_INPUT_I420;
 		infos[0].flags = MEDIA_ENCODER_RATE_CHANGE;
 	}
-
 	return 0;
 }
 
@@ -221,25 +218,19 @@ enc_open(
 	size_t y_bytes;
 	size_t c_bytes;
 	size_t mb_count;
-
 	if (config == NULL || state == NULL)
 		return EINVAL;
-
 	if (config->codec != MEDIA_CODEC_H264)
 		return MEDIA_PROBLEM_CONFIG;
-
 	if (config->input != MEDIA_ENCODER_INPUT_NV12 &&
 	    config->input != MEDIA_ENCODER_INPUT_I420)
 		return MEDIA_PROBLEM_CONFIG;
-
 	if (config->profile != MEDIA_ENCODER_PROFILE_DEFAULT &&
 	    config->profile != MEDIA_ENCODER_PROFILE_H264_CONSTRAINED_BASELINE)
 		return MEDIA_PROBLEM_CONFIG;
-
 	enc = (struct h264sw_enc *)calloc(1U, sizeof(*enc));
 	if (enc == NULL)
 		return ENOMEM;
-
 	enc->width = config->width;
 	enc->height = config->height;
 	enc->mb_w = (config->width + 15U) / 16U;
@@ -251,14 +242,11 @@ enc_open(
 		enc->qp = H264ENC_QP_MIN;
 	if (enc->qp > H264ENC_QP_MAX)
 		enc->qp = H264ENC_QP_MAX;
-
 	enc->key_interval = config->key_interval > 0U ? config->key_interval : 60U;
 	enc->force_idr = 1;
-
 	y_bytes = (size_t)enc->stride_y * (size_t)(enc->mb_h * 16U);
 	c_bytes = (size_t)enc->stride_c * (size_t)(enc->mb_h * 8U);
 	mb_count = (size_t)enc->mb_w * (size_t)enc->mb_h;
-
 	enc->cur_y = (uint8_t *)calloc(1U, y_bytes);
 	enc->cur_u = (uint8_t *)calloc(1U, c_bytes);
 	enc->cur_v = (uint8_t *)calloc(1U, c_bytes);
@@ -271,7 +259,6 @@ enc_open(
 	enc->ps_buf = (uint8_t *)malloc(256U);
 	enc->au_buf = (uint8_t *)malloc(H264ENC_BUF_CAP);
 	enc->rbsp = (uint8_t *)malloc(H264ENC_BUF_CAP);
-
 	if (enc->cur_y == NULL || enc->cur_u == NULL || enc->cur_v == NULL ||
 	    enc->ref_y == NULL || enc->ref_u == NULL || enc->ref_v == NULL ||
 	    enc->nz_y == NULL || enc->nz_u == NULL || enc->nz_v == NULL ||
@@ -279,12 +266,10 @@ enc_open(
 		enc_close(enc);
 		return ENOMEM;
 	}
-
 	if (build_parameter_sets(enc) != 0) {
 		enc_close(enc);
 		return EINVAL;
 	}
-
 	*state = enc;
 	return 0;
 }
@@ -301,20 +286,16 @@ enc_send(
 	int is_idr;
 	unsigned fmt;
 	int error;
-
 	enc = (struct h264sw_enc *)state;
 	if (picture == NULL) {
 		enc->draining = 1;
 		return 0;
 	}
-
 	if (enc->has_packet != 0)
 		return EAGAIN;
-
 	fmt = picture->plane[2] != NULL ?
 	      MEDIA_ENCODING_FORMAT_I420 : MEDIA_ENCODING_FORMAT_NV12;
 	copy_picture_planes(enc, picture, fmt);
-
 	is_idr = 0;
 	if (enc->force_idr != 0 || (flags & MEDIA_ENCODE_FORCE_KEY) != 0U ||
 	    enc->frames_since_idr >= enc->key_interval) {
@@ -325,18 +306,15 @@ enc_send(
 	} else {
 		enc->frames_since_idr++;
 	}
-
 	error = encode_frame(enc, is_idr);
 	if (error != 0)
 		return error;
-
 	enc->pkt_time = time_us;
 	enc->pkt_key = is_idr;
 	enc->has_packet = 1;
 	enc->frame_num = (enc->frame_num + 1U) & 15U;
 	if (is_idr != 0)
 		enc->idr_id = (enc->idr_id + 1U) & 7U;
-
 	return 0;
 }
 
@@ -348,16 +326,13 @@ enc_receive(
 	struct media_encoded *packet)
 {
 	struct h264sw_enc *enc;
-
 	(void)flags;
 	enc = (struct h264sw_enc *)state;
 	if (enc->has_packet == 0) {
 		if (enc->draining != 0)
 			return MEDIA_ENCODER_DRAINED;
-
 		return EAGAIN;
 	}
-
 	packet->data = enc->au_buf;
 	packet->size = enc->au_len;
 	packet->time_us = enc->pkt_time;
@@ -375,7 +350,6 @@ enc_set_rate(
 	uint32_t max_bitrate)
 {
 	struct h264sw_enc *enc;
-
 	(void)max_bitrate;
 	enc = (struct h264sw_enc *)state;
 	if (bitrate < 500000U)
@@ -384,7 +358,6 @@ enc_set_rate(
 		enc->qp = 28U;
 	else
 		enc->qp = 24U;
-
 	return 0;
 }
 
@@ -396,7 +369,6 @@ enc_parameter_sets(
 	size_t *size)
 {
 	const struct h264sw_enc *enc;
-
 	enc = (const struct h264sw_enc *)state;
 	*data = enc->ps_buf;
 	*size = enc->ps_len;
@@ -410,7 +382,6 @@ enc_stats(
 	struct media_encoder_stats *stats)
 {
 	const struct h264sw_enc *enc;
-
 	enc = (const struct h264sw_enc *)state;
 	*stats = enc->stats;
 }
@@ -421,10 +392,8 @@ enc_close(
 	void *state)
 {
 	struct h264sw_enc *enc;
-
 	if (state == NULL)
 		return;
-
 	enc = (struct h264sw_enc *)state;
 	free(enc->cur_y);
 	free(enc->cur_u);
@@ -464,7 +433,6 @@ bw_put_bit(
 {
 	if (bw->overflow != 0)
 		return;
-
 	bw->cur = (uint8_t)((bw->cur << 1) | (bit & 1U));
 	bw->bit_pos++;
 	if (bw->bit_pos == 8U) {
@@ -472,7 +440,6 @@ bw_put_bit(
 			bw->overflow = 1;
 			return;
 		}
-
 		bw->data[bw->byte_pos++] = bw->cur;
 		bw->cur = 0U;
 		bw->bit_pos = 0U;
@@ -487,7 +454,6 @@ bw_put_bits(
 	unsigned n)
 {
 	unsigned i;
-
 	for (i = n; i > 0U; i--)
 		bw_put_bit(bw, (val >> (i - 1U)) & 1U);
 }
@@ -501,7 +467,6 @@ bw_put_ue(
 	uint32_t code;
 	unsigned bits;
 	uint32_t tmp;
-
 	code = val + 1U;
 	bits = 0U;
 	tmp = code;
@@ -509,10 +474,8 @@ bw_put_ue(
 		bits++;
 		tmp >>= 1;
 	}
-
 	if (bits > 1U)
 		bw_put_bits(bw, 0U, bits - 1U);
-
 	bw_put_bits(bw, code, bits);
 }
 
@@ -523,12 +486,10 @@ bw_put_se(
 	int32_t val)
 {
 	uint32_t mapped;
-
 	if (val <= 0)
 		mapped = (uint32_t)(-val) * 2U;
 	else
 		mapped = (uint32_t)val * 2U - 1U;
-
 	bw_put_ue(bw, mapped);
 }
 
@@ -554,37 +515,30 @@ rbsp_to_annexb(
 	size_t pos;
 	size_t i;
 	unsigned zeros;
-
 	if (out_cap < 5U)
 		return 0U;
-
 	pos = 0U;
 	out[pos++] = 0x00U;
 	out[pos++] = 0x00U;
 	out[pos++] = 0x00U;
 	out[pos++] = 0x01U;
 	out[pos++] = nal_hdr;
-
 	zeros = 0U;
 	for (i = 0U; i < rbsp_len; i++) {
 		if (zeros == 2U && rbsp[i] <= 0x03U) {
 			if (pos >= out_cap)
 				return 0U;
-
 			out[pos++] = 0x03U;
 			zeros = 0U;
 		}
-
 		if (pos >= out_cap)
 			return 0U;
-
 		out[pos++] = rbsp[i];
 		if (rbsp[i] == 0x00U)
 			zeros++;
 		else
 			zeros = 0U;
 	}
-
 	return pos;
 }
 
@@ -614,7 +568,6 @@ build_parameter_sets(
 	bw_put_ue(&bw, enc->mb_h - 1U);
 	bw_put_bit(&bw, 1U);
 	bw_put_bit(&bw, 1U);
-
 	crop_r = (enc->mb_w * 16U - enc->width) / 2U;
 	crop_b = (enc->mb_h * 16U - enc->height) / 2U;
 	if (crop_r > 0U || crop_b > 0U) {
@@ -626,12 +579,10 @@ build_parameter_sets(
 	} else {
 		bw_put_bit(&bw, 0U);
 	}
-
 	bw_put_bit(&bw, 0U);
 	bw_trailing_bits(&bw);
 	if (bw.overflow != 0)
 		return EINVAL;
-
 	sps_sz = rbsp_to_annexb(tmp, bw.byte_pos, 0x67U, enc->ps_buf, 256U);
 	if (sps_sz == 0U)
 		return EINVAL;
@@ -656,12 +607,10 @@ build_parameter_sets(
 	bw_trailing_bits(&bw);
 	if (bw.overflow != 0)
 		return EINVAL;
-
 	pps_sz = rbsp_to_annexb(tmp, bw.byte_pos, 0x68U, enc->ps_buf + sps_sz,
 				256U - sps_sz);
 	if (pps_sz == 0U)
 		return EINVAL;
-
 	enc->ps_len = sps_sz + pps_sz;
 	return 0;
 }
@@ -680,7 +629,6 @@ copy_picture_planes(
 	const uint8_t *src_y;
 	const uint8_t *src_u;
 	const uint8_t *src_v;
-
 	for (y = 0U; y < enc->height; y++) {
 		src_y = pic->plane[0] + (size_t)y * pic->stride[0];
 		memcpy(enc->cur_y + (size_t)y * enc->stride_y, src_y,
@@ -690,13 +638,11 @@ copy_picture_planes(
 				src_y[enc->width - 1U];
 		}
 	}
-
 	for (y = enc->height; y < enc->mb_h * 16U; y++) {
 		memcpy(enc->cur_y + (size_t)y * enc->stride_y,
 		       enc->cur_y + (size_t)(enc->height - 1U) * enc->stride_y,
 		       enc->stride_y);
 	}
-
 	cw = (enc->width + 1U) / 2U;
 	ch = (enc->height + 1U) / 2U;
 	for (y = 0U; y < ch; y++) {
@@ -716,7 +662,6 @@ copy_picture_planes(
 					src_u[x * 2U + 1U];
 			}
 		}
-
 		for (x = cw; x < enc->stride_c; x++) {
 			enc->cur_u[(size_t)y * enc->stride_c + x] =
 				enc->cur_u[(size_t)y * enc->stride_c + cw - 1U];
@@ -724,7 +669,6 @@ copy_picture_planes(
 				enc->cur_v[(size_t)y * enc->stride_c + cw - 1U];
 		}
 	}
-
 	for (y = ch; y < enc->mb_h * 8U; y++) {
 		memcpy(enc->cur_u + (size_t)y * enc->stride_c,
 		       enc->cur_u + (size_t)(ch - 1U) * enc->stride_c,
@@ -760,7 +704,6 @@ encode_frame(
 	uint8_t nz;
 	uint8_t nal_hdr;
 	size_t out_sz;
-
 	bw_init(&bw, enc->rbsp, H264ENC_BUF_CAP);
 
 	/* Writes the H.264 slice header. */
@@ -777,10 +720,8 @@ encode_frame(
 		bw_put_bit(&bw, 0U);
 		bw_put_bit(&bw, 0U);
 	}
-
 	bw_put_se(&bw, (int32_t)enc->qp - 26);
 	bw_put_ue(&bw, 1U);
-
 	skip_run = 0U;
 	for (mby = 0U; mby < enc->mb_h; mby++) {
 		for (mbx = 0U; mbx < enc->mb_w; mbx++) {
@@ -791,18 +732,15 @@ encode_frame(
 				sad = 0U;
 				for (y = 0U; y < 16U; y++) {
 					size_t off;
-
 					off = (size_t)(mby * 16U + y) * enc->stride_y +
 					      mbx * 16U;
 					for (x = 0U; x < 16U; x++) {
 						int32_t d;
-
 						d = (int32_t)enc->cur_y[off + x] -
 						    (int32_t)enc->ref_y[off + x];
 						sad += (uint32_t)(d < 0 ? -d : d);
 					}
 				}
-
 				if (sad < 256U) {
 					skip_run++;
 					memset(&enc->nz_y[mb_idx * 16U], 0, 16U);
@@ -810,7 +748,6 @@ encode_frame(
 					memset(&enc->nz_v[mb_idx * 4U], 0, 4U);
 					continue;
 				}
-
 				bw_put_ue(&bw, skip_run);
 				skip_run = 0U;
 			}
@@ -823,22 +760,18 @@ encode_frame(
 						dc_sum += enc->ref_y[(size_t)(mby * 16U + y) * enc->stride_y + mbx * 16U - 1U];
 						dc_sum += enc->ref_y[(size_t)(mby * 16U - 1U) * enc->stride_y + mbx * 16U + y];
 					}
-
 					dc_sum = (dc_sum + 16) >> 5;
 				} else if (mbx > 0U) {
 					for (y = 0U; y < 16U; y++)
 						dc_sum += enc->ref_y[(size_t)(mby * 16U + y) * enc->stride_y + mbx * 16U - 1U];
-
 					dc_sum = (dc_sum + 8) >> 4;
 				} else if (mby > 0U) {
 					for (x = 0U; x < 16U; x++)
 						dc_sum += enc->ref_y[(size_t)(mby * 16U - 1U) * enc->stride_y + mbx * 16U + x];
-
 					dc_sum = (dc_sum + 8) >> 4;
 				} else {
 					dc_sum = 128;
 				}
-
 				memset(pred_y, (uint8_t)dc_sum, sizeof(pred_y));
 				memset(pred_u, 128U, sizeof(pred_u));
 				memset(pred_v, 128U, sizeof(pred_v));
@@ -856,44 +789,36 @@ encode_frame(
 					int16_t dc_tr[16];
 					uint32_t by;
 					uint32_t bx;
-
 					for (by = 0U; by < 4U; by++) {
 						for (bx = 0U; bx < 4U; bx++) {
 							int32_t s;
 							uint32_t py;
 							uint32_t px;
-
 							s = 0;
 							for (py = 0U; py < 4U; py++) {
 								for (px = 0U; px < 4U; px++) {
 									size_t idx;
-
 									idx = (size_t)(mby * 16U + by * 4U + py) * enc->stride_y +
 									      mbx * 16U + bx * 4U + px;
 									s += (int32_t)enc->cur_y[idx] - dc_sum;
 								}
 							}
-
 							dc_blk[by * 4U + bx] = (int16_t)(s >> 2);
 						}
 					}
-
 					fwd_4x4(dc_blk, dc_tr);
 					quant_4x4(dc_tr, enc->qp, 1, 0);
 					encode_cavlc_block(&bw, dc_tr, 16U, 0, &nz);
 					dequant_4x4(dc_tr, enc->qp, 0);
 					inv_4x4(dc_tr, dc_blk);
 				}
-
 				for (blk = 0U; blk < 16U; blk++) {
 					uint32_t by;
 					uint32_t bx;
-
 					by = ((blk >> 3) * 2U) + ((blk >> 1) & 1U);
 					bx = (((blk >> 2) & 1U) * 2U) + (blk & 1U);
 					for (y = 0U; y < 4U; y++) {
 						size_t off;
-
 						off = (size_t)(mby * 16U + by * 4U + y) * enc->stride_y +
 						      mbx * 16U + bx * 4U;
 						for (x = 0U; x < 4U; x++) {
@@ -902,7 +827,6 @@ encode_frame(
 								(int16_t)pred_y[(by * 4U + y) * 16U + bx * 4U + x];
 						}
 					}
-
 					fwd_4x4(res, coeff);
 					quant_4x4(coeff, enc->qp, 1, 1);
 					encode_cavlc_block(&bw, coeff, 15U, 0, &nz);
@@ -910,7 +834,6 @@ encode_frame(
 					inv_4x4(coeff, recon);
 					for (y = 0U; y < 4U; y++) {
 						size_t off;
-
 						off = (size_t)(mby * 16U + by * 4U + y) * enc->stride_y +
 						      mbx * 16U + bx * 4U;
 						for (x = 0U; x < 4U; x++) {
@@ -927,16 +850,13 @@ encode_frame(
 				bw_put_se(&bw, 0);
 				bw_put_ue(&bw, cbp_inter_code[47]);
 				bw_put_se(&bw, 0);
-
 				for (blk = 0U; blk < 16U; blk++) {
 					uint32_t by;
 					uint32_t bx;
-
 					by = ((blk >> 3) * 2U) + ((blk >> 1) & 1U);
 					bx = (((blk >> 2) & 1U) * 2U) + (blk & 1U);
 					for (y = 0U; y < 4U; y++) {
 						size_t off;
-
 						off = (size_t)(mby * 16U + by * 4U + y) * enc->stride_y +
 						      mbx * 16U + bx * 4U;
 						for (x = 0U; x < 4U; x++) {
@@ -945,7 +865,6 @@ encode_frame(
 								(int16_t)enc->ref_y[off + x];
 						}
 					}
-
 					fwd_4x4(res, coeff);
 					quant_4x4(coeff, enc->qp, 0, 0);
 					encode_cavlc_block(&bw, coeff, 16U, 0, &nz);
@@ -953,7 +872,6 @@ encode_frame(
 					inv_4x4(coeff, recon);
 					for (y = 0U; y < 4U; y++) {
 						size_t off;
-
 						off = (size_t)(mby * 16U + by * 4U + y) * enc->stride_y +
 						      mbx * 16U + bx * 4U;
 						for (x = 0U; x < 4U; x++) {
@@ -970,10 +888,8 @@ encode_frame(
 			bw_put_bit(&bw, 1U);
 			for (blk = 0U; blk < 8U; blk++)
 				bw_put_bit(&bw, 1U);
-
 			for (y = 0U; y < 8U; y++) {
 				size_t off;
-
 				off = (size_t)(mby * 8U + y) * enc->stride_c +
 				      mbx * 8U;
 				memcpy(enc->ref_u + off, enc->cur_u + off, 8U);
@@ -981,20 +897,16 @@ encode_frame(
 			}
 		}
 	}
-
 	if (is_idr == 0 && skip_run > 0U)
 		bw_put_ue(&bw, skip_run);
-
 	bw_trailing_bits(&bw);
 	if (bw.overflow != 0)
 		return ENOBUFS;
-
 	nal_hdr = is_idr != 0 ? 0x65U : 0x41U;
 	out_sz = rbsp_to_annexb(enc->rbsp, bw.byte_pos, nal_hdr, enc->au_buf,
 				H264ENC_BUF_CAP);
 	if (out_sz == 0U)
 		return ENOBUFS;
-
 	enc->au_len = out_sz;
 	return 0;
 }
@@ -1026,7 +938,6 @@ encode_cavlc_block(
 		1U, 3U, 3U, 4U, 4U, 5U, 5U, 6U,
 		6U, 7U, 7U, 8U, 8U, 9U, 9U, 9U
 	};
-
 	(void)nc;
 	start_idx = max_coeffs == 15U ? 1U : 0U;
 	total_coeff = 0U;
@@ -1038,19 +949,16 @@ encode_cavlc_block(
 			last_nz = (int)i;
 		}
 	}
-
 	*out_nz = (uint8_t)total_coeff;
 	if (total_coeff == 0U) {
 		bw_put_bit(bw, 1U);
 		return;
 	}
-
 	trailing_ones = 0U;
 	t1_signs = 0U;
 	for (i = (unsigned)last_nz; (int)i >= 0 && trailing_ones < 3U; i--) {
 		if (scan[i] == 0)
 			continue;
-
 		if (scan[i] == 1 || scan[i] == -1) {
 			t1_signs = (t1_signs << 1) | (scan[i] < 0 ? 1U : 0U);
 			trailing_ones++;
@@ -1063,7 +971,6 @@ encode_cavlc_block(
 	{
 		unsigned target_val;
 		unsigned idx;
-
 		target_val = (total_coeff << 2) | trailing_ones;
 		for (idx = 0U; idx < H264SW_COEFF_TOKEN_CODES; idx++) {
 			if (h264sw_cavlc_coeff_token[0][idx].value == target_val) {
@@ -1074,7 +981,6 @@ encode_cavlc_block(
 			}
 		}
 	}
-
 	if (trailing_ones > 0U)
 		bw_put_bits(bw, t1_signs, trailing_ones);
 
@@ -1082,28 +988,23 @@ encode_cavlc_block(
 	suffix_len = (total_coeff > 10U && trailing_ones < 3U) ? 1 : 0;
 	{
 		unsigned skipped_t1;
-
 		skipped_t1 = 0U;
 		for (i = (unsigned)last_nz; (int)i >= 0; i--) {
 			int32_t lv;
 			uint32_t lv_code;
 			uint32_t prefix;
 			uint32_t suffix;
-
 			if (scan[i] == 0)
 				continue;
-
 			if (skipped_t1 < trailing_ones) {
 				skipped_t1++;
 				continue;
 			}
-
 			lv = scan[i];
 			lv_code = lv > 0 ? (uint32_t)(lv * 2 - 2) :
 					   (uint32_t)(-lv * 2 - 1);
 			if (skipped_t1 == trailing_ones && trailing_ones < 3U)
 				lv_code -= 2U;
-
 			skipped_t1 = 4U;
 			prefix = lv_code >> (unsigned)suffix_len;
 			if (prefix < 14U) {
@@ -1118,7 +1019,6 @@ encode_cavlc_block(
 				bw_put_bit(bw, 1U);
 				bw_put_bits(bw, lv_code - (14U << (unsigned)suffix_len), 12U);
 			}
-
 			if (suffix_len == 0)
 				suffix_len = 1;
 		}
@@ -1131,20 +1031,16 @@ encode_cavlc_block(
 			bw_put_bits(bw, tz_code[zeros_left], tz_bits[zeros_left]);
 		else
 			bw_put_bits(bw, 0U, 9U);
-
 		for (i = (unsigned)last_nz; (int)i >= 0 && zeros_left > 0U; i--) {
 			if (scan[i] == 0)
 				continue;
-
 			run_before = 0U;
 			while ((int)(i - 1U - run_before) >= 0 &&
 			       scan[i - 1U - run_before] == 0) {
 				run_before++;
 			}
-
 			if (run_before > zeros_left)
 				run_before = zeros_left;
-
 			if (zeros_left == 1U) {
 				bw_put_bit(bw, run_before == 0U ? 1U : 0U);
 			} else {
@@ -1152,7 +1048,6 @@ encode_cavlc_block(
 				if (run_before < zeros_left)
 					bw_put_bit(bw, 1U);
 			}
-
 			zeros_left -= run_before;
 		}
 	}
@@ -1166,35 +1061,29 @@ fwd_4x4(
 {
 	int32_t t[16];
 	int i;
-
 	for (i = 0; i < 4; i++) {
 		int32_t s0;
 		int32_t s1;
 		int32_t d0;
 		int32_t d1;
-
 		s0 = (int32_t)in[i * 4 + 0] + (int32_t)in[i * 4 + 3];
 		s1 = (int32_t)in[i * 4 + 1] + (int32_t)in[i * 4 + 2];
 		d0 = (int32_t)in[i * 4 + 0] - (int32_t)in[i * 4 + 3];
 		d1 = (int32_t)in[i * 4 + 1] - (int32_t)in[i * 4 + 2];
-
 		t[i * 4 + 0] = s0 + s1;
 		t[i * 4 + 1] = (d0 * 2) + d1;
 		t[i * 4 + 2] = s0 - s1;
 		t[i * 4 + 3] = d0 - (d1 * 2);
 	}
-
 	for (i = 0; i < 4; i++) {
 		int32_t s0;
 		int32_t s1;
 		int32_t d0;
 		int32_t d1;
-
 		s0 = t[0 * 4 + i] + t[3 * 4 + i];
 		s1 = t[1 * 4 + i] + t[2 * 4 + i];
 		d0 = t[0 * 4 + i] - t[3 * 4 + i];
 		d1 = t[1 * 4 + i] - t[2 * 4 + i];
-
 		out[0 * 4 + i] = (int16_t)(s0 + s1);
 		out[1 * 4 + i] = (int16_t)((d0 * 2) + d1);
 		out[2 * 4 + i] = (int16_t)(s0 - s1);
@@ -1210,35 +1099,29 @@ inv_4x4(
 {
 	int32_t t[16];
 	int i;
-
 	for (i = 0; i < 4; i++) {
 		int32_t e0;
 		int32_t e1;
 		int32_t e2;
 		int32_t e3;
-
 		e0 = (int32_t)in[i * 4 + 0] + (int32_t)in[i * 4 + 2];
 		e1 = (int32_t)in[i * 4 + 0] - (int32_t)in[i * 4 + 2];
 		e2 = ((int32_t)in[i * 4 + 1] >> 1) - (int32_t)in[i * 4 + 3];
 		e3 = (int32_t)in[i * 4 + 1] + ((int32_t)in[i * 4 + 3] >> 1);
-
 		t[i * 4 + 0] = e0 + e3;
 		t[i * 4 + 1] = e1 + e2;
 		t[i * 4 + 2] = e1 - e2;
 		t[i * 4 + 3] = e0 - e3;
 	}
-
 	for (i = 0; i < 4; i++) {
 		int32_t e0;
 		int32_t e1;
 		int32_t e2;
 		int32_t e3;
-
 		e0 = t[0 * 4 + i] + t[2 * 4 + i];
 		e1 = t[0 * 4 + i] - t[2 * 4 + i];
 		e2 = (t[1 * 4 + i] >> 1) - t[3 * 4 + i];
 		e3 = t[1 * 4 + i] + (t[3 * 4 + i] >> 1);
-
 		out[0 * 4 + i] = (int16_t)((e0 + e3 + 32) >> 6);
 		out[1 * 4 + i] = (int16_t)((e1 + e2 + 32) >> 6);
 		out[2 * 4 + i] = (int16_t)((e1 - e2 + 32) >> 6);
@@ -1258,15 +1141,12 @@ quant_4x4(
 	uint32_t qp6;
 	uint32_t f;
 	int i;
-
 	qbits = 15U + qp / 6U;
 	qp6 = qp % 6U;
 	f = (1U << qbits) / (is_intra != 0 ? 3U : 6U);
-
 	for (i = skip_dc != 0 ? 1 : 0; i < 16; i++) {
 		int32_t v;
 		int32_t mag;
-
 		v = (int32_t)blk[i];
 		mag = v < 0 ? -v : v;
 		mag = (int32_t)(((uint32_t)mag * quant_mf[qp6][pos_class[i]] + f) >> qbits);
@@ -1284,7 +1164,6 @@ dequant_4x4(
 	uint32_t shift;
 	uint32_t qp6;
 	int i;
-
 	shift = qp / 6U;
 	qp6 = qp % 6U;
 	for (i = skip_dc != 0 ? 1 : 0; i < 16; i++)
@@ -1298,9 +1177,7 @@ clip_u8(
 {
 	if (v < 0)
 		return 0U;
-
 	if (v > 255)
 		return 255U;
-
 	return (uint8_t)v;
 }

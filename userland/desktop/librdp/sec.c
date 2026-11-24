@@ -75,19 +75,15 @@ rdp_sec_encode_info_pkt(
 	error = append_utf16le_z(&strs, cfg->domain, &cb_dom);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_utf16le_z(&strs, cfg->user_name, &cb_user);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_utf16le_z(&strs, cfg->password, &cb_pass);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_utf16le_z(&strs, "", &cb_shell);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_utf16le_z(&strs, "", &cb_wdir);
 	if (error != RDP_OK)
 		goto fail;
@@ -102,7 +98,6 @@ rdp_sec_encode_info_pkt(
 	error = rdp_buf_append_u16_le(&body, RDP_SEC_INFO_PKT);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, 0U);
 	if (error != RDP_OK)
 		goto fail;
@@ -111,31 +106,24 @@ rdp_sec_encode_info_pkt(
 	error = rdp_buf_append_u32_le(&body, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&body, flags);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, (uint16_t)cb_dom);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, (uint16_t)cb_user);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, (uint16_t)cb_pass);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, (uint16_t)cb_shell);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, (uint16_t)cb_wdir);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(&body, strs.data, strs.len);
 	if (error != RDP_OK)
 		goto fail;
@@ -144,39 +132,30 @@ rdp_sec_encode_info_pkt(
 	error = rdp_buf_append_u16_le(&body, 0x0002U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, 2U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, 2U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&body, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_zeros(&body, 172U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&body, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&body, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, body.data, body.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&body);
 	rdp_buf_free(&strs);
 
@@ -217,7 +196,6 @@ rdp_sec_decode_info_pkt(
 	error = rdp_read_u16_le(&r, &sec_flags);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &sec_hi);
 	if (error != RDP_OK)
 		return error;
@@ -235,23 +213,18 @@ rdp_sec_decode_info_pkt(
 	error = rdp_read_u32_le(&r, &info->flags);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &cb_dom);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &cb_user);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &cb_pass);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &cb_shell);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &cb_wdir);
 	if (error != RDP_OK)
 		return error;
@@ -260,12 +233,10 @@ rdp_sec_decode_info_pkt(
 	error = read_utf16le_z(&r, cb_dom, info->domain, sizeof(info->domain));
 	if (error != RDP_OK)
 		return error;
-
 	error = read_utf16le_z(&r, cb_user, info->user_name,
 			       sizeof(info->user_name));
 	if (error != RDP_OK)
 		return error;
-
 	error = read_utf16le_z(&r, cb_pass, info->password,
 			       sizeof(info->password));
 	if (error != RDP_OK)
@@ -291,7 +262,6 @@ rdp_sec_encode_license_valid(
 	error = rdp_buf_append_u16_le(out, RDP_SEC_LICENSE_PKT);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
@@ -300,11 +270,9 @@ rdp_sec_encode_license_valid(
 	error = rdp_buf_append_u8(out, 0xFFU);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0x02U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 16U);
 	if (error != RDP_OK)
 		return error;
@@ -313,15 +281,12 @@ rdp_sec_encode_license_valid(
 	error = rdp_buf_append_u32_le(out, 7U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 2U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 0x0004U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u16_le(out, 0U);
 }
 
@@ -347,7 +312,6 @@ rdp_sec_decode_license_valid(
 	error = rdp_read_u16_le(&r, &sec_flags);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &sec_hi);
 	if (error != RDP_OK)
 		return error;
@@ -360,11 +324,9 @@ rdp_sec_decode_license_valid(
 	error = rdp_read_u8(&r, &msg_type);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, &preamble_flags);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &msg_size);
 	if (error != RDP_OK)
 		return error;
@@ -373,11 +335,9 @@ rdp_sec_decode_license_valid(
 	UNUSED_PARAMETER(msg_size);
 	if (msg_type != 0xFFU)
 		return RDP_ERR_PROTO;
-
 	error = rdp_read_u32_le(&r, &err_code);
 	if (error != RDP_OK)
 		return error;
-
 	if (err_code != 7U)
 		return RDP_ERR_PROTO;
 
@@ -405,39 +365,30 @@ rdp_sec_encode_demand_active(
 	error = append_capset_general(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_bitmap(&caps, width, height);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_order(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_pointer(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_share(&caps, server_channel);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_input(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_vc(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_surfcmds(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_multifrag(&caps, RDP_MAX_PDU_SIZE);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_frame_ack(&caps);
 	if (error != RDP_OK)
 		goto fail;
@@ -447,47 +398,36 @@ rdp_sec_encode_demand_active(
 	error = rdp_buf_append_u16_le(out, (uint16_t)total_len);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, RDP_PDUTYPE_DEMANDACTIVE);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, server_channel);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(out, share_id);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, 4U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, (uint16_t)(4U + caps.len));
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, "RDP", 4U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, 10U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, caps.data, caps.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(out, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&caps);
 
 	/* Succeeded: DemandActivePDU encoded. */
@@ -518,39 +458,30 @@ rdp_sec_encode_confirm_active(
 	error = append_capset_general(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_bitmap(&caps, width, height);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_order(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_pointer(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_share(&caps, user_channel);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_input(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_vc(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_surfcmds(&caps);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_multifrag(&caps, RDP_MAX_PDU_SIZE);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_capset_frame_ack(&caps);
 	if (error != RDP_OK)
 		goto fail;
@@ -560,47 +491,36 @@ rdp_sec_encode_confirm_active(
 	error = rdp_buf_append_u16_le(out, (uint16_t)total_len);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, RDP_PDUTYPE_CONFIRMACTIVE);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, user_channel);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(out, share_id);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, 0x03EAU);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, 4U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, (uint16_t)(4U + caps.len));
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, "RDP", 4U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, 10U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(out, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, caps.data, caps.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&caps);
 
 	/* Succeeded: ConfirmActivePDU encoded. */
@@ -646,11 +566,9 @@ rdp_sec_decode_active_pdu(
 	error = rdp_read_u16_le(&r, &total_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &pdu_type);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &pdu_src);
 	if (error != RDP_OK)
 		return error;
@@ -664,7 +582,6 @@ rdp_sec_decode_active_pdu(
 	error = rdp_read_u32_le(&r, &out->share_id);
 	if (error != RDP_OK)
 		return error;
-
 	if (expected_type == RDP_PDUTYPE_CONFIRMACTIVE) {
 		error = rdp_skip_bytes(&r, 2U);
 		if (error != RDP_OK)
@@ -675,7 +592,6 @@ rdp_sec_decode_active_pdu(
 	error = rdp_read_u16_le(&r, &src_desc_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &comb_caps_len);
 	if (error != RDP_OK)
 		return error;
@@ -684,11 +600,9 @@ rdp_sec_decode_active_pdu(
 	error = rdp_skip_bytes(&r, src_desc_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &num_caps);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &pad);
 	if (error != RDP_OK)
 		return error;
@@ -700,32 +614,25 @@ rdp_sec_decode_active_pdu(
 		error = rdp_read_u16_le(&r, &cap_type);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_read_u16_le(&r, &cap_len);
 		if (error != RDP_OK)
 			return error;
-
 		if (cap_len < 4U)
 			return RDP_ERR_PROTO;
-
 		error = rdp_read_bytes(&r, &cap_body, (size_t)(cap_len - 4U));
 		if (error != RDP_OK)
 			return error;
-
 		rdp_reader_init(&cr, cap_body, (size_t)(cap_len - 4U));
 		if (cap_type == CAPSTYPE_BITMAP && cap_len >= 16U) {
 			error = rdp_skip_bytes(&cr, 8U);
 			if (error != RDP_OK)
 				return error;
-
 			error = rdp_read_u16_le(&cr, &w16);
 			if (error != RDP_OK)
 				return error;
-
 			error = rdp_read_u16_le(&cr, &h16);
 			if (error != RDP_OK)
 				return error;
-
 			out->width = w16;
 			out->height = h16;
 		} else if (cap_type == CAPSTYPE_MULTIFRAGMENTUPDATE && cap_len >= 8U) {
@@ -756,11 +663,9 @@ rdp_sec_encode_share_data_sync(
 				      RDP_PDUTYPE2_SYNCHRONIZE, 4U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u16_le(out, target_user);
 }
 
@@ -783,15 +688,12 @@ rdp_sec_encode_share_data_control(
 				      RDP_PDUTYPE2_CONTROL, 8U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, action);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, grant_id);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(out, control_id);
 }
 
@@ -811,19 +713,15 @@ rdp_sec_encode_share_data_fontlist(
 				      RDP_PDUTYPE2_FONTLIST, 8U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 3U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u16_le(out, 50U);
 }
 
@@ -843,19 +741,15 @@ rdp_sec_encode_share_data_fontmap(
 				      RDP_PDUTYPE2_FONTMAP, 8U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, 3U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u16_le(out, 4U);
 }
 
@@ -876,7 +770,6 @@ rdp_sec_encode_share_data_error_info(
 				      RDP_PDUTYPE2_SET_ERROR_INFO, 4U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(out, error_info);
 }
 
@@ -915,11 +808,9 @@ rdp_sec_decode_share_hdr(
 	error = rdp_read_u16_le(&r, &total_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, pdu_type);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &src);
 	if (error != RDP_OK)
 		return error;
@@ -938,27 +829,21 @@ rdp_sec_decode_share_hdr(
 	error = rdp_read_u32_le(&r, share_id);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, &pad1);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, &stream_id);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &uncomp_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, pdu_type2);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, &comp_type);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_le(&r, &comp_len);
 	if (error != RDP_OK)
 		return error;
@@ -968,7 +853,6 @@ rdp_sec_decode_share_hdr(
 	UNUSED_PARAMETER(uncomp_len);
 	UNUSED_PARAMETER(comp_type);
 	UNUSED_PARAMETER(comp_len);
-
 	*body = r.data + r.pos;
 	*body_len = rdp_reader_rem(&r);
 
@@ -986,19 +870,16 @@ append_utf16le_z(
 	size_t i;
 	size_t slen;
 	int error;
-
 	if (utf8 == NULL || utf8[0] == '\0') {
 		*out_cb = 0U;
 		return rdp_buf_append_u16_le(buf, 0U);
 	}
-
 	slen = strlen(utf8);
 	for (i = 0; i < slen; i++) {
 		error = rdp_buf_append_u16_le(buf, (uint8_t)utf8[i]);
 		if (error != RDP_OK)
 			return error;
 	}
-
 	*out_cb = slen * 2U;
 	return rdp_buf_append_u16_le(buf, 0U);
 }
@@ -1016,21 +897,17 @@ read_utf16le_z(
 	size_t pos;
 	uint16_t ch;
 	int error;
-
 	if ((cb & 1U) != 0U)
 		return RDP_ERR_PROTO;
-
 	nchars = cb / 2U;
 	pos = 0U;
 	for (i = 0; i < nchars; i++) {
 		error = rdp_read_u16_le(r, &ch);
 		if (error != RDP_OK)
 			return error;
-
 		if (pos + 1U < out_sz)
 			out[pos++] = (ch < 128U) ? (char)ch : '?';
 	}
-
 	out[pos] = '\0';
 
 	/* Consumes the mandatory 2-byte UTF-16LE NUL terminator. */
@@ -1043,35 +920,27 @@ append_capset_general(
 	struct rdp_buf *buf)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_GENERAL);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 24U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 3U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 0x0200U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_zeros(buf, 6U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 0x041DU);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_zeros(buf, 6U);
 }
 
@@ -1083,51 +952,39 @@ append_capset_bitmap(
 	uint32_t height)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_BITMAP);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 28U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 32U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, (uint16_t)width);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, (uint16_t)height);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_zeros(buf, 6U);
 }
 
@@ -1137,15 +994,12 @@ append_capset_order(
 	struct rdp_buf *buf)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_ORDER);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 88U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_zeros(buf, 84U);
 }
 
@@ -1155,23 +1009,18 @@ append_capset_pointer(
 	struct rdp_buf *buf)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_POINTER);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 10U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 20U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u16_le(buf, 20U);
 }
 
@@ -1182,19 +1031,15 @@ append_capset_share(
 	uint16_t channel_id)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_SHARE);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 8U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, channel_id);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u16_le(buf, 0U);
 }
 
@@ -1204,11 +1049,9 @@ append_capset_input(
 	struct rdp_buf *buf)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_INPUT);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 88U);
 	if (error != RDP_OK)
 		return error;
@@ -1217,7 +1060,6 @@ append_capset_input(
 	error = rdp_buf_append_u16_le(buf, 0x0035U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_zeros(buf, 82U);
 }
 
@@ -1227,19 +1069,15 @@ append_capset_vc(
 	struct rdp_buf *buf)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_VIRTUALCHANNEL);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 12U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(buf, RDP_VC_CHUNK_SIZE);
 }
 
@@ -1249,19 +1087,15 @@ append_capset_surfcmds(
 	struct rdp_buf *buf)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_SURFACE_COMMANDS);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 12U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 0x00000052U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(buf, 0U);
 }
 
@@ -1272,15 +1106,12 @@ append_capset_multifrag(
 	uint32_t max_size)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_MULTIFRAGMENTUPDATE);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 8U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(buf, max_size);
 }
 
@@ -1290,15 +1121,12 @@ append_capset_frame_ack(
 	struct rdp_buf *buf)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, CAPSTYPE_FRAME_ACKNOWLEDGE);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 8U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(buf, 4U);
 }
 
@@ -1313,43 +1141,33 @@ encode_share_data_hdr(
 {
 	size_t total_len;
 	int error;
-
 	total_len = 18U + body_len;
 	error = rdp_buf_append_u16_le(buf, (uint16_t)total_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, RDP_PDUTYPE_DATAPDU);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, src_ch);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, share_id);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, (uint16_t)(4U + body_len));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(buf, pdu_type2);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u16_le(buf, 0U);
 }

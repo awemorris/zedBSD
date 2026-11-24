@@ -49,9 +49,11 @@ main(
 			buf[3] = (uint8_t)(len & 0xFFU);
 		}
 
+		/* Feeds the mutated buffer into all parsers. */
 		fuzz_one_input(buf, len);
 	}
 
+	/* Reports successful completion of all iterations. */
 	printf("librdp-fuzz-test: 20000 iterations passed without crash\n");
 
 	/* Succeeded: fuzz harness completed cleanly. */
@@ -97,7 +99,6 @@ fuzz_one_input(
 	uint16_t codec;
 	uint32_t w;
 	uint32_t h;
-
 	memset(&cb, 0, sizeof(cb));
 	cb.send_bytes = discard_send;
 

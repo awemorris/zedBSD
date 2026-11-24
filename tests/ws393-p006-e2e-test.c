@@ -57,6 +57,24 @@ struct e2e_srv_state {
 	uint8_t last_mrep[7];
 };
 
+static int ssl_send_all(int sock, SSL *ssl, int tls_active, const uint8_t *data, size_t len);
+static struct media_encoder *open_h264_encoder(uint32_t width, uint32_t height);
+static int send_encoded_frame(struct e2e_srv_state *s, uint8_t luma_val, uint32_t ts_ms);
+static int srv_send_bytes(void *user, const uint8_t *data, size_t len);
+static void srv_on_auth(void *user, const char *domain, const char *user_name, const char *password);
+static void srv_on_connected(void *user, uint32_t width, uint32_t height);
+static void srv_on_frame_ack(void *user, uint32_t frame_id, uint32_t queue_depth, uint32_t total_decoded);
+static void srv_on_input_key(void *user, uint16_t scancode, uint16_t flags);
+static void srv_on_input_mouse(void *user, uint16_t flags, uint16_t x, uint16_t y);
+static void srv_on_resize(void *user, uint32_t width, uint32_t height);
+static void srv_on_disconnect(void *user, uint32_t error_info);
+static void *srv_thread_main(void *arg);
+static int cli_send_bytes(void *user, const uint8_t *data, size_t len);
+static void cli_on_connected(void *user, uint32_t width, uint32_t height);
+static void cli_on_avc_frame(void *user, uint32_t frame_id, uint16_t codec_id, const struct rdp_avc_stream *avc);
+static void cli_on_resize(void *user, uint32_t width, uint32_t height);
+static void cli_on_disconnect(void *user, uint32_t error_info);
+
 struct e2e_cli_state {
 	int sock;
 	SSL_CTX *ssl_ctx;
@@ -83,11 +101,11 @@ ssl_send_all(
 	size_t len)
 {
 	size_t off;
+	ssize_t n;
 
+	/* Sends the entire buffer over TLS or raw TCP. */
 	off = 0U;
 	while (off < len) {
-		ssize_t n;
-
 		if (tls_active && ssl != NULL)
 			n = SSL_write(ssl, data + off, (int)(len - off));
 		else
@@ -96,6 +114,8 @@ ssl_send_all(
 			return -1;
 		off += (size_t)n;
 	}
+
+	/* Succeeded. */
 	return 0;
 }
 
@@ -106,7 +126,6 @@ open_h264_encoder(
 {
 	struct media_encoder_config cfg;
 	struct media_encoder *enc;
-
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.codec = MEDIA_CODEC_H264;
 	cfg.profile = MEDIA_ENCODER_PROFILE_H264_CONSTRAINED_BASELINE;
@@ -143,7 +162,6 @@ send_encoded_frame(
 	size_t y_sz;
 	size_t uv_sz;
 	int rc;
-
 	y_sz = (size_t)s->width * (size_t)s->height;
 	uv_sz = (size_t)(s->width / 2U) * (size_t)(s->height / 2U);
 	y_plane = (uint8_t *)malloc(y_sz);
@@ -153,7 +171,6 @@ send_encoded_frame(
 	memset(y_plane, luma_val, y_sz);
 	memset(u_plane, 128U, uv_sz);
 	memset(v_plane, 128U, uv_sz);
-
 	memset(&pic, 0, sizeof(pic));
 	pic.plane[0] = y_plane;
 	pic.plane[1] = u_plane;
@@ -163,11 +180,9 @@ send_encoded_frame(
 	pic.stride[2] = s->width / 2U;
 	assert(media_encoder_send(s->enc, &pic, (int64_t)ts_ms * 1000,
 				  MEDIA_ENCODE_FORCE_KEY) == 0);
-
 	memset(&pkt, 0, sizeof(pkt));
 	assert(media_encoder_receive(s->enc, 0U, &pkt) == 0);
 	assert(pkt.data != NULL && pkt.size > 4U);
-
 	rect.left = 0U;
 	rect.top = 0U;
 	rect.right = s->width;
@@ -184,11 +199,12 @@ send_encoded_frame(
 				       &avc, ts_ms, NULL);
 	if (rc != 0)
 		assert(rc == RDP_ERR_STATE);
-
 	free(y_plane);
 	free(u_plane);
 	free(v_plane);
-	return rc == 0 ? 0 : 1;
+	if (rc == 0)
+		return 0;
+	return 1;
 }
 
 static int
@@ -198,7 +214,6 @@ srv_send_bytes(
 	size_t len)
 {
 	struct e2e_srv_state *s;
-
 	s = (struct e2e_srv_state *)user;
 	return ssl_send_all(s->client_fd, s->ssl, s->tls_active, data, len);
 }
@@ -211,7 +226,6 @@ srv_on_auth(
 	const char *password)
 {
 	struct e2e_srv_state *s;
-
 	(void)domain;
 	s = (struct e2e_srv_state *)user;
 	assert(strcmp(user_name, "alice") == 0);
@@ -227,7 +241,6 @@ srv_on_connected(
 	uint32_t height)
 {
 	struct e2e_srv_state *s;
-
 	s = (struct e2e_srv_state *)user;
 	s->width = width;
 	s->height = height;
@@ -245,7 +258,6 @@ srv_on_frame_ack(
 	uint32_t total_decoded)
 {
 	struct e2e_srv_state *s;
-
 	(void)frame_id;
 	(void)queue_depth;
 	s = (struct e2e_srv_state *)user;
@@ -260,7 +272,6 @@ srv_on_input_key(
 	uint16_t flags)
 {
 	struct e2e_srv_state *s;
-
 	s = (struct e2e_srv_state *)user;
 	assert(rdpd_hid_format_key(&s->hid, scancode, flags, s->last_krep) == 0);
 	s->got_key = 1;
@@ -274,7 +285,6 @@ srv_on_input_mouse(
 	uint16_t y)
 {
 	struct e2e_srv_state *s;
-
 	s = (struct e2e_srv_state *)user;
 	assert(rdpd_hid_format_mouse(&s->hid, flags, x, y, s->last_mrep) == 0);
 	s->got_mouse = 1;
@@ -287,7 +297,6 @@ srv_on_resize(
 	uint32_t height)
 {
 	struct e2e_srv_state *s;
-
 	s = (struct e2e_srv_state *)user;
 	s->width = width;
 	s->height = height;
@@ -304,7 +313,6 @@ srv_on_disconnect(
 	uint32_t error_info)
 {
 	struct e2e_srv_state *s;
-
 	(void)error_info;
 	s = (struct e2e_srv_state *)user;
 	s->running = 0;
@@ -318,11 +326,16 @@ srv_thread_main(
 	struct rdp_callbacks cb;
 	struct rdp_server_config cfg;
 	uint8_t buf[16384];
+	struct pollfd pfd;
+	int n;
+	int need_tls;
+	int ready;
+	int rc;
 
+	/* Accepts one client connection and configures the RDP server. */
 	s = (struct e2e_srv_state *)arg;
 	s->client_fd = accept(s->listen_fd, NULL, NULL);
 	assert(s->client_fd >= 0);
-
 	memset(&cb, 0, sizeof(cb));
 	cb.send_bytes = srv_send_bytes;
 	cb.on_auth_request = srv_on_auth;
@@ -332,19 +345,15 @@ srv_thread_main(
 	cb.on_input_mouse = srv_on_input_mouse;
 	cb.on_resize = srv_on_resize;
 	cb.on_disconnect = srv_on_disconnect;
-
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.width = 640U;
 	cfg.height = 480U;
 	s->srv = rdp_server_create(&cb, s, &cfg);
 	assert(s->srv != NULL);
 	s->running = 1;
-
 	while (s->running) {
-		struct pollfd pfd;
-		int n;
-
-		if (rdp_server_needs_tls(s->srv) && !s->tls_active) {
+		need_tls = rdp_server_needs_tls(s->srv);
+		if (need_tls != 0 && !s->tls_active) {
 			s->ssl = SSL_new(s->ssl_ctx);
 			assert(s->ssl != NULL);
 			assert(SSL_set_fd(s->ssl, s->client_fd) == 1);
@@ -353,35 +362,42 @@ srv_thread_main(
 			assert(rdp_server_tls_established(s->srv) == 0);
 		}
 
-		if (s->connected && !s->sent_640 &&
-		    rdp_server_is_connected(s->srv)) {
+		/* Sends the initial 640x480 frame once RDPEGFX is ready. */
+		ready = rdp_server_is_connected(s->srv);
+		if (s->connected && !s->sent_640 && ready != 0) {
 			s->next_ts_ms += 33U;
-			if (send_encoded_frame(s, 96U, s->next_ts_ms) == 0)
+			rc = send_encoded_frame(s, 96U, s->next_ts_ms);
+			if (rc == 0)
 				s->sent_640 = 1;
 		}
-		if (s->got_resize && !s->sent_800 &&
-		    rdp_server_is_connected(s->srv)) {
+
+		/* Sends the resized 800x600 frame after RDPEDISP resize. */
+		if (s->got_resize && !s->sent_800 && ready != 0) {
 			s->next_ts_ms += 33U;
-			if (send_encoded_frame(s, 160U, s->next_ts_ms) == 0)
+			rc = send_encoded_frame(s, 160U, s->next_ts_ms);
+			if (rc == 0)
 				s->sent_800 = 1;
 		}
 
+		/* Waits for incoming client bytes. */
 		pfd.fd = s->client_fd;
 		pfd.events = POLLIN;
 		pfd.revents = 0;
-		if (poll(&pfd, 1, 100) <= 0)
+		rc = poll(&pfd, 1, 100);
+		if (rc <= 0)
 			continue;
-
 		if (s->tls_active)
 			n = SSL_read(s->ssl, buf, sizeof(buf));
 		else
 			n = (int)recv(s->client_fd, buf, sizeof(buf), 0);
 		if (n <= 0)
 			break;
-		if (rdp_server_feed(s->srv, buf, (size_t)n) != 0)
+		rc = rdp_server_feed(s->srv, buf, (size_t)n);
+		if (rc != 0)
 			break;
 	}
 
+	/* Cleans up server-side session resources. */
 	if (s->enc != NULL)
 		media_encoder_close(s->enc);
 	rdp_server_destroy(s->srv);
@@ -389,6 +405,8 @@ srv_thread_main(
 		(void)SSL_shutdown(s->ssl);
 		SSL_free(s->ssl);
 	}
+
+	/* Closes the client socket and exits the server thread. */
 	close(s->client_fd);
 	return NULL;
 }
@@ -400,7 +418,6 @@ cli_send_bytes(
 	size_t len)
 {
 	struct e2e_cli_state *c;
-
 	c = (struct e2e_cli_state *)user;
 	return ssl_send_all(c->sock, c->ssl, c->tls_active, data, len);
 }
@@ -412,7 +429,6 @@ cli_on_connected(
 	uint32_t height)
 {
 	struct e2e_cli_state *c;
-
 	c = (struct e2e_cli_state *)user;
 	c->width = width;
 	c->height = height;
@@ -433,7 +449,9 @@ cli_on_avc_frame(
 	struct media_scaler *scaler;
 	uint32_t *rgba;
 	int64_t pts;
+	int rc;
 
+	/* Lazily opens the h264sw decoder for the current desktop size. */
 	(void)codec_id;
 	c = (struct e2e_cli_state *)user;
 	if (c->dec == NULL) {
@@ -445,19 +463,22 @@ cli_on_avc_frame(
 		assert(media_decoder_open(&track, &c->dec) == 0);
 	}
 
+	/* Sends the H.264 Access Unit into h264sw and receives the decoded frame. */
 	memset(&mpkt, 0, sizeof(mpkt));
 	mpkt.data = (void *)avc->luma.data;
 	mpkt.size = avc->luma.data_len;
 	mpkt.pts_us = 0;
 	mpkt.keyframe = 1;
 	assert(media_decoder_send(c->dec, &mpkt) == 0);
-	if (media_decoder_receive(c->dec, &pts) != 1) {
+	rc = media_decoder_receive(c->dec, &pts);
+	if (rc != 1) {
 		assert(media_decoder_send(c->dec, NULL) == 0);
 		assert(media_decoder_receive(c->dec, &pts) == 1);
 	}
+
+	/* Scales the decoded frame to RGBA and sends FRAME_ACKNOWLEDGE. */
 	frame = media_decoder_picture(c->dec);
 	assert(frame != NULL);
-
 	rgba = (uint32_t *)malloc((size_t)c->width * (size_t)c->height * 4U);
 	assert(rgba != NULL);
 	scaler = NULL;
@@ -481,7 +502,6 @@ cli_on_resize(
 	uint32_t height)
 {
 	struct e2e_cli_state *c;
-
 	c = (struct e2e_cli_state *)user;
 	c->width = width;
 	c->height = height;
@@ -498,7 +518,6 @@ cli_on_disconnect(
 	uint32_t error_info)
 {
 	struct e2e_cli_state *c;
-
 	(void)error_info;
 	c = (struct e2e_cli_state *)user;
 	c->running = 0;
@@ -519,18 +538,21 @@ main(
 	int opt;
 	int sent_input;
 	int sent_resize;
+	struct pollfd pfd;
+	int n;
+	int need_tls;
+	int rc;
 
+	/* Starts the loopback TLS+RDP server thread and connects the client. */
 	memset(&srv, 0, sizeof(srv));
 	srv.hid.fd = -1;
 	srv.ssl_ctx = SSL_CTX_new(TLS_server_method());
 	assert(srv.ssl_ctx != NULL);
 	assert(SSL_CTX_generate_self_signed(srv.ssl_ctx, "zedbsd-rdp-e2e") == 1);
-
 	srv.listen_fd = socket(AF_INET, SOCK_STREAM, 0);
 	assert(srv.listen_fd >= 0);
 	opt = 1;
 	(void)setsockopt(srv.listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
@@ -542,23 +564,19 @@ main(
 	srv.port = ntohs(addr.sin_port);
 
 	assert(pthread_create(&srv_thr, NULL, srv_thread_main, &srv) == 0);
-
 	memset(&cli, 0, sizeof(cli));
 	cli.sock = socket(AF_INET, SOCK_STREAM, 0);
 	assert(cli.sock >= 0);
 	assert(connect(cli.sock, (struct sockaddr *)&addr, sizeof(addr)) == 0);
-
 	cli.ssl_ctx = SSL_CTX_new(TLS_client_method());
 	assert(cli.ssl_ctx != NULL);
 	SSL_CTX_set_verify(cli.ssl_ctx, SSL_VERIFY_NONE, NULL);
-
 	memset(&cb, 0, sizeof(cb));
 	cb.send_bytes = cli_send_bytes;
 	cb.on_connected = cli_on_connected;
 	cb.on_avc_frame = cli_on_avc_frame;
 	cb.on_resize = cli_on_resize;
 	cb.on_disconnect = cli_on_disconnect;
-
 	cli.cli = rdp_client_create(&cb, &cli);
 	assert(cli.cli != NULL);
 	memset(&ccfg, 0, sizeof(ccfg));
@@ -568,15 +586,12 @@ main(
 	ccfg.password = "secret";
 	ccfg.client_name = "e2e-client";
 	assert(rdp_client_connect(cli.cli, &ccfg) == 0);
-
 	cli.running = 1;
 	sent_input = 0;
 	sent_resize = 0;
 	while (cli.running) {
-		struct pollfd pfd;
-		int n;
-
-		if (rdp_client_needs_tls(cli.cli) && !cli.tls_active) {
+		need_tls = rdp_client_needs_tls(cli.cli);
+		if (need_tls != 0 && !cli.tls_active) {
 			cli.ssl = SSL_new(cli.ssl_ctx);
 			assert(cli.ssl != NULL);
 			assert(SSL_set_fd(cli.ssl, cli.sock) == 1);
@@ -585,6 +600,7 @@ main(
 			assert(rdp_client_tls_established(cli.cli) == 0);
 		}
 
+		/* Sends keyboard and mouse input once the first 640x480 frame decodes. */
 		if (cli.decoded_640 && !sent_input) {
 			assert(rdp_client_send_key(cli.cli, 0x1EU, 0U) == 0);
 			assert(rdp_client_send_mouse(
@@ -593,22 +609,27 @@ main(
 				320U, 240U) == 0);
 			sent_input = 1;
 		}
+
+		/* Requests dynamic resize to 800x600 after sending input. */
 		if (sent_input && !sent_resize) {
 			assert(rdp_client_request_resize(cli.cli, 800U, 600U) == 0);
 			sent_resize = 1;
 		}
+
+		/* Disconnects once all E2E stages have completed. */
 		if (cli.decoded_800 && srv.got_ack && srv.got_key &&
 		    srv.got_mouse && srv.got_resize) {
 			(void)rdp_client_disconnect(cli.cli);
 			break;
 		}
 
+		/* Waits for incoming server bytes. */
 		pfd.fd = cli.sock;
 		pfd.events = POLLIN;
 		pfd.revents = 0;
-		if (poll(&pfd, 1, 100) <= 0)
+		rc = poll(&pfd, 1, 100);
+		if (rc <= 0)
 			continue;
-
 		if (cli.tls_active)
 			n = SSL_read(cli.ssl, buf, sizeof(buf));
 		else
@@ -618,10 +639,13 @@ main(
 		assert(rdp_client_feed(cli.cli, buf, (size_t)n) == 0);
 	}
 
+	/* Shuts down TLS and joins the server thread. */
 	if (cli.ssl != NULL) {
 		(void)SSL_shutdown(cli.ssl);
 		SSL_free(cli.ssl);
 	}
+
+	/* Closes the client socket and verifies every E2E milestone. */
 	close(cli.sock);
 	assert(pthread_join(srv_thr, NULL) == 0);
 
@@ -637,14 +661,12 @@ main(
 	assert(cli.decoded_640 == 1);
 	assert(cli.got_resize == 1);
 	assert(cli.decoded_800 == 1);
-
 	if (cli.dec != NULL)
 		media_decoder_close(cli.dec);
 	rdp_client_destroy(cli.cli);
 	SSL_CTX_free(cli.ssl_ctx);
 	SSL_CTX_free(srv.ssl_ctx);
 	close(srv.listen_fd);
-
 	printf("ws393-p006-e2e-test: all E2E TCP loopback tests passed\n");
 	return 0;
 }

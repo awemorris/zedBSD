@@ -68,31 +68,25 @@ rdp_thread_start(
 	struct kl_thread_options opts;
 	struct kl_thread *thr;
 	int error;
-
 	if (tab == NULL || target == NULL || decoder_ops == NULL)
 		return EINVAL;
-
 	args = (struct rdp_thread_args *)calloc(1U, sizeof(*args));
 	if (args == NULL)
 		return ENOMEM;
-
 	args->tab = tab;
 	args->target = *target;
 	args->decoder_ops = decoder_ops;
 	args->connect_timeout = connect_timeout > 0U ? connect_timeout : 15U;
-
 	memset(&opts, 0, sizeof(opts));
 	opts.run = rdp_worker_main;
 	opts.argument = args;
 	opts.name = "rdp-client";
 	opts.priority = KL_THREAD_PRIORITY_NORMAL;
-
 	error = kl_thread_start(&opts, &thr);
 	if (error != 0) {
 		free(args);
 		return error;
 	}
-
 	(void)kl_thread_detach(thr);
 
 	/* Succeeded: RDP worker thread started. */
@@ -115,7 +109,6 @@ rdp_worker_main(
 	int ssl_rc;
 	int error;
 	char msg[256];
-
 	args = (struct rdp_thread_args *)arg;
 	memset(&w, 0, sizeof(w));
 	w.tab = args->tab;
@@ -123,28 +116,23 @@ rdp_worker_main(
 	w.decoder_ops = args->decoder_ops;
 	w.width = args->target.width > 0U ? args->target.width : 1280U;
 	w.height = args->target.height > 0U ? args->target.height : 720U;
-
 	if (kl_socket_waker_open(&w.waker) != 0) {
 		rdp_tab_end(w.tab, "Failed to create RDP waker.");
 		rdp_tab_release(w.tab);
 		free(args);
 		return;
 	}
-
 	rdp_tab_attach_waker(w.tab, w.waker);
-
 	if (w.decoder_ops->create(&w.decoder_ctx) != 0) {
 		rdp_tab_end(w.tab, "Failed to initialize H.264 decoder.");
 		goto cleanup;
 	}
-
 	if (worker_connect_tcp(&w, args->connect_timeout) != 0) {
 		snprintf(msg, sizeof(msg), "Could not connect to %s:%u.",
 			 w.target.host_name, (unsigned)w.target.port);
 		rdp_tab_end(w.tab, msg);
 		goto cleanup;
 	}
-
 	memset(&cb, 0, sizeof(cb));
 	cb.send_bytes = worker_send_bytes;
 	cb.on_tls_required = worker_on_tls;
@@ -152,13 +140,11 @@ rdp_worker_main(
 	cb.on_avc_frame = worker_on_avc_frame;
 	cb.on_resize = worker_on_resize;
 	cb.on_disconnect = worker_on_disconnect;
-
 	w.client = rdp_client_create(&cb, &w);
 	if (w.client == NULL) {
 		rdp_tab_end(w.tab, "Out of memory creating RDP client.");
 		goto cleanup;
 	}
-
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.width = w.width;
 	cfg.height = w.height;
@@ -166,7 +152,6 @@ rdp_worker_main(
 	cfg.user_name = w.target.user;
 	cfg.password = w.target.password;
 	cfg.client_name = "mikuterm";
-
 	if (rdp_client_connect(w.client, &cfg) != RDP_OK) {
 		rdp_tab_end(w.tab, "RDP connection handshake failed.");
 		goto cleanup;
@@ -175,57 +160,47 @@ rdp_worker_main(
 	/* Event loop polling the TCP socket and the UI tab waker. */
 	while (w.disconnected == 0 && rdp_tab_is_closing(w.tab) == 0) {
 		worker_drain_tab(&w);
-
 		memset(waits, 0, sizeof(waits));
 		waits[0].socket = w.sock;
 		waits[0].events = KL_SOCKET_READABLE;
 		waits[1].waker = w.waker;
 		waits[1].events = KL_SOCKET_READABLE;
-
 		ready = 0U;
 		error = kl_socket_poll(waits, 2U, 200, &ready);
 		if (error != 0 && error != ETIMEDOUT)
 			break;
-
 		if (waits[0].ready == 0U)
 			continue;
-
 		for (;;) {
 			if (w.tls_active != 0) {
 				ssl_rc = SSL_read(w.ssl, rxbuf,
 						  (int)sizeof(rxbuf));
 				if (ssl_rc <= 0) {
 					int err;
-
 					err = SSL_get_error(w.ssl, ssl_rc);
 					if (err == SSL_ERROR_WANT_READ ||
 					    err == SSL_ERROR_WANT_WRITE)
 						break;
-
 					w.disconnected = 1;
 					break;
 				}
-
 				got = (size_t)ssl_rc;
 			} else {
 				error = kl_socket_receive(w.sock, rxbuf,
 							  sizeof(rxbuf), &got);
 				if (error == EAGAIN || error == EWOULDBLOCK)
 					break;
-
 				if (error != 0 || got == 0U) {
 					w.disconnected = 1;
 					break;
 				}
 			}
-
 			if (rdp_client_feed(w.client, rxbuf, got) != RDP_OK) {
 				w.disconnected = 1;
 				break;
 			}
 		}
 	}
-
 	rdp_tab_end(w.tab, "RDP session closed.");
 
 cleanup:
@@ -233,7 +208,6 @@ cleanup:
 		rdp_client_disconnect(w.client);
 		rdp_client_destroy(w.client);
 	}
-
 	if (w.ssl != NULL)
 		SSL_free(w.ssl);
 	if (w.ssl_ctx != NULL)
@@ -242,7 +216,6 @@ cleanup:
 		kl_socket_close(w.sock);
 	if (w.decoder_ctx != NULL)
 		w.decoder_ops->destroy(w.decoder_ctx);
-
 	free(w.frame_buf);
 	kl_socket_waker_close(w.waker);
 	rdp_tab_release(w.tab);
@@ -262,18 +235,15 @@ worker_connect_tcp(
 	struct kl_socket_wait wait;
 	size_t ready;
 	int error;
-
 	if (kl_socket_resolve(w->target.host_name, w->target.port,
 			      KL_ADDRESS_ANY, KL_SOCKET_STREAM, addrs,
 			      8U, &count) != 0 || count == 0U)
 		return EHOSTUNREACH;
-
 	for (i = 0U; i < count; i++) {
 		error = kl_socket_open(addrs[i].family, KL_SOCKET_STREAM,
 				       KL_SOCKET_NONBLOCKING, &s);
 		if (error != 0)
 			continue;
-
 		error = kl_socket_connect(s, &addrs[i]);
 		if (error == EINPROGRESS || error == EWOULDBLOCK) {
 			memset(&wait, 0, sizeof(wait));
@@ -286,16 +256,13 @@ worker_connect_tcp(
 			if (error == 0)
 				error = kl_socket_connect_result(s);
 		}
-
 		if (error == 0) {
 			(void)kl_socket_set_option(s, KL_SOCKET_NO_DELAY, 1);
 			w->sock = s;
 			return 0;
 		}
-
 		kl_socket_close(s);
 	}
-
 	return ECONNREFUSED;
 }
 
@@ -313,7 +280,6 @@ worker_send_bytes(
 	struct kl_socket_wait wait;
 	size_t ready;
 	int error;
-
 	w = (struct rdp_worker *)user;
 	off = 0U;
 	while (off < len) {
@@ -323,7 +289,6 @@ worker_send_bytes(
 				off += (size_t)rc;
 				continue;
 			}
-
 			rc = SSL_get_error(w->ssl, rc);
 			if (rc != SSL_ERROR_WANT_WRITE &&
 			    rc != SSL_ERROR_WANT_READ)
@@ -335,11 +300,9 @@ worker_send_bytes(
 				off += sent;
 				continue;
 			}
-
 			if (error != EAGAIN && error != EWOULDBLOCK)
 				return -1;
 		}
-
 		memset(&wait, 0, sizeof(wait));
 		wait.socket = w->sock;
 		wait.events = KL_SOCKET_WRITABLE;
@@ -347,7 +310,6 @@ worker_send_bytes(
 		if (kl_socket_poll(&wait, 1U, 5000, &ready) != 0)
 			return -1;
 	}
-
 	return 0;
 }
 
@@ -361,35 +323,29 @@ worker_on_tls(
 	int err;
 	struct kl_socket_wait wait;
 	size_t ready;
-
 	w = (struct rdp_worker *)user;
 	w->ssl_ctx = SSL_CTX_new(TLS_client_method());
 	if (w->ssl_ctx == NULL) {
 		w->disconnected = 1;
 		return;
 	}
-
 	SSL_CTX_set_verify(w->ssl_ctx, SSL_VERIFY_NONE, NULL);
 	w->ssl = SSL_new(w->ssl_ctx);
 	if (w->ssl == NULL) {
 		w->disconnected = 1;
 		return;
 	}
-
 	(void)SSL_set_fd(w->ssl, (int)kl_socket_native(w->sock));
 	(void)SSL_set_tlsext_host_name(w->ssl, w->target.host_name);
-
 	for (;;) {
 		rc = SSL_connect(w->ssl);
 		if (rc == 1)
 			break;
-
 		err = SSL_get_error(w->ssl, rc);
 		if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
 			w->disconnected = 1;
 			return;
 		}
-
 		memset(&wait, 0, sizeof(wait));
 		wait.socket = w->sock;
 		wait.events = (err == SSL_ERROR_WANT_WRITE) ?
@@ -400,7 +356,6 @@ worker_on_tls(
 			return;
 		}
 	}
-
 	w->tls_active = 1;
 	if (rdp_client_tls_established(w->client) != RDP_OK)
 		w->disconnected = 1;
@@ -414,7 +369,6 @@ worker_on_connected(
 	uint32_t height)
 {
 	struct rdp_worker *w;
-
 	w = (struct rdp_worker *)user;
 	w->width = width;
 	w->height = height;
@@ -439,20 +393,16 @@ worker_on_avc_frame(
 	w = (struct rdp_worker *)user;
 	if (avc->luma.data == NULL || avc->luma.data_len == 0U)
 		return;
-
 	need = (size_t)w->width * (size_t)w->height;
 	if (need > w->frame_cap) {
 		uint32_t *nb;
-
 		nb = (uint32_t *)realloc(w->frame_buf,
 					 need * sizeof(*w->frame_buf));
 		if (nb == NULL)
 			return;
-
 		w->frame_buf = nb;
 		w->frame_cap = need;
 	}
-
 	dec_w = w->width;
 	dec_h = w->height;
 	error = w->decoder_ops->decode(w->decoder_ctx, avc->luma.data,
@@ -461,7 +411,6 @@ worker_on_avc_frame(
 	if (error == 0)
 		(void)rdp_tab_put_frame(w->tab, w->frame_buf, w->width,
 					w->height);
-
 	(void)rdp_client_send_frame_ack(w->client, frame_id, 0U);
 }
 
@@ -473,7 +422,6 @@ worker_on_resize(
 	uint32_t height)
 {
 	struct rdp_worker *w;
-
 	w = (struct rdp_worker *)user;
 	w->width = width;
 	w->height = height;
@@ -500,10 +448,8 @@ worker_drain_tab(
 	struct rdp_tab_input in;
 	uint32_t rw;
 	uint32_t rh;
-
 	if (rdp_client_is_connected(w->client) == 0)
 		return;
-
 	while (rdp_tab_take_input(w->tab, &in) != 0) {
 		if (in.kind == RDP_TAB_IN_KEY)
 			(void)rdp_client_send_key(w->client, in.code, in.flags);
@@ -516,7 +462,6 @@ worker_drain_tab(
 		else if (in.kind == RDP_TAB_IN_SYNC)
 			(void)rdp_client_send_sync(w->client, in.flags);
 	}
-
 	if (rdp_tab_take_resize(w->tab, &rw, &rh) != 0)
 		(void)rdp_client_request_resize(w->client, rw, rh);
 }

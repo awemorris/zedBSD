@@ -48,11 +48,9 @@ rdp_hosts_parse(
 	/* Validates arguments and initializes the output list. */
 	if (list == NULL)
 		return EINVAL;
-
 	memset(list, 0, sizeof(*list));
 	if (text == NULL || size == 0U)
 		return 0;
-
 	cur = NULL;
 	pos = 0U;
 
@@ -61,32 +59,25 @@ rdp_hosts_parse(
 		line_start = pos;
 		while (pos < size && text[pos] != '\n' && text[pos] != '\r')
 			pos++;
-
 		line_len = pos - line_start;
 		while (pos < size && (text[pos] == '\n' || text[pos] == '\r'))
 			pos++;
-
 		trim_span(text + line_start, line_len, &s, &e);
 		if (s == e || *s == '#')
 			continue;
-
 		kw_end = s;
 		while (kw_end < e && !isspace((unsigned char)*kw_end) &&
 		       *kw_end != '=') {
 			kw_end++;
 		}
-
 		kw_len = (size_t)(kw_end - s);
 		if (kw_len == 0U || kw_len >= sizeof(kw))
 			continue;
-
 		memcpy(kw, s, kw_len);
 		kw[kw_len] = '\0';
-
 		val = kw_end;
 		while (val < e && (isspace((unsigned char)*val) || *val == '='))
 			val++;
-
 		if (val < e && *val == '"' && e - val >= 2 && *(e - 1) == '"') {
 			val++;
 			e--;
@@ -98,7 +89,6 @@ rdp_hosts_parse(
 				cur = NULL;
 				continue;
 			}
-
 			cur = &list->entries[list->count++];
 			memset(cur, 0, sizeof(*cur));
 			cur->port = default_port > 0U ? default_port : 3389U;
@@ -108,10 +98,8 @@ rdp_hosts_parse(
 				   (size_t)(e - val));
 			continue;
 		}
-
 		if (cur == NULL)
 			continue;
-
 		if (eq_ci(kw, "HostName")) {
 			copy_field(cur->host_name, sizeof(cur->host_name), val,
 				   (size_t)(e - val));
@@ -158,15 +146,12 @@ rdp_hosts_format(
 	unsigned i;
 	int n;
 	const struct rdp_host_entry *e;
-
 	if (list == NULL || out == NULL || out_size == NULL)
 		return EINVAL;
-
 	cap = 4096U;
 	buf = (char *)malloc(cap);
 	if (buf == NULL)
 		return ENOMEM;
-
 	len = 0U;
 	buf[0] = '\0';
 
@@ -175,49 +160,41 @@ rdp_hosts_format(
 		e = &list->entries[i];
 		if (len + 512U >= cap) {
 			char *grown;
-
 			cap *= 2U;
 			grown = (char *)realloc(buf, cap);
 			if (grown == NULL) {
 				free(buf);
 				return ENOMEM;
 			}
-
 			buf = grown;
 		}
-
 		n = snprintf(buf + len, cap - len, "Host %s\n", e->name);
 		if (n > 0)
 			len += (size_t)n;
-
 		if (e->host_name[0] != '\0') {
 			n = snprintf(buf + len, cap - len, "    HostName %s\n",
 				     e->host_name);
 			if (n > 0)
 				len += (size_t)n;
 		}
-
 		if (e->port != 0U && e->port != 3389U) {
 			n = snprintf(buf + len, cap - len, "    Port %u\n",
 				     (unsigned)e->port);
 			if (n > 0)
 				len += (size_t)n;
 		}
-
 		if (e->user[0] != '\0') {
 			n = snprintf(buf + len, cap - len, "    User %s\n",
 				     e->user);
 			if (n > 0)
 				len += (size_t)n;
 		}
-
 		if (e->domain[0] != '\0') {
 			n = snprintf(buf + len, cap - len, "    Domain %s\n",
 				     e->domain);
 			if (n > 0)
 				len += (size_t)n;
 		}
-
 		if (e->width > 0U && e->height > 0U) {
 			n = snprintf(buf + len, cap - len,
 				     "    Width %u\n    Height %u\n",
@@ -225,12 +202,10 @@ rdp_hosts_format(
 			if (n > 0)
 				len += (size_t)n;
 		}
-
 		n = snprintf(buf + len, cap - len, "\n");
 		if (n > 0)
 			len += (size_t)n;
 	}
-
 	*out = buf;
 	*out_size = len;
 
@@ -252,20 +227,15 @@ rdp_hosts_parse_target(
 	const char *slash;
 	const char *colon;
 	uint32_t port_num;
-
 	if (spec == NULL || out == NULL)
 		return EINVAL;
-
 	memset(out, 0, sizeof(*out));
 	out->port = default_port > 0U ? default_port : 3389U;
-
 	s = spec;
 	while (*s != '\0' && isspace((unsigned char)*s))
 		s++;
-
 	if (strncmp(s, "rdp://", 6U) == 0)
 		s += 6U;
-
 	if (*s == '\0')
 		return EINVAL;
 
@@ -282,10 +252,8 @@ rdp_hosts_parse_target(
 			copy_field(out->user, sizeof(out->user), s,
 				   (size_t)(at - s));
 		}
-
 		s = at + 1;
 	}
-
 	if (*s == '\0')
 		return EINVAL;
 
@@ -296,17 +264,14 @@ rdp_hosts_parse_target(
 		    port_num < 1U || port_num > 65535U) {
 			return EINVAL;
 		}
-
 		out->port = (uint16_t)port_num;
 		copy_field(out->host_name, sizeof(out->host_name), s,
 			   (size_t)(colon - s));
 	} else {
 		copy_field(out->host_name, sizeof(out->host_name), s, strlen(s));
 	}
-
 	if (out->host_name[0] == '\0')
 		return EINVAL;
-
 	copy_field(out->name, sizeof(out->name), out->host_name,
 		   strlen(out->host_name));
 
@@ -323,14 +288,11 @@ eq_ci(
 	while (*a != '\0' && *b != '\0') {
 		if (tolower((unsigned char)*a) != tolower((unsigned char)*b))
 			return 0;
-
 		a++;
 		b++;
 	}
-
 	if (*a != '\0' || *b != '\0')
 		return 0;
-
 	return 1;
 }
 
@@ -344,15 +306,12 @@ trim_span(
 {
 	const char *s;
 	const char *e;
-
 	s = line;
 	e = line + len;
 	while (s < e && isspace((unsigned char)*s))
 		s++;
-
 	while (e > s && isspace((unsigned char)*(e - 1)))
 		e--;
-
 	*start = s;
 	*end = e;
 }
@@ -366,14 +325,11 @@ copy_field(
 	size_t src_len)
 {
 	size_t n;
-
 	if (dst_sz == 0U)
 		return;
-
 	n = src_len;
 	if (n >= dst_sz)
 		n = dst_sz - 1U;
-
 	memcpy(dst, src, n);
 	dst[n] = '\0';
 }
@@ -387,21 +343,16 @@ parse_u32(
 {
 	size_t i;
 	uint32_t v;
-
 	if (len == 0U)
 		return EINVAL;
-
 	v = 0U;
 	for (i = 0U; i < len; i++) {
 		if (!isdigit((unsigned char)s[i]))
 			return EINVAL;
-
 		if (v > 429496729U)
 			return ERANGE;
-
 		v = v * 10U + (uint32_t)(s[i] - '0');
 	}
-
 	*out = v;
 	return 0;
 }

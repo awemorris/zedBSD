@@ -28,7 +28,6 @@ rdp_disp_encode_caps(
 	error = rdp_buf_append_u32_le(out, DISP_PDU_TYPE_CAPS);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 20U);
 	if (error != RDP_OK)
 		return error;
@@ -37,11 +36,9 @@ rdp_disp_encode_caps(
 	error = rdp_buf_append_u32_le(out, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 3840U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(out, 2160U);
 }
 
@@ -60,15 +57,12 @@ rdp_disp_encode_monitor_layout(
 	error = rdp_buf_append_u32_le(out, DISP_PDU_TYPE_MONITOR_LAYOUT);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 56U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 40U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 1U);
 	if (error != RDP_OK)
 		return error;
@@ -77,39 +71,30 @@ rdp_disp_encode_monitor_layout(
 	error = rdp_buf_append_u32_le(out, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, width);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, height);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(out, 100U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(out, 100U);
 }
 
@@ -135,7 +120,6 @@ rdp_disp_decode_monitor_layout(
 	error = rdp_read_u32_le(&r, &pdu_type);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u32_le(&r, &pdu_len);
 	if (error != RDP_OK)
 		return error;
@@ -143,15 +127,12 @@ rdp_disp_decode_monitor_layout(
 	UNUSED_PARAMETER(pdu_len);
 	if (pdu_type != DISP_PDU_TYPE_MONITOR_LAYOUT)
 		return RDP_ERR_PROTO;
-
 	error = rdp_read_u32_le(&r, &layout_sz);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u32_le(&r, &num_mon);
 	if (error != RDP_OK)
 		return error;
-
 	if (layout_sz < 40U || num_mon == 0U)
 		return RDP_ERR_PROTO;
 
@@ -159,10 +140,8 @@ rdp_disp_decode_monitor_layout(
 	error = rdp_skip_bytes(&r, 12U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u32_le(&r, width);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_read_u32_le(&r, height);
 }

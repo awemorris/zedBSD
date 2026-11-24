@@ -47,6 +47,18 @@ struct rdpd_client_ctx {
 
 static volatile sig_atomic_t rdpd_stop;
 
+static void on_sig(int sig);
+static int cb_send_bytes(void *user, const uint8_t *data, size_t len);
+static void cb_on_auth_request(void *user, const char *domain, const char *user_name, const char *password);
+static void cb_on_connected(void *user, uint32_t width, uint32_t height);
+static void cb_on_resize(void *user, uint32_t width, uint32_t height);
+static void cb_on_input_key(void *user, uint16_t scancode, uint16_t flags);
+static void cb_on_input_mouse(void *user, uint16_t flags, uint16_t x, uint16_t y);
+static void cb_on_disconnect(void *user, uint32_t error_info);
+static int read_exact_fd(int fd, uint8_t *buf, size_t len);
+static void handle_client(int client_sock, SSL_CTX *ssl_ctx);
+
+/* Records shutdown signal receipt for the accept/client loops. */
 static void
 on_sig(
 	int sig)
@@ -55,6 +67,7 @@ on_sig(
 	rdpd_stop = 1;
 }
 
+/* Sends outgoing RDP/TLS bytes to the connected client socket. */
 static int
 cb_send_bytes(
 	void *user,
@@ -63,24 +76,24 @@ cb_send_bytes(
 {
 	struct rdpd_client_ctx *ctx;
 	size_t off;
-
+	ssize_t n;
 	ctx = (struct rdpd_client_ctx *)user;
 	off = 0U;
 	while (off < len) {
-		ssize_t n;
-
 		if (ctx->tls_active && ctx->ssl != NULL)
 			n = SSL_write(ctx->ssl, data + off, (int)(len - off));
 		else
 			n = send(ctx->sock, data + off, len - off, 0);
-
 		if (n <= 0)
 			return -1;
 		off += (size_t)n;
 	}
+
+	/* Succeeded. */
 	return 0;
 }
 
+/* Authenticates client credentials via passkey and accepts or rejects. */
 static void
 cb_on_auth_request(
 	void *user,
@@ -89,12 +102,13 @@ cb_on_auth_request(
 	const char *password)
 {
 	struct rdpd_client_ctx *ctx;
-
+	int rc;
 	(void)domain;
 	ctx = (struct rdpd_client_ctx *)user;
-	if (rdpd_auth_user(user_name, password, &ctx->uid, &ctx->gid,
-			   ctx->home, sizeof(ctx->home),
-			   ctx->shell, sizeof(ctx->shell)) == 0) {
+	rc = rdpd_auth_user(user_name, password, &ctx->uid, &ctx->gid,
+			    ctx->home, sizeof(ctx->home),
+			    ctx->shell, sizeof(ctx->shell));
+	if (rc == 0) {
 		(void)snprintf(ctx->user, sizeof(ctx->user), "%s", user_name);
 		ctx->authed = 1;
 		(void)rdp_server_accept_auth(ctx->srv);
@@ -104,6 +118,7 @@ cb_on_auth_request(
 	}
 }
 
+/* Opens virtual HID and starts the headless Wayland desktop session. */
 static void
 cb_on_connected(
 	void *user,
@@ -111,21 +126,27 @@ cb_on_connected(
 	uint32_t height)
 {
 	struct rdpd_client_ctx *ctx;
-
+	int rc;
 	ctx = (struct rdpd_client_ctx *)user;
-	ctx->width = width != 0U ? width : 1280U;
-	ctx->height = height != 0U ? height : 720U;
+	ctx->width = 1280U;
+	if (width != 0U)
+		ctx->width = width;
+	ctx->height = 720U;
+	if (height != 0U)
+		ctx->height = height;
 	if (!ctx->authed)
 		return;
-	if (rdpd_hid_open(&ctx->hid, ctx->width, ctx->height) != 0)
+	rc = rdpd_hid_open(&ctx->hid, ctx->width, ctx->height);
+	if (rc != 0)
 		return;
-	if (rdpd_session_start(&ctx->sess, ctx->uid, ctx->gid, ctx->user,
-			       ctx->home, ctx->shell,
-			       ctx->width, ctx->height) == 0) {
+	rc = rdpd_session_start(&ctx->sess, ctx->uid, ctx->gid, ctx->user,
+				ctx->home, ctx->shell,
+				ctx->width, ctx->height);
+	if (rc == 0)
 		ctx->session_started = 1;
-	}
 }
 
+/* Propagates client RDPEDISP resize requests to HID and Wayland. */
 static void
 cb_on_resize(
 	void *user,
@@ -133,7 +154,6 @@ cb_on_resize(
 	uint32_t height)
 {
 	struct rdpd_client_ctx *ctx;
-
 	ctx = (struct rdpd_client_ctx *)user;
 	kwl_rdp_clamp_size(&width, &height);
 	ctx->width = width;
@@ -143,6 +163,7 @@ cb_on_resize(
 	(void)rdp_server_resize(ctx->srv, width, height);
 }
 
+/* Forwards client keyboard scancodes into /dev/input/bridge. */
 static void
 cb_on_input_key(
 	void *user,
@@ -150,11 +171,11 @@ cb_on_input_key(
 	uint16_t flags)
 {
 	struct rdpd_client_ctx *ctx;
-
 	ctx = (struct rdpd_client_ctx *)user;
 	rdpd_hid_key(&ctx->hid, scancode, flags);
 }
 
+/* Forwards client mouse events into /dev/input/bridge. */
 static void
 cb_on_input_mouse(
 	void *user,
@@ -163,23 +184,23 @@ cb_on_input_mouse(
 	uint16_t y)
 {
 	struct rdpd_client_ctx *ctx;
-
 	ctx = (struct rdpd_client_ctx *)user;
 	rdpd_hid_mouse(&ctx->hid, flags, x, y);
 }
 
+/* Stops the client loop upon RDP disconnect. */
 static void
 cb_on_disconnect(
 	void *user,
 	uint32_t error_info)
 {
 	struct rdpd_client_ctx *ctx;
-
 	(void)error_info;
 	ctx = (struct rdpd_client_ctx *)user;
 	ctx->running = 0;
 }
 
+/* Reads exactly len bytes from a stream descriptor. */
 static int
 read_exact_fd(
 	int fd,
@@ -187,24 +208,27 @@ read_exact_fd(
 	size_t len)
 {
 	size_t off;
-
+	ssize_t n;
 	off = 0U;
 	while (off < len) {
-		ssize_t n;
-
 		n = read(fd, buf + off, len - off);
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
 			return -1;
 		}
+
+		/* Checks for EOF before the full message was read. */
 		if (n == 0)
 			return -1;
 		off += (size_t)n;
 	}
+
+	/* Succeeded. */
 	return 0;
 }
 
+/* Runs one client RDP session in a dedicated child process. */
 static void
 handle_client(
 	int client_sock,
@@ -216,7 +240,23 @@ handle_client(
 	uint8_t io_buf[16384];
 	uint8_t *au_buf;
 	size_t au_cap;
-
+	struct pollfd pfds[2];
+	nfds_t nfds;
+	int rc;
+	int need_tls;
+	int set_ok;
+	int acc_ok;
+	int n;
+	uint8_t hdr[KWL_RDP_FRAME_HDR_SIZE];
+	uint32_t flags;
+	uint64_t pts_us;
+	uint32_t size;
+	uint8_t *nb;
+	int conn;
+	uint32_t unacked;
+	struct rdp_avc_rect rect;
+	struct rdp_avc_quant quant;
+	struct rdp_avc_stream avc;
 	memset(&ctx, 0, sizeof(ctx));
 	ctx.sock = client_sock;
 	ctx.hid.fd = -1;
@@ -224,7 +264,6 @@ handle_client(
 	ctx.running = 1;
 	ctx.width = 1280U;
 	ctx.height = 720U;
-
 	memset(&cb, 0, sizeof(cb));
 	cb.send_bytes = cb_send_bytes;
 	cb.on_auth_request = cb_on_auth_request;
@@ -233,7 +272,6 @@ handle_client(
 	cb.on_input_key = cb_on_input_key;
 	cb.on_input_mouse = cb_on_input_mouse;
 	cb.on_disconnect = cb_on_disconnect;
-
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.width = ctx.width;
 	cfg.height = ctx.height;
@@ -243,6 +281,7 @@ handle_client(
 		return;
 	}
 
+	/* Allocates initial H.264 Access Unit staging buffer. */
 	au_cap = 262144U;
 	au_buf = (uint8_t *)malloc(au_cap);
 	if (au_buf == NULL) {
@@ -251,23 +290,24 @@ handle_client(
 		return;
 	}
 
+	/* Multiplexes network RDP traffic and headless Wayland video frames. */
 	while (ctx.running && !rdpd_stop) {
-		struct pollfd pfds[2];
-		nfds_t nfds;
-		int rc;
-
-		if (rdp_server_needs_tls(ctx.srv) && !ctx.tls_active) {
+		need_tls = rdp_server_needs_tls(ctx.srv);
+		if (need_tls != 0 && !ctx.tls_active) {
 			ctx.ssl = SSL_new(ssl_ctx);
-			if (ctx.ssl == NULL ||
-			    SSL_set_fd(ctx.ssl, ctx.sock) != 1 ||
-			    SSL_accept(ctx.ssl) != 1) {
+			if (ctx.ssl == NULL)
 				break;
-			}
+			set_ok = SSL_set_fd(ctx.ssl, ctx.sock);
+			acc_ok = SSL_accept(ctx.ssl);
+			if (set_ok != 1 || acc_ok != 1)
+				break;
 			ctx.tls_active = 1;
-			if (rdp_server_tls_established(ctx.srv) != 0)
+			rc = rdp_server_tls_established(ctx.srv);
+			if (rc != 0)
 				break;
 		}
 
+		/* Prepares poll descriptors for socket and optional compositor pipe. */
 		pfds[0].fd = ctx.sock;
 		pfds[0].events = POLLIN;
 		pfds[0].revents = 0;
@@ -279,6 +319,7 @@ handle_client(
 			nfds = 2U;
 		}
 
+		/* Polls both descriptors with a short timeout for signal checks. */
 		rc = poll(pfds, nfds, 100);
 		if (rc < 0) {
 			if (errno == EINTR)
@@ -286,46 +327,42 @@ handle_client(
 			break;
 		}
 
+		/* Reads and feeds incoming RDP/TLS bytes. */
 		if ((pfds[0].revents & POLLIN) != 0) {
-			int n;
-
 			if (ctx.tls_active)
 				n = SSL_read(ctx.ssl, io_buf, sizeof(io_buf));
 			else
 				n = (int)recv(ctx.sock, io_buf, sizeof(io_buf), 0);
 			if (n <= 0)
 				break;
-			if (rdp_server_feed(ctx.srv, io_buf, (size_t)n) != 0)
+			rc = rdp_server_feed(ctx.srv, io_buf, (size_t)n);
+			if (rc != 0)
 				break;
 		}
 
+		/* Reads encoded H.264 AU from headless Wayland and sends over RDPEGFX. */
 		if (nfds == 2U && (pfds[1].revents & POLLIN) != 0) {
-			uint8_t hdr[KWL_RDP_FRAME_HDR_SIZE];
-			uint32_t flags;
-			uint64_t pts_us;
-			uint32_t size;
-
-			if (read_exact_fd(ctx.sess.rdp_fd, hdr, sizeof(hdr)) != 0)
+			rc = read_exact_fd(ctx.sess.rdp_fd, hdr, sizeof(hdr));
+			if (rc != 0)
 				break;
 			kwl_rdp_unpack_frame_hdr(hdr, &flags, &pts_us, &size);
 			if (size == 0U || size > 4194304U)
 				break;
 			if (size > au_cap) {
-				uint8_t *nb = (uint8_t *)realloc(au_buf, size);
+				nb = (uint8_t *)realloc(au_buf, size);
 				if (nb == NULL)
 					break;
 				au_buf = nb;
 				au_cap = size;
 			}
-			if (read_exact_fd(ctx.sess.rdp_fd, au_buf, size) != 0)
+
+			/* Reads the H.264 Access Unit payload and forwards it to RDPEGFX. */
+			rc = read_exact_fd(ctx.sess.rdp_fd, au_buf, size);
+			if (rc != 0)
 				break;
-
-			if (rdp_server_is_connected(ctx.srv) &&
-			    rdp_server_unacked_frames(ctx.srv) < 4U) {
-				struct rdp_avc_rect rect;
-				struct rdp_avc_quant quant;
-				struct rdp_avc_stream avc;
-
+			conn = rdp_server_is_connected(ctx.srv);
+			unacked = rdp_server_unacked_frames(ctx.srv);
+			if (conn != 0 && unacked < 4U) {
 				rect.left = 0U;
 				rect.top = 0U;
 				rect.right = ctx.width;
@@ -345,6 +382,7 @@ handle_client(
 		}
 	}
 
+	/* Releases session, HID, RDP server, TLS, and socket state. */
 	free(au_buf);
 	rdpd_session_stop(&ctx.sess);
 	rdpd_hid_close(&ctx.hid);
@@ -353,6 +391,8 @@ handle_client(
 		(void)SSL_shutdown(ctx.ssl);
 		SSL_free(ctx.ssl);
 	}
+
+	/* Closes the client socket. */
 	close(client_sock);
 }
 
@@ -369,64 +409,81 @@ main(
 	int opt;
 	struct sockaddr_in addr;
 	int i;
-
+	int m1;
+	int m2;
+	int m3;
+	int c_ok;
+	int k_ok;
+	int g_ok;
+	int b_ok;
+	int l_ok;
+	int client_fd;
+	pid_t pid;
+	pid_t wp;
 	port = RDPD_DEFAULT_PORT;
 	cert_path = RDPD_CERT_PATH;
 	key_path = RDPD_KEY_PATH;
-
 	for (i = 1; i < argc; i++) {
-		if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+		m1 = strcmp(argv[i], "-p");
+		m2 = strcmp(argv[i], "-c");
+		m3 = strcmp(argv[i], "-k");
+		if (m1 == 0 && i + 1 < argc) {
 			port = (uint16_t)atoi(argv[++i]);
-		} else if (strcmp(argv[i], "-c") == 0 && i + 1 < argc) {
+		} else if (m2 == 0 && i + 1 < argc) {
 			cert_path = argv[++i];
-		} else if (strcmp(argv[i], "-k") == 0 && i + 1 < argc) {
+		} else if (m3 == 0 && i + 1 < argc) {
 			key_path = argv[++i];
 		}
 	}
 
+	/* Installs signal handlers and initializes server TLS context. */
 	signal(SIGINT, on_sig);
 	signal(SIGTERM, on_sig);
 	signal(SIGPIPE, SIG_IGN);
-
 	ssl_ctx = SSL_CTX_new(TLS_server_method());
 	if (ssl_ctx == NULL)
 		return 1;
-
-	if (SSL_CTX_use_certificate_file(ssl_ctx, cert_path, SSL_FILETYPE_PEM) != 1 ||
-	    SSL_CTX_use_PrivateKey_file(ssl_ctx, key_path, SSL_FILETYPE_PEM) != 1) {
-		if (SSL_CTX_generate_self_signed(ssl_ctx, "zedbsd-rdpd") != 1) {
+	c_ok = SSL_CTX_use_certificate_file(ssl_ctx, cert_path, SSL_FILETYPE_PEM);
+	k_ok = SSL_CTX_use_PrivateKey_file(ssl_ctx, key_path, SSL_FILETYPE_PEM);
+	if (c_ok != 1 || k_ok != 1) {
+		g_ok = SSL_CTX_generate_self_signed(ssl_ctx, "zedbsd-rdpd");
+		if (g_ok != 1) {
 			SSL_CTX_free(ssl_ctx);
 			return 1;
 		}
 	}
 
+	/* Binds and listens on the configured TCP port. */
 	listen_fd = socket(AF_INET, SOCK_STREAM, 0);
 	if (listen_fd < 0) {
 		SSL_CTX_free(ssl_ctx);
 		return 1;
 	}
 
+	/* Enables address reuse and binds the listening socket. */
 	opt = 1;
 	(void)setsockopt(listen_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
 	addr.sin_port = htons(port);
-	if (bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
-	    listen(listen_fd, 8) != 0) {
+	b_ok = bind(listen_fd, (struct sockaddr *)&addr, sizeof(addr));
+	l_ok = listen(listen_fd, 8);
+	if (b_ok != 0 || l_ok != 0) {
 		close(listen_fd);
 		SSL_CTX_free(ssl_ctx);
 		return 1;
 	}
 
+	/* Accepts incoming RDP client connections and forks per-session workers. */
 	while (!rdpd_stop) {
-		int client_fd;
-		pid_t pid;
+		for (;;) {
+			wp = waitpid(-1, NULL, WNOHANG);
+			if (wp <= 0)
+				break;
+		}
 
-		while (waitpid(-1, NULL, WNOHANG) > 0)
-			;
-
+		/* Accepts the next client connection. */
 		client_fd = accept(listen_fd, NULL, NULL);
 		if (client_fd < 0) {
 			if (errno == EINTR)
@@ -434,6 +491,7 @@ main(
 			break;
 		}
 
+		/* Forks a worker child for the accepted client. */
 		pid = fork();
 		if (pid == 0) {
 			close(listen_fd);
@@ -441,9 +499,12 @@ main(
 			SSL_CTX_free(ssl_ctx);
 			_exit(0);
 		}
+
+		/* Parent closes its copy of the client socket. */
 		close(client_fd);
 	}
 
+	/* Cleans up listening socket and TLS context on shutdown. */
 	close(listen_fd);
 	SSL_CTX_free(ssl_ctx);
 	return 0;

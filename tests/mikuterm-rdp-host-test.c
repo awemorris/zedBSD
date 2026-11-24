@@ -48,7 +48,6 @@ main(
 	test_rdp_hosts_and_conf();
 	test_rdp_tab_view();
 	test_rdp_h264sw_decoder();
-
 	printf("mikuterm-rdp-host-test: all tests passed\n");
 	return 0;
 }
@@ -85,7 +84,6 @@ test_rdp_hosts_and_conf(
 	assert(strcmp(list.entries[0].domain, "ZED") == 0);
 	assert(list.entries[0].width == 1920U);
 	assert(list.entries[0].height == 1080U);
-
 	formatted = NULL;
 	formatted_sz = 0U;
 	assert(rdp_hosts_format(&list, &formatted, &formatted_sz) == 0);
@@ -101,7 +99,6 @@ test_rdp_hosts_and_conf(
 	assert(strcmp(target.user, "alice") == 0);
 	assert(strcmp(target.host_name, "192.168.1.10") == 0);
 	assert(target.port == 3391U);
-
 	mikuterm_conf_defaults(&conf);
 	assert(conf.rdp_port == 3389U);
 	assert(conf.rdp_resize == 1);
@@ -128,10 +125,8 @@ test_rdp_tab_view(
 
 	assert(rdp_tab_create("10.0.2.2", 4U, 4U, 1, NULL, 1U, &tab) == 0);
 	assert(tab->connection.ops->view != NULL);
-
 	tab->connection.ops->view->title(&tab->connection, title, sizeof(title));
 	assert(strcmp(title, "RDP: 10.0.2.2") == 0);
-
 	for (i = 0U; i < 16U; i++)
 		frame[i] = 0xFF112233U;
 
@@ -150,7 +145,6 @@ test_rdp_tab_view(
 	tab->connection.ops->view->input(&tab->connection, &ev);
 	assert(rdp_tab_take_input(tab, &in) == 1);
 	assert(in.kind == RDP_TAB_IN_KEY && in.code == 30U && in.flags == 0U);
-
 	memset(&ev, 0, sizeof(ev));
 	ev.kind = TERMINAL_PICTURE_BUTTON;
 	ev.code = 0x110U;
@@ -166,7 +160,6 @@ test_rdp_tab_view(
 					   600U) == 0);
 	assert(rdp_tab_take_resize(tab, &rw, &rh) == 1);
 	assert(rw == 800U && rh == 600U);
-
 	tab->connection.ops->close(&tab->connection);
 }
 
@@ -185,16 +178,13 @@ test_rdp_h264sw_decoder(
 	uint32_t dw;
 	uint32_t dh;
 	int rc;
-
 	ctx = NULL;
 	assert(rdp_h264sw_decoder_ops.create(&ctx) == 0);
 	assert(ctx != NULL);
-
 	dw = 0U;
 	dh = 0U;
 	rc = rdp_h264sw_decoder_ops.decode(ctx, sps_pps, sizeof(sps_pps),
 					   pixels, 64U, 64U, &dw, &dh);
 	assert(rc == 0 || rc == 11);
-
 	rdp_h264sw_decoder_ops.destroy(ctx);
 }

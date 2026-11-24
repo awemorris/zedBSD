@@ -79,11 +79,9 @@ rdp_mcs_encode_connect_initial(
 	error = append_cs_core(&udata, width, height, want_drdynvc);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_cs_security(&udata);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = append_cs_net(&udata, want_drdynvc);
 	if (error != RDP_OK)
 		goto fail;
@@ -97,23 +95,18 @@ rdp_mcs_encode_connect_initial(
 			0x00U, 0x08U, 0x00U, 0x10U, 0x00U, 0x01U,
 			0xC0U, 0x00U, 0x44U, 0x75U, 0x63U, 0x61U
 		};
-
 		error = rdp_buf_append(&gcc, gcc_hdr_prefix, sizeof(gcc_hdr_prefix));
 		if (error != RDP_OK)
 			goto fail;
-
 		error = per_append_len(&gcc, udata.len + 14U);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append(&gcc, gcc_hdr_mid, sizeof(gcc_hdr_mid));
 		if (error != RDP_OK)
 			goto fail;
-
 		error = per_append_len(&gcc, udata.len);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append(&gcc, udata.data, udata.len);
 		if (error != RDP_OK)
 			goto fail;
@@ -125,19 +118,15 @@ rdp_mcs_encode_connect_initial(
 	error = ber_append_octet_string(&body, calling_sel, 1U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_octet_string(&body, called_sel, 1U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&body, 0x01U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&body, 0x01U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&body, 0xFFU);
 	if (error != RDP_OK)
 		goto fail;
@@ -146,11 +135,9 @@ rdp_mcs_encode_connect_initial(
 	error = ber_append_domain_params(&body, 34U, 2U, 0U, 1U, 0U, 1U, 65535U, 2U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_domain_params(&body, 1U, 1U, 1U, 1U, 0U, 1U, 1056U, 2U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_domain_params(&body, 65535U, 64535U, 65535U, 1U, 0U, 1U, 65535U, 2U);
 	if (error != RDP_OK)
 		goto fail;
@@ -164,19 +151,15 @@ rdp_mcs_encode_connect_initial(
 	error = rdp_buf_append_u8(out, 0x7FU);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(out, MCS_TAG_CONNECT_INITIAL);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_len(out, body.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, body.data, body.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&udata);
 	rdp_buf_free(&gcc);
 	rdp_buf_free(&body);
@@ -219,18 +202,14 @@ rdp_mcs_decode_connect_initial(
 	error = rdp_read_u8(&r, &b0);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, &b1);
 	if (error != RDP_OK)
 		return error;
-
 	if (b0 != 0x7FU || b1 != MCS_TAG_CONNECT_INITIAL)
 		return RDP_ERR_PROTO;
-
 	error = ber_read_len(&r, &ci_len);
 	if (error != RDP_OK)
 		return error;
-
 	if (rdp_reader_rem(&r) < ci_len)
 		return RDP_ERR_PROTO;
 
@@ -238,23 +217,18 @@ rdp_mcs_decode_connect_initial(
 	error = ber_read_tlv(&r, 0x04U, &slice, &slice_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = ber_read_tlv(&r, 0x04U, &slice, &slice_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = ber_read_tlv(&r, 0x01U, &slice, &slice_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = ber_read_tlv(&r, 0x30U, &slice, &slice_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = ber_read_tlv(&r, 0x30U, &slice, &slice_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = ber_read_tlv(&r, 0x30U, &slice, &slice_len);
 	if (error != RDP_OK)
 		return error;
@@ -269,19 +243,15 @@ rdp_mcs_decode_connect_initial(
 	error = rdp_skip_bytes(&r, 7U);
 	if (error != RDP_OK)
 		return error;
-
 	error = per_read_len(&r, &dummy_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_skip_bytes(&r, 12U);
 	if (error != RDP_OK)
 		return error;
-
 	error = per_read_len(&r, &slice_len);
 	if (error != RDP_OK)
 		return error;
-
 	if (rdp_reader_rem(&r) < slice_len)
 		return RDP_ERR_PROTO;
 
@@ -317,15 +287,12 @@ rdp_mcs_encode_connect_response(
 	error = rdp_buf_append_u16_le(&udata, UDATA_SC_CORE);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&udata, 12U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&udata, 0x00080004U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&udata, RDP_NEG_PROTO_SSL);
 	if (error != RDP_OK)
 		goto fail;
@@ -334,15 +301,12 @@ rdp_mcs_encode_connect_response(
 	error = rdp_buf_append_u16_le(&udata, UDATA_SC_SECURITY);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&udata, 12U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&udata, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&udata, 0U);
 	if (error != RDP_OK)
 		goto fail;
@@ -352,23 +316,18 @@ rdp_mcs_encode_connect_response(
 		error = rdp_buf_append_u16_le(&udata, UDATA_SC_NET);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u16_le(&udata, 12U);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u16_le(&udata, RDP_MCS_IO_CHANNEL);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u16_le(&udata, 1U);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u16_le(&udata, drdynvc_channel);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u16_le(&udata, 0U);
 		if (error != RDP_OK)
 			goto fail;
@@ -376,15 +335,12 @@ rdp_mcs_encode_connect_response(
 		error = rdp_buf_append_u16_le(&udata, UDATA_SC_NET);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u16_le(&udata, 8U);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u16_le(&udata, RDP_MCS_IO_CHANNEL);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u16_le(&udata, 0U);
 		if (error != RDP_OK)
 			goto fail;
@@ -399,19 +355,15 @@ rdp_mcs_encode_connect_response(
 		static const uint8_t gcc_rsp_key[6] = {
 			0x01U, 0xC0U, 0x4DU, 0x63U, 0x44U, 0x6EU
 		};
-
 		error = rdp_buf_append(&gcc, gcc_rsp_hdr, sizeof(gcc_rsp_hdr));
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append(&gcc, gcc_rsp_key, sizeof(gcc_rsp_key));
 		if (error != RDP_OK)
 			goto fail;
-
 		error = per_append_len(&gcc, udata.len);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append(&gcc, udata.data, udata.len);
 		if (error != RDP_OK)
 			goto fail;
@@ -422,31 +374,24 @@ rdp_mcs_encode_connect_response(
 	error = rdp_buf_append_u8(&body, 0x0AU);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&body, 0x01U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&body, 0x00U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&body, 0x02U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&body, 0x01U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(&body, call_id, 1U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_domain_params(&body, 34U, 3U, 0U, 1U, 0U, 1U, 65535U, 2U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_octet_string(&body, gcc.data, gcc.len);
 	if (error != RDP_OK)
 		goto fail;
@@ -455,19 +400,15 @@ rdp_mcs_encode_connect_response(
 	error = rdp_buf_append_u8(out, 0x7FU);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(out, MCS_TAG_CONNECT_RESPONSE);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_len(out, body.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, body.data, body.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&udata);
 	rdp_buf_free(&gcc);
 	rdp_buf_free(&body);
@@ -509,18 +450,14 @@ rdp_mcs_decode_connect_response(
 	error = rdp_read_u8(&r, &b0);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, &b1);
 	if (error != RDP_OK)
 		return error;
-
 	if (b0 != 0x7FU || b1 != MCS_TAG_CONNECT_RESPONSE)
 		return RDP_ERR_PROTO;
-
 	error = ber_read_len(&r, &cr_len);
 	if (error != RDP_OK)
 		return error;
-
 	if (rdp_reader_rem(&r) < cr_len)
 		return RDP_ERR_PROTO;
 
@@ -533,7 +470,6 @@ rdp_mcs_decode_connect_response(
 	error = ber_read_tlv(&r, 0x02U, &slice, &slice_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = ber_read_tlv(&r, 0x30U, &slice, &slice_len);
 	if (error != RDP_OK)
 		return error;
@@ -548,11 +484,9 @@ rdp_mcs_decode_connect_response(
 	error = rdp_skip_bytes(&r, 20U);
 	if (error != RDP_OK)
 		return error;
-
 	error = per_read_len(&r, &slice_len);
 	if (error != RDP_OK)
 		return error;
-
 	if (rdp_reader_rem(&r) < slice_len)
 		return RDP_ERR_PROTO;
 
@@ -622,11 +556,9 @@ rdp_mcs_encode_attach_user_confirm(
 	error = rdp_buf_append_u8(out, (uint8_t)((MCS_CHOICE_ATTACH_USER_CONF << 2) | 0x02U));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0x00U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, (uint16_t)(user_id - RDP_MCS_USER_BASE));
 	if (error != RDP_OK)
 		return error;
@@ -654,11 +586,9 @@ rdp_mcs_encode_channel_join_req(
 	error = rdp_buf_append_u8(out, (uint8_t)(MCS_CHOICE_CHANNEL_JOIN_REQ << 2));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, (uint16_t)(user_id - RDP_MCS_USER_BASE));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, channel_id);
 	if (error != RDP_OK)
 		return error;
@@ -686,19 +616,15 @@ rdp_mcs_encode_channel_join_confirm(
 	error = rdp_buf_append_u8(out, (uint8_t)((MCS_CHOICE_CHANNEL_JOIN_CONF << 2) | 0x02U));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0x00U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, (uint16_t)(user_id - RDP_MCS_USER_BASE));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, channel_id);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, channel_id);
 	if (error != RDP_OK)
 		return error;
@@ -728,23 +654,18 @@ rdp_mcs_encode_send_data_req(
 	error = rdp_buf_append_u8(out, (uint8_t)(MCS_CHOICE_SEND_DATA_REQ << 2));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, (uint16_t)(user_id - RDP_MCS_USER_BASE));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, channel_id);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0x70U);
 	if (error != RDP_OK)
 		return error;
-
 	error = per_append_len(out, len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append(out, payload, len);
 	if (error != RDP_OK)
 		return error;
@@ -774,23 +695,18 @@ rdp_mcs_encode_send_data_ind(
 	error = rdp_buf_append_u8(out, (uint8_t)(MCS_CHOICE_SEND_DATA_IND << 2));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, (uint16_t)(user_id - RDP_MCS_USER_BASE));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, channel_id);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0x70U);
 	if (error != RDP_OK)
 		return error;
-
 	error = per_append_len(out, len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append(out, payload, len);
 	if (error != RDP_OK)
 		return error;
@@ -815,7 +731,6 @@ rdp_mcs_encode_disconnect(
 	error = rdp_buf_append_u8(out, hdr);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, (uint8_t)((reason & 0x01U) << 7));
 	if (error != RDP_OK)
 		return error;
@@ -850,7 +765,6 @@ rdp_mcs_decode_pdu(
 	error = rdp_read_u8(&r, &b0);
 	if (error != RDP_OK)
 		return error;
-
 	pdu->choice = (uint8_t)((b0 >> 2) & 0x3FU);
 
 	/* Dispatches according to the MCS PDU choice. */
@@ -862,26 +776,21 @@ rdp_mcs_decode_pdu(
 		error = rdp_read_u8(&r, &res);
 		if (error != RDP_OK)
 			return error;
-
 		pdu->result = res;
 		if ((b0 & 0x02U) != 0U) {
 			error = rdp_read_u16_be(&r, &rel_id);
 			if (error != RDP_OK)
 				return error;
-
 			pdu->user_id = (uint16_t)(RDP_MCS_USER_BASE + rel_id);
 		}
-
 		return RDP_OK;
 	} else if (pdu->choice == MCS_CHOICE_CHANNEL_JOIN_REQ) {
 		error = rdp_read_u16_be(&r, &rel_id);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_read_u16_be(&r, &ch_id);
 		if (error != RDP_OK)
 			return error;
-
 		pdu->user_id = (uint16_t)(RDP_MCS_USER_BASE + rel_id);
 		pdu->channel_id = ch_id;
 		return RDP_OK;
@@ -889,36 +798,29 @@ rdp_mcs_decode_pdu(
 		error = rdp_read_u8(&r, &res);
 		if (error != RDP_OK)
 			return error;
-
 		pdu->result = res;
 		error = rdp_read_u16_be(&r, &rel_id);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_skip_bytes(&r, 2U);
 		if (error != RDP_OK)
 			return error;
-
 		pdu->user_id = (uint16_t)(RDP_MCS_USER_BASE + rel_id);
 		if ((b0 & 0x02U) != 0U) {
 			error = rdp_read_u16_be(&r, &ch_id);
 			if (error != RDP_OK)
 				return error;
-
 			pdu->channel_id = ch_id;
 		}
-
 		return RDP_OK;
 	} else if (pdu->choice == MCS_CHOICE_SEND_DATA_REQ ||
 		   pdu->choice == MCS_CHOICE_SEND_DATA_IND) {
 		error = rdp_read_u16_be(&r, &rel_id);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_read_u16_be(&r, &ch_id);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_read_u8(&r, &flags);
 		if (error != RDP_OK)
 			return error;
@@ -927,10 +829,8 @@ rdp_mcs_decode_pdu(
 		error = per_read_len(&r, &pay_len);
 		if (error != RDP_OK)
 			return error;
-
 		if (rdp_reader_rem(&r) < pay_len)
 			return RDP_ERR_PROTO;
-
 		pdu->user_id = (uint16_t)(RDP_MCS_USER_BASE + rel_id);
 		pdu->channel_id = ch_id;
 		pdu->payload = r.data + r.pos;
@@ -939,7 +839,6 @@ rdp_mcs_decode_pdu(
 		/* Succeeded: SendData PDU decoded. */
 		return RDP_OK;
 	}
-
 	return RDP_ERR_PROTO;
 }
 
@@ -950,28 +849,22 @@ ber_append_len(
 	size_t len)
 {
 	int error;
-
 	if (len < 0x80U) {
 		error = rdp_buf_append_u8(buf, (uint8_t)len);
 		return error;
 	}
-
 	if (len <= 0xFFU) {
 		error = rdp_buf_append_u8(buf, 0x81U);
 		if (error != RDP_OK)
 			return error;
-
 		return rdp_buf_append_u8(buf, (uint8_t)len);
 	}
-
 	if (len <= 0xFFFFU) {
 		error = rdp_buf_append_u8(buf, 0x82U);
 		if (error != RDP_OK)
 			return error;
-
 		return rdp_buf_append_u16_be(buf, (uint16_t)len);
 	}
-
 	return RDP_ERR_INVAL;
 }
 
@@ -1005,15 +898,12 @@ ber_append_int(
 		raw[3] = (uint8_t)(val & 0xFFU);
 		n = 4U;
 	}
-
 	error = rdp_buf_append_u8(buf, 0x02U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(buf, (uint8_t)n);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append(buf, raw, n);
 }
 
@@ -1025,15 +915,12 @@ ber_append_octet_string(
 	size_t len)
 {
 	int error;
-
 	error = rdp_buf_append_u8(buf, 0x04U);
 	if (error != RDP_OK)
 		return error;
-
 	error = ber_append_len(buf, len);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append(buf, data, len);
 }
 
@@ -1052,53 +939,40 @@ ber_append_domain_params(
 {
 	struct rdp_buf seq;
 	int error;
-
 	rdp_buf_init(&seq);
-
 	error = ber_append_int(&seq, max_ch);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_int(&seq, max_usr);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_int(&seq, max_tok);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_int(&seq, num_prio);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_int(&seq, min_tp);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_int(&seq, max_ht);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_int(&seq, max_pdu);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_int(&seq, proto_ver);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(buf, 0x30U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = ber_append_len(buf, seq.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(buf, seq.data, seq.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&seq);
 	return RDP_OK;
 
@@ -1118,29 +992,23 @@ ber_read_len(
 	uint8_t i;
 	size_t val;
 	int error;
-
 	error = rdp_read_u8(r, &b);
 	if (error != RDP_OK)
 		return error;
-
 	if ((b & 0x80U) == 0U) {
 		*out_len = (size_t)b;
 		return RDP_OK;
 	}
-
 	count = (uint8_t)(b & 0x7FU);
 	if (count == 0U || count > 4U)
 		return RDP_ERR_PROTO;
-
 	val = 0;
 	for (i = 0; i < count; i++) {
 		error = rdp_read_u8(r, &b);
 		if (error != RDP_OK)
 			return error;
-
 		val = (val << 8) | (size_t)b;
 	}
-
 	*out_len = val;
 	return RDP_OK;
 }
@@ -1156,22 +1024,17 @@ ber_read_tlv(
 	uint8_t tag;
 	size_t len;
 	int error;
-
 	error = rdp_read_u8(r, &tag);
 	if (error != RDP_OK)
 		return error;
-
 	if (tag != expected_tag)
 		return RDP_ERR_PROTO;
-
 	error = ber_read_len(r, &len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_bytes(r, val, len);
 	if (error != RDP_OK)
 		return error;
-
 	*val_len = len;
 	return RDP_OK;
 }
@@ -1183,18 +1046,14 @@ per_append_len(
 	size_t len)
 {
 	int error;
-
 	if (len < 0x80U)
 		return rdp_buf_append_u8(buf, (uint8_t)len);
-
 	if (len < 0x4000U) {
 		error = rdp_buf_append_u8(buf, (uint8_t)(0x80U | (len >> 8)));
 		if (error != RDP_OK)
 			return error;
-
 		return rdp_buf_append_u8(buf, (uint8_t)(len & 0xFFU));
 	}
-
 	return RDP_ERR_INVAL;
 }
 
@@ -1207,23 +1066,18 @@ per_read_len(
 	uint8_t b0;
 	uint8_t b1;
 	int error;
-
 	error = rdp_read_u8(r, &b0);
 	if (error != RDP_OK)
 		return error;
-
 	if ((b0 & 0x80U) == 0U) {
 		*out_len = (size_t)b0;
 		return RDP_OK;
 	}
-
 	if ((b0 & 0x40U) != 0U)
 		return RDP_ERR_PROTO;
-
 	error = rdp_read_u8(r, &b1);
 	if (error != RDP_OK)
 		return error;
-
 	*out_len = (((size_t)(b0 & 0x3FU)) << 8) | (size_t)b1;
 	return RDP_OK;
 }
@@ -1239,11 +1093,9 @@ append_cs_core(
 	uint16_t early_caps;
 	uint8_t cname[32];
 	int error;
-
 	early_caps = RNS_UD_CS_SUPPORT_ERRINFO | RNS_UD_CS_WANT_32BPP;
 	if (want_drdynvc != 0)
 		early_caps |= RNS_UD_CS_SUPPORT_DYNVC_GFX;
-
 	memset(cname, 0, sizeof(cname));
 	cname[0] = 'z';
 	cname[2] = 'e';
@@ -1251,99 +1103,75 @@ append_cs_core(
 	cname[6] = 'B';
 	cname[8] = 'S';
 	cname[10] = 'D';
-
 	error = rdp_buf_append_u16_le(buf, UDATA_CS_CORE);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 216U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 0x00080004U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, (uint16_t)width);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, (uint16_t)height);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 0xCA01U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 0xAA03U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 0x00000409U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 2600U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append(buf, cname, sizeof(cname));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 4U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 12U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_zeros(buf, 64U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 0xCA01U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 24U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 0x000FU);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, early_caps);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_zeros(buf, 64U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(buf, RDP_NEG_PROTO_SSL);
 }
 
@@ -1353,19 +1181,15 @@ append_cs_security(
 	struct rdp_buf *buf)
 {
 	int error;
-
 	error = rdp_buf_append_u16_le(buf, UDATA_CS_SECURITY);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 12U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(buf, 0U);
 }
 
@@ -1379,26 +1203,20 @@ append_cs_net(
 		'd', 'r', 'd', 'y', 'n', 'v', 'c', '\0'
 	};
 	int error;
-
 	if (want_drdynvc == 0)
 		return RDP_OK;
-
 	error = rdp_buf_append_u16_le(buf, UDATA_CS_NET);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(buf, 20U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u32_le(buf, 1U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append(buf, drdynvc_name, sizeof(drdynvc_name));
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_u32_le(buf, 0xC0800000U);
 }
 
@@ -1423,7 +1241,6 @@ parse_user_data_blocks(
 	uint16_t sc_count;
 	uint16_t ch_id;
 	int error;
-
 	rdp_reader_init(&r, data, len);
 
 	/* Iterates over each type-length-value User Data block. */
@@ -1431,49 +1248,38 @@ parse_user_data_blocks(
 		error = rdp_read_u16_le(&r, &btype);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_read_u16_le(&r, &blen);
 		if (error != RDP_OK)
 			return error;
-
 		if (blen < 4U || rdp_reader_rem(&r) < (size_t)(blen - 4U))
 			return RDP_ERR_PROTO;
-
 		error = rdp_read_bytes(&r, &blk, (size_t)(blen - 4U));
 		if (error != RDP_OK)
 			return error;
-
 		rdp_reader_init(&br, blk, (size_t)(blen - 4U));
-
 		if (btype == UDATA_CS_CORE && blen >= 12U) {
 			error = rdp_skip_bytes(&br, 4U);
 			if (error != RDP_OK)
 				return error;
-
 			error = rdp_read_u16_le(&br, &w16);
 			if (error != RDP_OK)
 				return error;
-
 			error = rdp_read_u16_le(&br, &h16);
 			if (error != RDP_OK)
 				return error;
-
 			info->width = w16;
 			info->height = h16;
 		} else if (btype == UDATA_CS_NET && blen >= 8U) {
 			error = rdp_read_u32_le(&br, &ch_count);
 			if (error != RDP_OK)
 				return error;
-
 			for (i = 0; i < ch_count && rdp_reader_rem(&br) >= 12U; i++) {
 				error = rdp_read_bytes(&br, &cname, 8U);
 				if (error != RDP_OK)
 					return error;
-
 				error = rdp_skip_bytes(&br, 4U);
 				if (error != RDP_OK)
 					return error;
-
 				if (memcmp(cname, "drdynvc", 7U) == 0)
 					info->has_drdynvc = 1;
 			}
@@ -1481,22 +1287,18 @@ parse_user_data_blocks(
 			error = rdp_read_u16_le(&br, &io_ch);
 			if (error != RDP_OK)
 				return error;
-
 			error = rdp_read_u16_le(&br, &sc_count);
 			if (error != RDP_OK)
 				return error;
-
 			info->io_channel = io_ch;
 			if (sc_count > 0U && rdp_reader_rem(&br) >= 2U) {
 				error = rdp_read_u16_le(&br, &ch_id);
 				if (error != RDP_OK)
 					return error;
-
 				info->drdynvc_channel = ch_id;
 				info->has_drdynvc = 1;
 			}
 		}
 	}
-
 	return RDP_OK;
 }

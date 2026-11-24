@@ -37,7 +37,6 @@ extern "C" {
 /* Wire header sizes (bytes). */
 #define KWL_RDP_FRAME_HDR_SIZE	20U
 #define KWL_RDP_CTRL_HDR_SIZE	12U
-
 struct kwl_server;
 struct kwl_rdp;
 

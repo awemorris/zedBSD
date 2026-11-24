@@ -95,7 +95,6 @@ rdp_buf_reserve(
 			new_cap = RDP_MAX_PDU_SIZE;
 			break;
 		}
-
 		new_cap *= 2U;
 	}
 
@@ -103,7 +102,6 @@ rdp_buf_reserve(
 	new_data = (uint8_t *)realloc(buf->data, new_cap);
 	if (new_data == NULL)
 		return RDP_ERR_NOMEM;
-
 	buf->data = new_data;
 	buf->cap = new_cap;
 
@@ -473,7 +471,6 @@ rdp_stream_next_packet(
 		/* Waits until the full TPKT frame has arrived. */
 		if (rx->len < total_len)
 			return RDP_ERR_SHORT;
-
 		pkt->is_fastpath = 0;
 		pkt->event_count = 0;
 		pkt->payload = rx->data + TPKT_HDR_LEN;
@@ -500,7 +497,6 @@ rdp_stream_next_packet(
 	} else {
 		if (rx->len < 3U)
 			return RDP_ERR_SHORT;
-
 		total_len = (((size_t)(b1 & 0x7FU)) << 8) | (size_t)rx->data[2];
 		hdr_len = 3U;
 	}
@@ -518,11 +514,9 @@ rdp_stream_next_packet(
 	if (num_events == 0U) {
 		if (total_len < hdr_len + 1U)
 			return RDP_ERR_PROTO;
-
 		num_events = rx->data[hdr_len];
 		hdr_len += 1U;
 	}
-
 	pkt->is_fastpath = 1;
 	pkt->event_count = num_events;
 	pkt->payload = rx->data + hdr_len;
@@ -554,11 +548,9 @@ rdp_tpkt_wrap(
 	error = rdp_buf_append_u8(out, (uint8_t)TPKT_VERSION);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0x00U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, (uint16_t)total);
 	if (error != RDP_OK)
 		return error;
@@ -590,19 +582,15 @@ rdp_x224_encode_cr(
 	error = rdp_buf_append_u8(&tpdu, 14U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&tpdu, X224_TPDU_CR);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_be(&tpdu, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_be(&tpdu, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&tpdu, 0U);
 	if (error != RDP_OK)
 		goto fail;
@@ -611,15 +599,12 @@ rdp_x224_encode_cr(
 	error = rdp_buf_append_u8(&tpdu, X224_NEG_TYPE_REQ);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&tpdu, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&tpdu, X224_NEG_LEN);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&tpdu, requested_protocols);
 	if (error != RDP_OK)
 		goto fail;
@@ -628,7 +613,6 @@ rdp_x224_encode_cr(
 	error = rdp_tpkt_wrap(out, tpdu.data, tpdu.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&tpdu);
 
 	/* Succeeded: X.224 Connection Request encoded. */
@@ -657,19 +641,15 @@ rdp_x224_encode_cc(
 	error = rdp_buf_append_u8(&tpdu, 14U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&tpdu, X224_TPDU_CC);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_be(&tpdu, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_be(&tpdu, 0x1234U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&tpdu, 0U);
 	if (error != RDP_OK)
 		goto fail;
@@ -678,15 +658,12 @@ rdp_x224_encode_cc(
 	error = rdp_buf_append_u8(&tpdu, X224_NEG_TYPE_RSP);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(&tpdu, 0U);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u16_le(&tpdu, X224_NEG_LEN);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(&tpdu, selected_protocol);
 	if (error != RDP_OK)
 		goto fail;
@@ -695,7 +672,6 @@ rdp_x224_encode_cc(
 	error = rdp_tpkt_wrap(out, tpdu.data, tpdu.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&tpdu);
 
 	/* Succeeded: X.224 Connection Confirm encoded. */
@@ -727,11 +703,9 @@ rdp_x224_encode_dt(
 	error = rdp_buf_append_u8(out, (uint8_t)TPKT_VERSION);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0x00U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_be(out, (uint16_t)total);
 	if (error != RDP_OK)
 		return error;
@@ -740,11 +714,9 @@ rdp_x224_encode_dt(
 	error = rdp_buf_append_u8(out, 0x02U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, X224_TPDU_DT);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0x80U);
 	if (error != RDP_OK)
 		return error;
@@ -794,22 +766,18 @@ rdp_x224_decode(
 	error = rdp_read_u8(&r, &li);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, &code);
 	if (error != RDP_OK)
 		return error;
-
 	neg->tpdu_code = code;
 
 	/* Handles X.224 Data TPDU by returning the trailing MCS slice. */
 	if (code == X224_TPDU_DT) {
 		if (li < 2U || rdp_reader_rem(&r) < (size_t)(li - 1U))
 			return RDP_ERR_PROTO;
-
 		error = rdp_skip_bytes(&r, (size_t)(li - 1U));
 		if (error != RDP_OK)
 			return error;
-
 		*dt_payload = r.data + r.pos;
 		*dt_len = rdp_reader_rem(&r);
 
@@ -825,11 +793,9 @@ rdp_x224_decode(
 	error = rdp_read_u16_be(&r, &dst_ref);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u16_be(&r, &src_ref);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u8(&r, &cls);
 	if (error != RDP_OK)
 		return error;
@@ -842,7 +808,6 @@ rdp_x224_decode(
 	var_len = rdp_reader_rem(&r);
 	if (var_len == 0)
 		return RDP_OK;
-
 	error = rdp_read_bytes(&r, &var_data, var_len);
 	if (error != RDP_OK)
 		return error;
@@ -856,7 +821,6 @@ rdp_x224_decode(
 				i += 2U;
 				break;
 			}
-
 			i++;
 		}
 	}
@@ -867,22 +831,17 @@ rdp_x224_decode(
 		error = rdp_read_u8(&r, &neg_type);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_read_u8(&r, &neg_flags);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_read_u16_le(&r, &neg_len);
 		if (error != RDP_OK)
 			return error;
-
 		error = rdp_read_u32_le(&r, &protos);
 		if (error != RDP_OK)
 			return error;
-
 		if (neg_len != X224_NEG_LEN)
 			return RDP_ERR_PROTO;
-
 		neg->neg_type = neg_type;
 		neg->neg_flags = neg_flags;
 		neg->protocols = protos;

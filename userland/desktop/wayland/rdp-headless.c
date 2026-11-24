@@ -48,6 +48,16 @@ struct kwl_rdp {
 	size_t ctrl_used;
 };
 
+static void put_be32(uint8_t *p, uint32_t v);
+static uint32_t get_be32(const uint8_t *p);
+static void put_be64(uint8_t *p, uint64_t v);
+static uint64_t get_be64(const uint8_t *p);
+static uint32_t find_mem_type(VkPhysicalDevice physical, uint32_t filter, VkMemoryPropertyFlags props);
+static void rdp_destroy_targets(struct kwl_rdp *rdp);
+static int rdp_create_targets(struct kwl_rdp *rdp, uint32_t width, uint32_t height);
+static void bgra_to_i420(const uint8_t *bgra, uint32_t width, uint32_t height, uint8_t *y_out, uint8_t *u_out, uint8_t *v_out);
+static int write_all_fd(int fd, const uint8_t *buf, size_t len);
+
 static void
 put_be32(
 	uint8_t *p,
@@ -146,7 +156,6 @@ kwl_rdp_clamp_size(
 {
 	uint32_t w;
 	uint32_t h;
-
 	w = *width;
 	h = *height;
 	if (w < KWL_RDP_MIN_WIDTH)
@@ -171,13 +180,14 @@ find_mem_type(
 {
 	VkPhysicalDeviceMemoryProperties mem_props;
 	uint32_t i;
-
 	vkGetPhysicalDeviceMemoryProperties(physical, &mem_props);
 	for (i = 0U; i < mem_props.memoryTypeCount; i++) {
 		if ((filter & (1U << i)) != 0U &&
 		    (mem_props.memoryTypes[i].propertyFlags & props) == props)
 			return i;
 	}
+
+	/* No matching memory type was found. */
 	return UINT32_MAX;
 }
 
@@ -189,26 +199,38 @@ rdp_destroy_targets(
 		media_encoder_close(rdp->encoder);
 		rdp->encoder = NULL;
 	}
+
+	/* Unmaps and releases the host staging buffer. */
 	if (rdp->mapped != NULL && rdp->staging_mem != VK_NULL_HANDLE) {
 		vkUnmapMemory(rdp->device, rdp->staging_mem);
 		rdp->mapped = NULL;
 	}
+
+	/* Destroys the Vulkan staging buffer. */
 	if (rdp->staging != VK_NULL_HANDLE) {
 		vkDestroyBuffer(rdp->device, rdp->staging, NULL);
 		rdp->staging = VK_NULL_HANDLE;
 	}
+
+	/* Frees staging buffer memory. */
 	if (rdp->staging_mem != VK_NULL_HANDLE) {
 		vkFreeMemory(rdp->device, rdp->staging_mem, NULL);
 		rdp->staging_mem = VK_NULL_HANDLE;
 	}
+
+	/* Destroys the offscreen render target image. */
 	if (rdp->image != VK_NULL_HANDLE) {
 		vkDestroyImage(rdp->device, rdp->image, NULL);
 		rdp->image = VK_NULL_HANDLE;
 	}
+
+	/* Frees offscreen image device memory. */
 	if (rdp->image_mem != VK_NULL_HANDLE) {
 		vkFreeMemory(rdp->device, rdp->image_mem, NULL);
 		rdp->image_mem = VK_NULL_HANDLE;
 	}
+
+	/* Frees planar I420 conversion buffers. */
 	free(rdp->y_plane);
 	free(rdp->u_plane);
 	free(rdp->v_plane);
@@ -232,12 +254,10 @@ rdp_create_targets(
 	VkResult res;
 	size_t y_size;
 	size_t uv_size;
-
 	kwl_rdp_clamp_size(&width, &height);
 	rdp->width = width;
 	rdp->height = height;
 	rdp->staging_size = (size_t)width * (size_t)height * 4U;
-
 	memset(&img_info, 0, sizeof(img_info));
 	img_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	img_info.imageType = VK_IMAGE_TYPE_2D;
@@ -252,17 +272,14 @@ rdp_create_targets(
 	img_info.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
 			 VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-
 	res = vkCreateImage(rdp->device, &img_info, NULL, &rdp->image);
 	if (res != VK_SUCCESS)
 		return EIO;
-
 	vkGetImageMemoryRequirements(rdp->device, rdp->image, &req);
 	mem_type = find_mem_type(rdp->physical, req.memoryTypeBits,
 				 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 	if (mem_type == UINT32_MAX)
 		return EIO;
-
 	memset(&alloc, 0, sizeof(alloc));
 	alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	alloc.allocationSize = req.size;
@@ -273,7 +290,6 @@ rdp_create_targets(
 	res = vkBindImageMemory(rdp->device, rdp->image, rdp->image_mem, 0U);
 	if (res != VK_SUCCESS)
 		return EIO;
-
 	memset(&buf_info, 0, sizeof(buf_info));
 	buf_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	buf_info.size = rdp->staging_size;
@@ -281,14 +297,12 @@ rdp_create_targets(
 	res = vkCreateBuffer(rdp->device, &buf_info, NULL, &rdp->staging);
 	if (res != VK_SUCCESS)
 		return EIO;
-
 	vkGetBufferMemoryRequirements(rdp->device, rdp->staging, &req);
 	mem_type = find_mem_type(rdp->physical, req.memoryTypeBits,
 				 VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
 				 VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
 	if (mem_type == UINT32_MAX)
 		return EIO;
-
 	memset(&alloc, 0, sizeof(alloc));
 	alloc.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	alloc.allocationSize = req.size;
@@ -303,7 +317,6 @@ rdp_create_targets(
 			  0U, &rdp->mapped);
 	if (res != VK_SUCCESS)
 		return EIO;
-
 	y_size = (size_t)width * (size_t)height;
 	uv_size = (size_t)(width / 2U) * (size_t)(height / 2U);
 	rdp->y_plane = (uint8_t *)malloc(y_size);
@@ -311,7 +324,6 @@ rdp_create_targets(
 	rdp->v_plane = (uint8_t *)malloc(uv_size);
 	if (rdp->y_plane == NULL || rdp->u_plane == NULL || rdp->v_plane == NULL)
 		return ENOMEM;
-
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.codec = MEDIA_CODEC_H264;
 	cfg.profile = MEDIA_ENCODER_PROFILE_H264_CONSTRAINED_BASELINE;
@@ -325,9 +337,9 @@ rdp_create_targets(
 	cfg.output = MEDIA_ENCODER_ANNEX_B;
 	cfg.rate_control = MEDIA_ENCODER_RATE_CQP;
 	cfg.qp = 26U;
-	if (media_encoder_create(&cfg, &rdp->encoder) != 0)
+	res = (VkResult)media_encoder_create(&cfg, &rdp->encoder);
+	if ((int)res != 0)
 		return EIO;
-
 	rdp->force_key = 1U;
 	return 0;
 }
@@ -350,17 +362,14 @@ kwl_rdp_open(
 	VkFenceCreateInfo fence_info;
 	VkResult res;
 	int err;
-
 	rdp = (struct kwl_rdp *)calloc(1U, sizeof(*rdp));
 	if (rdp == NULL)
 		return ENOMEM;
-
 	rdp->fd = server->rdp_fd;
 	rdp->device = (VkDevice)device;
 	rdp->physical = (VkPhysicalDevice)physical;
 	rdp->queue = (VkQueue)queue;
 	rdp->queue_family = queue_family;
-
 	memset(&pool_info, 0, sizeof(pool_info));
 	pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
 	pool_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
@@ -371,6 +380,7 @@ kwl_rdp_open(
 		return EIO;
 	}
 
+	/* Allocates the primary copy command buffer. */
 	memset(&cmd_info, 0, sizeof(cmd_info));
 	cmd_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 	cmd_info.commandPool = rdp->cmd_pool;
@@ -383,6 +393,7 @@ kwl_rdp_open(
 		return EIO;
 	}
 
+	/* Creates the fence used to wait on staging readback. */
 	memset(&fence_info, 0, sizeof(fence_info));
 	fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	res = vkCreateFence(rdp->device, &fence_info, NULL, &rdp->copy_fence);
@@ -392,6 +403,7 @@ kwl_rdp_open(
 		return EIO;
 	}
 
+	/* Allocates the offscreen image, staging buffer, and H.264 encoder. */
 	err = rdp_create_targets(rdp, width, height);
 	if (err != 0) {
 		rdp_destroy_targets(rdp);
@@ -401,6 +413,7 @@ kwl_rdp_open(
 		return err;
 	}
 
+	/* Publishes the headless state on the compositor server. */
 	server->rdp = rdp;
 	if (out_image != NULL)
 		*out_image = (void *)rdp->image;
@@ -417,23 +430,21 @@ kwl_rdp_resize(
 {
 	struct kwl_rdp *rdp;
 	int err;
-
 	rdp = server->rdp;
 	if (rdp == NULL)
 		return EINVAL;
-
 	kwl_rdp_clamp_size(&width, &height);
 	if (width == rdp->width && height == rdp->height) {
 		rdp->force_key = 1U;
 		return 0;
 	}
 
+	/* Waits for the GPU to finish before recreating targets. */
 	vkDeviceWaitIdle(rdp->device);
 	rdp_destroy_targets(rdp);
 	err = rdp_create_targets(rdp, width, height);
 	if (err != 0)
 		return err;
-
 	if (out_image != NULL)
 		*out_image = (void *)rdp->image;
 	kwl_output_size_set(server, width, height, 0U, server->scale_wanted);
@@ -453,31 +464,33 @@ bgra_to_i420(
 	uint32_t y;
 	uint32_t x;
 	uint32_t uv_w;
-
+	const uint8_t *row;
+	uint8_t *y_row;
+	int32_t b;
+	int32_t g;
+	int32_t r;
+	int32_t yy;
+	int32_t uu;
+	int32_t vv;
+	size_t uv_idx;
 	uv_w = width / 2U;
 	for (y = 0U; y < height; y++) {
-		const uint8_t *row;
-		uint8_t *y_row;
-
 		row = bgra + (size_t)y * (size_t)width * 4U;
 		y_row = y_out + (size_t)y * (size_t)width;
 		for (x = 0U; x < width; x++) {
-			int32_t b = row[x * 4U + 0U];
-			int32_t g = row[x * 4U + 1U];
-			int32_t r = row[x * 4U + 2U];
-			int32_t yy = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
-
+			b = row[x * 4U + 0U];
+			g = row[x * 4U + 1U];
+			r = row[x * 4U + 2U];
+			yy = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
 			if (yy < 0)
 				yy = 0;
 			if (yy > 255)
 				yy = 255;
 			y_row[x] = (uint8_t)yy;
-
 			if ((y & 1U) == 0U && (x & 1U) == 0U) {
-				int32_t uu = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
-				int32_t vv = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
-				size_t uv_idx = (size_t)(y / 2U) * (size_t)uv_w + (size_t)(x / 2U);
-
+				uu = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
+				vv = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
+				uv_idx = (size_t)(y / 2U) * (size_t)uv_w + (size_t)(x / 2U);
 				if (uu < 0)
 					uu = 0;
 				if (uu > 255)
@@ -500,29 +513,38 @@ write_all_fd(
 	size_t len)
 {
 	size_t off;
-
+	ssize_t n;
+	struct pollfd pfd;
+	int prc;
+	int err;
 	off = 0U;
 	while (off < len) {
-		ssize_t n;
-
 		n = write(fd, buf + off, len - off);
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
-				struct pollfd pfd;
-
 				pfd.fd = fd;
 				pfd.events = POLLOUT;
 				pfd.revents = 0;
-				if (poll(&pfd, 1, 1000) <= 0)
+				prc = poll(&pfd, 1, 1000);
+				if (prc <= 0)
 					return EIO;
 				continue;
 			}
-			return errno != 0 ? errno : EIO;
+
+			/* Propagates non-retryable write errors. */
+			err = errno;
+			if (err == 0)
+				err = EIO;
+			return err;
 		}
+
+		/* Advances past the written bytes. */
 		off += (size_t)n;
 	}
+
+	/* Succeeded. */
 	return 0;
 }
 
@@ -545,21 +567,19 @@ kwl_rdp_encode_and_send(
 	uint32_t send_flags;
 	uint32_t out_flags;
 	int err;
-
+	VkResult vres;
 	if (rdp == NULL || rdp->closed || rdp->fd < 0)
 		return 0;
 	if (width != rdp->width || height != rdp->height)
 		return 0;
-
 	vkResetFences(rdp->device, 1U, &rdp->copy_fence);
 	vkResetCommandBuffer(rdp->cmd_buf, 0U);
-
 	memset(&begin, 0, sizeof(begin));
 	begin.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	begin.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	if (vkBeginCommandBuffer(rdp->cmd_buf, &begin) != VK_SUCCESS)
+	vres = vkBeginCommandBuffer(rdp->cmd_buf, &begin);
+	if (vres != VK_SUCCESS)
 		return EIO;
-
 	memset(&barrier, 0, sizeof(barrier));
 	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 	barrier.oldLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
@@ -574,7 +594,6 @@ kwl_rdp_encode_and_send(
 			     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
 			     VK_PIPELINE_STAGE_TRANSFER_BIT,
 			     0U, 0U, NULL, 0U, NULL, 1U, &barrier);
-
 	memset(&region, 0, sizeof(region));
 	region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	region.imageSubresource.layerCount = 1U;
@@ -584,23 +603,22 @@ kwl_rdp_encode_and_send(
 	vkCmdCopyImageToBuffer(rdp->cmd_buf, (VkImage)image,
 			       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			       rdp->staging, 1U, &region);
-
-	if (vkEndCommandBuffer(rdp->cmd_buf) != VK_SUCCESS)
+	vres = vkEndCommandBuffer(rdp->cmd_buf);
+	if (vres != VK_SUCCESS)
 		return EIO;
-
 	memset(&submit, 0, sizeof(submit));
 	submit.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 	submit.commandBufferCount = 1U;
 	submit.pCommandBuffers = &rdp->cmd_buf;
-	if (vkQueueSubmit(rdp->queue, 1U, &submit, rdp->copy_fence) != VK_SUCCESS)
+	vres = vkQueueSubmit(rdp->queue, 1U, &submit, rdp->copy_fence);
+	if (vres != VK_SUCCESS)
 		return EIO;
-	if (vkWaitForFences(rdp->device, 1U, &rdp->copy_fence, VK_TRUE,
-			    UINT64_MAX) != VK_SUCCESS)
+	vres = vkWaitForFences(rdp->device, 1U, &rdp->copy_fence, VK_TRUE,
+			       UINT64_MAX);
+	if (vres != VK_SUCCESS)
 		return EIO;
-
 	bgra_to_i420((const uint8_t *)rdp->mapped, width, height,
 		     rdp->y_plane, rdp->u_plane, rdp->v_plane);
-
 	memset(&pic, 0, sizeof(pic));
 	pic.plane[0] = rdp->y_plane;
 	pic.plane[1] = rdp->u_plane;
@@ -608,19 +626,20 @@ kwl_rdp_encode_and_send(
 	pic.stride[0] = width;
 	pic.stride[1] = width / 2U;
 	pic.stride[2] = width / 2U;
-
-	send_flags = rdp->force_key != 0U ? MEDIA_ENCODE_FORCE_KEY : 0U;
+	send_flags = 0U;
+	if (rdp->force_key != 0U)
+		send_flags = MEDIA_ENCODE_FORCE_KEY;
 	rdp->force_key = 0U;
 	err = media_encoder_send(rdp->encoder, &pic, (int64_t)pts_us, send_flags);
 	if (err != 0)
 		return err;
-
 	memset(&pkt, 0, sizeof(pkt));
 	err = media_encoder_receive(rdp->encoder, 0U, &pkt);
 	if (err != 0 || pkt.data == NULL || pkt.size == 0U)
 		return err;
-
-	out_flags = (pkt.flags & MEDIA_ENCODED_KEY) != 0U ? KWL_RDP_FRAME_KEY : 0U;
+	out_flags = 0U;
+	if ((pkt.flags & MEDIA_ENCODED_KEY) != 0U)
+		out_flags = KWL_RDP_FRAME_KEY;
 	kwl_rdp_pack_frame_hdr(hdr, out_flags, pts_us, (uint32_t)pkt.size);
 	err = write_all_fd(rdp->fd, hdr, sizeof(hdr));
 	if (err == 0)
@@ -637,11 +656,12 @@ kwl_rdp_poll(
 {
 	struct kwl_rdp *rdp;
 	ssize_t n;
-
+	uint32_t type;
+	uint32_t arg1;
+	uint32_t arg2;
 	rdp = server->rdp;
 	if (rdp == NULL || rdp->fd < 0 || rdp->closed)
 		return;
-
 	for (;;) {
 		n = read(rdp->fd, rdp->ctrl_buf + rdp->ctrl_used,
 			 sizeof(rdp->ctrl_buf) - rdp->ctrl_used);
@@ -654,17 +674,17 @@ kwl_rdp_poll(
 			server->failed = 1;
 			break;
 		}
+
+		/* Stops compositor if the rdpd IPC peer closed the socket. */
 		if (n == 0) {
 			rdp->closed = 1;
 			server->failed = 1;
 			break;
 		}
+
+		/* Accumulates and dispatches complete 12-byte control messages. */
 		rdp->ctrl_used += (size_t)n;
 		if (rdp->ctrl_used == sizeof(rdp->ctrl_buf)) {
-			uint32_t type;
-			uint32_t arg1;
-			uint32_t arg2;
-
 			kwl_rdp_unpack_ctrl(rdp->ctrl_buf, &type, &arg1, &arg2);
 			rdp->ctrl_used = 0U;
 			if (type == KWL_RDP_MSG_RESIZE)
@@ -681,11 +701,9 @@ kwl_rdp_close(
 	struct kwl_server *server)
 {
 	struct kwl_rdp *rdp;
-
 	rdp = server->rdp;
 	if (rdp == NULL)
 		return;
-
 	rdp_destroy_targets(rdp);
 	if (rdp->copy_fence != VK_NULL_HANDLE)
 		vkDestroyFence(rdp->device, rdp->copy_fence, NULL);
