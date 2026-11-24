@@ -98,6 +98,11 @@ struct terminal_run_options {
 	const struct terminal_connector *connector;
 	void (*new_window)(void *data, struct kl_app *app, struct kl_window *from);
 	void (*ended)(void *data, const struct terminal_run_result *result);
+	int refuse_terminal_drop;
+	int open_sftp_menu;
+	int (*can_open_sftp)(void *data, const struct terminal_connection *connection);
+	int (*open_sftp)(void *data, struct terminal_connection *connection);
+	int (*confirm_close)(void *data, struct terminal_window *window, struct terminal_connection *connection);
 	void *data;
 };
 

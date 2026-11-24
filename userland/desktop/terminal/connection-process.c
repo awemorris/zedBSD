@@ -53,6 +53,7 @@ static const struct terminal_connection_ops process_ops = {
 	process_pending,
 	process_close,
 	NULL,
+	NULL,
 	NULL
 };
 

@@ -84,7 +84,8 @@ static const struct terminal_connection_ops tab_ops = {
 	tab_pending,
 	tab_close,
 	NULL,
-	&tab_picture_ops
+	&tab_picture_ops,
+	NULL
 };
 
 /*

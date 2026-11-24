@@ -46,6 +46,7 @@
 #define MENU_NEW_TAB		13U
 #define MENU_CLOSE_TAB		14U
 #define MENU_SETTINGS		15U
+#define MENU_OPEN_SFTP		16U
 
 /* Edit. */
 #define MENU_COPY		20U
@@ -106,6 +107,7 @@ static const struct kl_menu_entry menu_items[] = {
 	{ MENU_SHELL, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Shell", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_NEW_WINDOW, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Window", TERMINAL_ACTION_NEW_WINDOW, KL_MENU_ROLE_NEW, KL_MENU_CTRL | KL_MENU_SHIFT, 'n' },
 	{ MENU_NEW_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "New Tab", TERMINAL_ACTION_NEW_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_ALT, 't' },
+	{ MENU_OPEN_SFTP, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Open SFTP", TERMINAL_ACTION_OPEN_SFTP, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'o' },
 	{ MENU_SETTINGS, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Settings...", TERMINAL_ACTION_SETTINGS, KL_MENU_ROLE_NONE, 0U, MENU_KEY_F12 },
 	{ MENU_SHELL_LINE, MENU_SHELL, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ MENU_CLOSE_TAB, MENU_SHELL, KL_MENU_ITEM_NORMAL, "Close Tab", TERMINAL_ACTION_CLOSE_TAB, KL_MENU_ROLE_NONE, KL_MENU_CTRL | KL_MENU_SHIFT, 'w' },
@@ -195,6 +197,10 @@ terminal_menu_open(
 
 		/* A program that gave the settings' tab nothing has no settings. */
 		if (menu_items[index].id == MENU_SETTINGS && !window->settings_item)
+			continue;
+
+		/* A program without SFTP has no Open SFTP item. */
+		if (menu_items[index].id == MENU_OPEN_SFTP && !window->open_sftp_item)
 			continue;
 
 		/* The item, after the ones before it. */
@@ -388,6 +394,10 @@ menu_state(
 	/* Disable Input Method checked while the user keeps it off, for the window that has the item. */
 	if (window->input_method_item)
 		menu_action_state(window, TERMINAL_ACTION_INPUT_METHOD_OFF, 1, state->input_method_off);
+
+	/* Open SFTP enabled when the active tab's connection allows it, for the window that has the item. */
+	if (window->open_sftp_item)
+		menu_action_state(window, TERMINAL_ACTION_OPEN_SFTP, state->can_open_sftp, 0);
 
 	/* Succeeded: the menus show the state. */
 	window->menu_state = *state;

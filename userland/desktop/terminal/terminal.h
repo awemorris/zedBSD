@@ -110,6 +110,15 @@ struct terminal_connection;
 /* How many inputs of a picture's tab wait for the main loop at most. */
 #define TERMINAL_PICTURE_EVENTS	64U
 
+/* How many drag-and-drop events of a view tab wait for the main loop at most. */
+#define TERMINAL_VIEW_DROPS	16U
+
+/* The kinds of a view tab's drag-and-drop events (terminal_drop_event). */
+#define TERMINAL_DROP_ENTER	1U
+#define TERMINAL_DROP_MOTION	2U
+#define TERMINAL_DROP_LEAVE	3U
+#define TERMINAL_DROP_DROP	4U
+
 /*
  * The kinds of a picture's tab's inputs (connection.h): a key pressed or
  * released, text an input method typed, the pointer moved, a button
@@ -176,7 +185,8 @@ enum terminal_action {
 	TERMINAL_ACTION_INPUT_METHOD_OFF,
 	TERMINAL_ACTION_FORGET_PASSPHRASES,
 	TERMINAL_ACTION_SETTINGS,
-	TERMINAL_ACTION_COPY_ON_SELECT
+	TERMINAL_ACTION_COPY_ON_SELECT,
+	TERMINAL_ACTION_OPEN_SFTP
 };
 
 /*
@@ -226,6 +236,7 @@ struct terminal_menu_state {
 	unsigned theme;
 	int can_find_again;
 	int input_method_off;
+	int can_open_sftp;
 };
 
 /*
@@ -414,7 +425,32 @@ struct terminal_picture_event {
 	int32_t y;
 	double dx;
 	double dy;
+	uint32_t modifiers;
 	char text[KL_WINDOW_TEXT_MAX];
+};
+
+/*
+ * One drag-and-drop event for a program's view tab: its kind
+ * (TERMINAL_DROP_*), the types offered (KL_DROP_*), where the pointer is
+ * in the window (pixels) and the modifiers held.
+ */
+struct terminal_drop_event {
+	unsigned kind;
+	unsigned types;
+	int32_t x;
+	int32_t y;
+	uint32_t modifiers;
+};
+
+/*
+ * What a program's view tab is drawn with: the screen's scale in 96ths
+ * (KL_SCALE_BASE is 100 %), the colour theme (TERMINAL_THEME_*) and the
+ * terminal's font size at 96 dots an inch.
+ */
+struct terminal_view_state {
+	unsigned scale;
+	unsigned theme;
+	unsigned pixels;
 };
 
 /*
@@ -759,6 +795,8 @@ struct terminal_window {
 	int page_active;
 	int settings_item;
 	int new_window_item;
+	int open_sftp_item;
+	int refuse_terminal_drop;
 
 	/*
 	 * A picture's tab (connection.h): whether it is the active tab (the
@@ -770,6 +808,17 @@ struct terminal_window {
 	int picture_active;
 	struct terminal_picture_event picture_events[TERMINAL_PICTURE_EVENTS];
 	unsigned picture_event_count;
+
+	/*
+	 * A program's view tab (connection.h): whether it is the active tab,
+	 * its drag-and-drop events not yet taken by the main loop, and whether
+	 * a drop on a non-view tab is waiting to be refused when
+	 * refuse_terminal_drop is set.
+	 */
+	int view_active;
+	struct terminal_drop_event view_drops[TERMINAL_VIEW_DROPS];
+	unsigned view_drop_count;
+	int view_drop_pending;
 
 	/* Whether the window has the keyboard's focus (it has when it opens). */
 	int focused;

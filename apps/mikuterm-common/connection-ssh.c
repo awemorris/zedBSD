@@ -91,6 +91,7 @@ static const struct terminal_connection_ops connection_ops = {
 	connection_pending,
 	connection_close,
 	connection_take,
+	NULL,
 	NULL
 };
 

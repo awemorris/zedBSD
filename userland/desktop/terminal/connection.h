@@ -37,6 +37,9 @@
 /* What a picture's connection does besides (below). */
 struct terminal_picture_ops;
 
+/* What a program's view tab does besides (below). */
+struct terminal_view_ops;
+
 /*
  * What a connection does, the implementation's own functions:
  *
@@ -69,6 +72,7 @@ struct terminal_connection_ops {
 	void (*close)(struct terminal_connection *connection);
 	struct terminal_connection *(*take)(struct terminal_connection *connection);
 	const struct terminal_picture_ops *picture;
+	const struct terminal_view_ops *view;
 };
 
 /*
@@ -84,6 +88,32 @@ struct terminal_picture_ops {
 	int (*draw)(struct terminal_connection *connection, uint32_t *pixels, uint32_t width, uint32_t height);
 	void (*title)(struct terminal_connection *connection, char *title, size_t size);
 	void (*input)(struct terminal_connection *connection, const struct terminal_picture_event *event);
+	void (*refuse)(struct terminal_connection *connection);
+};
+
+/*
+ * What a program's view tab does besides (terminal.h): draw paints into
+ * pixels (0xAARRGGBB, width by height, rows of width) at the window's
+ * scale and theme; title gives its title (UTF-8, cut to size); input
+ * takes a key, text, pointer or touch input; drop takes a drag over or
+ * dropped on the view and returns the KL_DND_* actions it accepts;
+ * shown tells when the tab becomes visible (1) or hidden (0);
+ * confirm_close asks before a user-initiated close (returns nonzero to
+ * allow closing, 0 to keep the tab open); can_copy and copy report and
+ * read the view's selection; can_paste and paste report and take pasted
+ * text; refuse tells that the run has no tab for it before closing it.
+ */
+struct terminal_view_ops {
+	int (*draw)(struct terminal_connection *connection, const struct terminal_view_state *state, uint32_t *pixels, uint32_t width, uint32_t height);
+	void (*title)(struct terminal_connection *connection, char *title, size_t size);
+	void (*input)(struct terminal_connection *connection, const struct terminal_picture_event *event);
+	unsigned (*drop)(struct terminal_connection *connection, struct terminal_window *window, const struct terminal_drop_event *event);
+	void (*shown)(struct terminal_connection *connection, struct terminal_window *window, int visible);
+	int (*confirm_close)(struct terminal_connection *connection, struct terminal_window *window);
+	int (*can_copy)(const struct terminal_connection *connection);
+	size_t (*copy)(struct terminal_connection *connection, char *text, size_t size);
+	int (*can_paste)(const struct terminal_connection *connection);
+	void (*paste)(struct terminal_connection *connection, const char *text, size_t length);
 	void (*refuse)(struct terminal_connection *connection);
 };
 
