@@ -19,6 +19,8 @@
  */
 
 #include "mikuterm.h"
+#include "session.h"
+#include "sftp-view.h"
 #include "x11-host.h"
 
 #include "userland/desktop/terminal/run.h"
@@ -74,6 +76,9 @@ static struct main_state main_state;
 static void main_read_conf(struct mikuterm_conf *conf);
 static void main_new_window(void *data, struct kl_app *app, struct kl_window *from);
 static void main_forget_passphrases(void *data);
+static int main_can_open_sftp(void *data, const struct terminal_connection *connection);
+static int main_open_sftp(void *data, struct terminal_connection *connection);
+static int main_confirm_close(void *data, struct terminal_window *window, struct terminal_connection *connection);
 static void main_ended(void *data, const struct terminal_run_result *result);
 static void main_say(const char *text);
 
@@ -190,6 +195,11 @@ wWinMain(
 	run.connector = &main_state.connector.connector;
 	run.new_window = main_new_window;
 	run.ended = main_ended;
+	run.refuse_terminal_drop = 1;
+	run.open_sftp_menu = 1;
+	run.can_open_sftp = main_can_open_sftp;
+	run.open_sftp = main_open_sftp;
+	run.confirm_close = main_confirm_close;
 	run.data = &main_state;
 
 	/* The run, until the last tab or the window closes; then the threads have a while to say goodbye. */
@@ -363,4 +373,73 @@ main_forget_passphrases(
 	forgotten = mikuterm_passphrases_forget_all();
 	printf("MIKUTERM PASSPHRASE forget count=%u\n", forgotten);
 	fflush(stdout);
+}
+
+/* Reports whether Shell > Open SFTP is available for connection. */
+static int
+main_can_open_sftp(
+	void *data,
+	const struct terminal_connection *connection)
+{
+	(void)data;
+	return mikuterm_session_can_open_sftp(connection);
+}
+
+/* Opens an SFTP browser tab on the active SSH connection. */
+static int
+main_open_sftp(
+	void *data,
+	struct terminal_connection *connection)
+{
+	struct main_state *st;
+	struct mikuterm_session *session;
+	struct sftp_link *link;
+	struct terminal_connection *view_conn;
+	char host[MIKUTERM_HOST_MAX];
+	int error;
+
+	st = data;
+	if (!mikuterm_session_can_open_sftp(connection))
+		return 0;
+	session = (struct mikuterm_session *)connection;
+
+	error = sftp_link_create(session->waker, &link);
+	if (error != 0)
+		return 0;
+
+	mikuterm_session_host(connection, host, sizeof(host));
+	view_conn = NULL;
+	error = sftp_view_create(session->app, session, link, host,
+		st->conf.sftp_preserve_times, st->conf.sftp_show_hidden,
+		st->page_font, st->page_fallback, &view_conn);
+	if (error != 0) {
+		sftp_link_release(link);
+		return 0;
+	}
+
+	error = mikuterm_session_open_sftp(connection, view_conn, link);
+	sftp_link_release(link);
+	if (error != 0) {
+		view_conn->ops->close(view_conn);
+		return 0;
+	}
+	return 0;
+}
+
+/* Confirms closing a terminal tab if its attached SFTP tab has active transfers. */
+static int
+main_confirm_close(
+	void *data,
+	struct terminal_window *window,
+	struct terminal_connection *connection)
+{
+	struct terminal_connection *view_conn;
+
+	(void)data;
+	if (connection == NULL)
+		return 1;
+	view_conn = mikuterm_session_sftp_view(connection);
+	if (view_conn == NULL)
+		return 1;
+	return sftp_view_confirm_close(view_conn, window);
 }

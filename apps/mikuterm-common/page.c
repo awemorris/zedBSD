@@ -112,6 +112,8 @@ static const struct terminal_page_item page_items[] = {
 	{ "X11Scale", "X11 scale (%)", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, "auto, or 100 to 400 by 25 (X11Scale)" },
 	{ "X11Render", "X11 drawing", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, "auto or cpu (X11Render)" },
 	{ "X11PrimaryToClipboard", "X11 selection to clipboard", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, "yes or no (X11PrimaryToClipboard)" },
+	{ "Sftp", "SFTP client", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, "yes or no (Sftp)" },
+	{ "SftpPreserveTimes", "SFTP preserve times", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_CONNECTION, "yes or no (SftpPreserveTimes)" },
 	{ "Connect", "Host at start", TERMINAL_PANE_BEHAVIOR, TERMINAL_ITEM_TEXT, TERMINAL_EFFECT_START, NULL }
 };
 

@@ -210,8 +210,15 @@ int mikuterm_windows_address(const char *address);
 unsigned mikuterm_port_listener(unsigned port, char *name, size_t size);
 
 /* The tabs' connections (connection-ssh.c, ssh-thread.c). */
+struct sftp_link;
+struct mikuterm_session;
 void mikuterm_connector_init(struct mikuterm_connector *connector, const struct mikuterm_connect_options *options);
 void mikuterm_connections_stop(void);
 int mikuterm_connections_wait(unsigned milliseconds);
+int mikuterm_session_can_open_sftp(const struct terminal_connection *connection);
+int mikuterm_session_open_sftp(struct terminal_connection *connection, struct terminal_connection *view_connection, struct sftp_link *link);
+void mikuterm_session_detach_sftp(struct mikuterm_session *session, const struct terminal_connection *view_connection);
+struct terminal_connection *mikuterm_session_sftp_view(struct terminal_connection *connection);
+void mikuterm_session_host(const struct terminal_connection *connection, char *host, size_t size);
 
 #endif
