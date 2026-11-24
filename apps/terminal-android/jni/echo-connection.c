@@ -51,7 +51,8 @@ static const struct terminal_connection_ops echo_ops = {
 	.pending = echo_pending,
 	.close = echo_close,
 	.take = NULL,
-	.picture = NULL
+	.picture = NULL,
+	.view = NULL
 };
 
 /*

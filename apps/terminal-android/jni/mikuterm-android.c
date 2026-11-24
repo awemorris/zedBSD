@@ -125,6 +125,7 @@ static const struct terminal_connection_ops main_session_ops = {
 	main_session_pending,
 	main_session_close,
 	main_session_take,
+	NULL,
 	NULL
 };
 

@@ -91,6 +91,7 @@ static uint32_t window_modifiers(unsigned modifiers);
 static int window_page_input(struct terminal_window *window, const struct kl_window_event *event);
 static int window_picture_input(struct terminal_window *window, const struct kl_window_event *event);
 static void window_picture_push(struct terminal_window *window, unsigned kind, const struct kl_window_event *event);
+static void window_view_drop_push(struct terminal_window *window, unsigned kind, const struct kl_window_event *event);
 static void window_action(struct terminal_window *window, uint32_t action);
 
 /*
@@ -411,8 +412,8 @@ window_event(
 			return;
 	}
 
-	/* While a picture's tab is active its other end takes the keys, the text and the pointer as they are. */
-	if (window->picture_active) {
+	/* While a picture's tab or a program's view tab is active its other end takes the keys, the text and the pointer as they are. */
+	if (window->picture_active || window->view_active) {
 		taken = window_picture_input(window, event);
 		if (taken)
 			return;
@@ -505,11 +506,23 @@ window_event(
 		terminal_tabs_input(window, event);
 		break;
 	case KL_WINDOW_DROP_ENTER:
-		window_drop_enter(event);
+		if (window->refuse_terminal_drop)
+			kl_window_answer_drop(window->kui, 0U, 0U);
+		else
+			window_drop_enter(event);
+		break;
+	case KL_WINDOW_DROP_MOTION:
+		if (window->refuse_terminal_drop)
+			kl_window_answer_drop(window->kui, 0U, 0U);
+		break;
+	case KL_WINDOW_DROP_LEAVE:
 		break;
 	case KL_WINDOW_DROP:
-		/* Dropped: the main loop pastes it (clipboard.c). */
-		window->drop_pending = 1;
+		/* Dropped: the main loop pastes it (clipboard.c) unless terminal drops are refused. */
+		if (window->refuse_terminal_drop)
+			window->view_drop_pending = 1;
+		else
+			window->drop_pending = 1;
 		break;
 	case KL_WINDOW_DRAG_DONE:
 		/* The terminal's drag of text ended. */
@@ -1088,6 +1101,30 @@ window_picture_input(
 	case KL_WINDOW_TOUCH_CANCEL:
 		window_picture_push(window, TERMINAL_PICTURE_TOUCH_CANCEL, event);
 		return 1;
+	case KL_WINDOW_DROP_ENTER:
+		if (window->view_active) {
+			window_view_drop_push(window, TERMINAL_DROP_ENTER, event);
+			return 1;
+		}
+		break;
+	case KL_WINDOW_DROP_MOTION:
+		if (window->view_active) {
+			window_view_drop_push(window, TERMINAL_DROP_MOTION, event);
+			return 1;
+		}
+		break;
+	case KL_WINDOW_DROP_LEAVE:
+		if (window->view_active) {
+			window_view_drop_push(window, TERMINAL_DROP_LEAVE, event);
+			return 1;
+		}
+		break;
+	case KL_WINDOW_DROP:
+		if (window->view_active) {
+			window_view_drop_push(window, TERMINAL_DROP_DROP, event);
+			return 1;
+		}
+		break;
 	default:
 		break;
 	}
@@ -1139,9 +1176,46 @@ window_picture_push(
 	}
 	queued->dx = event->dx;
 	queued->dy = event->dy;
+	queued->modifiers = window->modifiers;
 	if (kind == TERMINAL_PICTURE_TEXT)
 		(void)snprintf(queued->text, sizeof(queued->text), "%s", event->text);
 	window->picture_event_count = count + 1U;
+}
+
+/* Queues one drag-and-drop event for a program's view tab; a motion replaces a motion just before it. */
+static void
+window_view_drop_push(
+	struct terminal_window *window,
+	unsigned kind,
+	const struct kl_window_event *event)
+{
+	struct terminal_drop_event *queued;
+	unsigned count;
+
+	/* A motion after a motion: only the newest place counts. */
+	count = window->view_drop_count;
+	if (kind == TERMINAL_DROP_MOTION &&
+	    count != 0U &&
+	    window->view_drops[count - 1U].kind == TERMINAL_DROP_MOTION) {
+		window->view_drops[count - 1U].x = (int32_t)event->x;
+		window->view_drops[count - 1U].y = (int32_t)event->y;
+		window->view_drops[count - 1U].modifiers = window->modifiers;
+		return;
+	}
+
+	/* Room for it. */
+	if (count >= TERMINAL_VIEW_DROPS)
+		return;
+
+	/* The drop event as the window had it. */
+	queued = &window->view_drops[count];
+	memset(queued, 0, sizeof(*queued));
+	queued->kind = kind;
+	queued->types = event->code;
+	queued->x = (int32_t)event->x;
+	queued->y = (int32_t)event->y;
+	queued->modifiers = window->modifiers;
+	window->view_drop_count = count + 1U;
 }
 
 /* Queues an action for the main loop, as a menu's choice is (a full queue drops it). */

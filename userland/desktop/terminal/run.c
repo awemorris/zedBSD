@@ -141,6 +141,7 @@ struct run_tab {
 	char title[TERMINAL_TAB_TITLE];
 	int settings;
 	const struct terminal_picture_ops *picture;
+	const struct terminal_view_ops *view;
 };
 
 /* The settings tab's title. */
@@ -296,8 +297,11 @@ static uint32_t run_page_from;
 static uint32_t *run_picture_pixels;
 static size_t run_picture_count;
 
-/* The ID of the picture's tab told it has the keyboard (0: none), which is told it lost it when another tab is chosen. */
+/* The ID of the picture's or view's tab told it has the keyboard (0: none), which is told it lost it when another tab is chosen. */
 static uint32_t run_picture_focused;
+
+/* The ID of the program's view tab last told it is shown (0: none), which is told it is hidden when another tab is chosen. */
+static uint32_t run_view_shown;
 
 /*
  * The settings tab's connection: it has nothing to read, takes every key
@@ -322,6 +326,7 @@ static const struct terminal_connection_ops run_page_ops = {
 	run_page_pending,
 	run_page_close,
 	NULL,
+	NULL,
 	NULL
 };
 static struct terminal_connection run_page_connection = { &run_page_ops };
@@ -334,7 +339,7 @@ static void run_tell_size(const struct run_state *run, struct terminal_connectio
 static int run_read_shell(struct terminal_connection *connection, struct terminal_screen *screen, unsigned ready);
 static int run_write_shell(struct terminal_connection *connection);
 static int run_menu_actions(const struct terminal_run_options *options, struct run_state *run);
-static void run_menu_state(const struct run_state *run, struct terminal_menu_state *state);
+static void run_menu_state(const struct terminal_run_options *options, const struct run_state *run, struct terminal_menu_state *state);
 static void run_new_window(const struct terminal_run_options *options, const struct run_state *run);
 static int run_zoom(const struct terminal_run_options *options, struct run_state *run, unsigned pixels);
 static int run_rescale(const struct terminal_run_options *options, struct run_state *run);
@@ -391,6 +396,16 @@ static void run_picture_output(unsigned index, unsigned ready);
 static void run_picture_inputs(void);
 static void run_picture_focus(unsigned index, int focused);
 static int run_picture_frame(struct run_state *run);
+static int run_tab_view_open(const struct terminal_run_options *options, struct run_state *run, struct terminal_connection *connection);
+static void run_view_output(unsigned index, unsigned ready);
+static void run_view_inputs(void);
+static void run_view_drops(void);
+static void run_view_focus(unsigned index, int focused);
+static int run_view_frame(struct run_state *run);
+static void run_view_copy(void);
+static void run_view_paste(void);
+static int run_confirm_tab_close(const struct terminal_run_options *options, struct run_state *run, unsigned index);
+static int run_confirm_window_close(const struct terminal_run_options *options, struct run_state *run);
 
 /*
  * Runs the terminal: opens the font, the window, the display and the first
@@ -532,6 +547,8 @@ run_start(
 				      run_window_units(run, options->rows * run_font.cell_height + 2U * run_font.padding));
 	if (status != 0)
 		return -1;
+	run_window.open_sftp_item = options->open_sftp_menu;
+	run_window.refuse_terminal_drop = options->refuse_terminal_drop;
 
 	/* A window on a screen of another scale than the one asked has the font at its scale (a size the font cannot give keeps the old one). */
 	if (run_window.scale != 0U && run_window.scale != run->scale) {
@@ -577,7 +594,7 @@ run_start(
 	run_window.new_window_item = 0;
 	if (options->new_window != NULL)
 		run_window.new_window_item = 1;
-	run_menu_state(run, &state);
+	run_menu_state(options, run, &state);
 	run->operation = "terminal_menu_open";
 	status = terminal_menu_open(&run_window, &state);
 	if (status != 0)
@@ -652,7 +669,7 @@ run_loop(
 		 * drawn when it answers (which wakes the wait), or at the latest
 		 * when the pace gives up waiting (pace.h).
 		 */
-		if (run_screen->changed && !run_window.page_active && !run_window.picture_active) {
+		if (run_screen->changed && !run_window.page_active && !run_window.picture_active && !run_window.view_active) {
 			wait = terminal_window_frame_wait(&run_window, now);
 			if (run->present_busy && wait == 0)
 				wait = 16;
@@ -672,8 +689,8 @@ run_loop(
 			}
 		}
 
-		/* A picture's frame waiting for a free window buffer wakes as soon as the compositor returns one. */
-		if (run_window.picture_active && run_screen->changed && run->present_busy && timeout > 16)
+		/* A picture's or view's frame waiting for a free window buffer wakes as soon as the compositor returns one. */
+		if ((run_window.picture_active || run_window.view_active) && run_screen->changed && run->present_busy && timeout > 16)
 			timeout = 16;
 
 		/* A connection that still has something now (whatever events come) is not waited for. */
@@ -711,10 +728,13 @@ run_loop(
 			told[index] = 0U;
 		}
 
-		/* The compositor closing the window ends the terminal. */
+		/* The compositor closing the window ends the terminal unless a view or the program asks to confirm first. */
 		if (run_window.closed) {
-			run->reason = "closed";
-			return 0;
+			run_window.closed = 0;
+			if (run_confirm_window_close(options, run)) {
+				run->reason = "closed";
+				return 0;
+			}
 		}
 
 		/* The menus' choices are carried out; Close Window (or closing the last tab) ends the terminal. */
@@ -765,9 +785,11 @@ run_loop(
 			if (run_tabs[index - 1U].id != told[index - 1U])
 				continue;
 
-			/* A picture's news: its title, and its picture drawn again. */
+			/* A picture's or view's news: its title, and its pixels drawn again. */
 			if (run_tabs[index - 1U].picture != NULL)
 				run_picture_output(index - 1U, ready[index - 1U]);
+			else if (run_tabs[index - 1U].view != NULL)
+				run_view_output(index - 1U, ready[index - 1U]);
 
 			/* Its bytes on its grid; its end closes its tab, and the last tab's ends the terminal. */
 			status = run_read_shell(run_tabs[index - 1U].connection, run_tabs[index - 1U].screen, ready[index - 1U]);
@@ -778,6 +800,12 @@ run_loop(
 					return 0;
 				}
 			}
+		}
+
+		/* A drop on a non-view tab is refused when terminal drops are disabled. */
+		if (run_window.view_drop_pending) {
+			run_window.view_drop_pending = 0;
+			kl_window_finish_drop(run_window.kui, 0U);
 		}
 
 		/* A drop on the window is pasted into the active shell (clipboard.c). */
@@ -817,8 +845,10 @@ run_loop(
 			run_view_log("key");
 		}
 
-		/* The window's input goes to the active picture's tab as it came. */
+		/* The window's input goes to the active picture's or view's tab as it came. */
 		run_picture_inputs();
+		run_view_inputs();
+		run_view_drops();
 
 		/* The keys typed and the text pasted go to the shell. */
 		status = run_write_shell(run->connection);
@@ -852,7 +882,7 @@ run_loop(
 		}
 
 		/* The menus show the terminal's state, and the titlebar its tabs (only a change is sent). */
-		run_menu_state(run, &state);
+		run_menu_state(options, run, &state);
 		terminal_menu_refresh(&run_window, &state);
 		run_tabs_show(options);
 
@@ -873,6 +903,14 @@ run_loop(
 		/* So is the picture of a picture's tab. */
 		if (run_window.picture_active) {
 			status = run_picture_frame(run);
+			if (status != 0)
+				return -1;
+			continue;
+		}
+
+		/* So is a program's view tab. */
+		if (run_window.view_active) {
+			status = run_view_frame(run);
 			if (status != 0)
 				return -1;
 			continue;
@@ -1002,8 +1040,8 @@ run_tell_size(
 	unsigned height;
 	int error;
 
-	/* A picture fills the grid's place. */
-	if (connection->ops->picture != NULL) {
+	/* A picture or view fills the grid's place. */
+	if (connection->ops->picture != NULL || connection->ops->view != NULL) {
 		error = connection->ops->resize(connection, 0U, 0U, run->width, run->height);
 		(void)error;
 		return;
@@ -1066,10 +1104,10 @@ run_secret_follow(
 	int text_off;
 	int error;
 
-	/* The settings' page asks for the text input itself while its tab is active, and a picture's tab has it as the user left it. */
+	/* The settings' page asks for the text input itself while its tab is active, and a picture's or view's tab has it as the user left it. */
 	if (run_window.page_active)
 		return;
-	if (run_window.picture_active)
+	if (run_window.picture_active || run_window.view_active)
 		return;
 
 	/* The active connection's modes; one that cannot tell them leaves the secret as it was. */
@@ -1176,35 +1214,43 @@ run_menu_actions(
 			run_new_window(options, run);
 			break;
 		case TERMINAL_ACTION_CLOSE:
-			/* The terminal ends. */
+			/* The terminal ends unless a view or the program asks to confirm first. */
+			if (!run_confirm_window_close(options, run))
+				break;
 			return 1;
 		case TERMINAL_ACTION_NEW_TAB:
 			/* Another shell, in a tab of its own. */
 			status = run_tab_new(options, run);
 			break;
 		case TERMINAL_ACTION_CLOSE_TAB:
-			/* The active tab closes; the last one's end ends the terminal. */
+			/* The active tab closes unless it asks to confirm first; the last one's end ends the terminal. */
+			if (!run_confirm_tab_close(options, run, run_active))
+				break;
 			status = run_tab_close(options, run, run_active);
 			if (status != 0)
 				return 1;
 			break;
 		case TERMINAL_ACTION_COPY:
-			/* The selected text into the terminal's clipboard (the settings' field's while their tab is active; a picture has none). */
+			/* The selected text into the terminal's clipboard (the settings' or view's while active; a picture has none). */
 			if (run_window.page_active)
 				run_page_copy();
+			else if (run_window.view_active)
+				run_view_copy();
 			else if (!run_window.picture_active)
 				run_copy();
 			break;
 		case TERMINAL_ACTION_PASTE:
-			/* The clipboard's text to the shell, as if typed (into the settings' field while their tab is active; a picture's program pastes its own). */
+			/* The clipboard's text to the shell, as if typed (into the settings' or view's while active; a picture's program pastes its own). */
 			if (run_window.page_active)
 				run_page_paste();
+			else if (run_window.view_active)
+				run_view_paste();
 			else if (!run_window.picture_active)
 				run_start_paste();
 			break;
 		case TERMINAL_ACTION_SELECT_ALL:
-			/* The whole screen is selected until a key is typed (not the settings' page, nor a picture). */
-			if (run_window.page_active || run_window.picture_active)
+			/* The whole screen is selected until a key is typed (not the settings' page, a picture, nor a view). */
+			if (run_window.page_active || run_window.picture_active || run_window.view_active)
 				break;
 			run_screen->selected = 1;
 			run_screen->changed = 1;
@@ -1260,18 +1306,18 @@ run_menu_actions(
 			run_ambiguous_wide(options, run);
 			break;
 		case TERMINAL_ACTION_FIND:
-			/* The search bar opens with the text looked for last; the settings' page and a picture have none. */
-			if (!run_window.page_active && !run_window.picture_active)
+			/* The search bar opens with the text looked for last; the settings' page, a picture and a view have none. */
+			if (!run_window.page_active && !run_window.picture_active && !run_window.view_active)
 				run_find(0);
 			break;
 		case TERMINAL_ACTION_FIND_NEXT:
 			/* The next older match. */
-			if (!run_window.page_active && !run_window.picture_active)
+			if (!run_window.page_active && !run_window.picture_active && !run_window.view_active)
 				run_find(1);
 			break;
 		case TERMINAL_ACTION_FIND_PREVIOUS:
 			/* The next newer match. */
-			if (!run_window.page_active && !run_window.picture_active)
+			if (!run_window.page_active && !run_window.picture_active && !run_window.view_active)
 				run_find(-1);
 			break;
 		case TERMINAL_ACTION_THEME_DARK:
@@ -1305,6 +1351,15 @@ run_menu_actions(
 			/* A selection copied as well, or not, from now on and kept for the next run. */
 			run_copy_on_select_switch(options, run);
 			break;
+		case TERMINAL_ACTION_OPEN_SFTP:
+			/* Opens an SFTP tab on the active terminal tab's connection. */
+			if (options->open_sftp != NULL &&
+			    run_tab_count > 0U &&
+			    !run_tabs[run_active].settings &&
+			    run_tabs[run_active].picture == NULL &&
+			    run_tabs[run_active].view == NULL)
+				status = options->open_sftp(options->data, run->connection);
+			break;
 		case TERMINAL_ACTION_ABOUT:
 			/* A line about the terminal on the screen (there are no dialogs). */
 			if (options->about != NULL)
@@ -1335,29 +1390,45 @@ run_menu_actions(
 /* Describes the terminal's state for the menus. */
 static void
 run_menu_state(
+	const struct terminal_run_options *options,
 	const struct run_state *run,
 	struct terminal_menu_state *state)
 {
+	const struct terminal_view_ops *view;
+
 	/* Disables menu actions until their initial state is supplied. */
 	memset(state, 0, sizeof(*state));
 
 	/* The first menu exists before the first tab has a screen to select from. */
-	if (run_screen != NULL) {
+	if (run_window.view_active && run_tab_count > 0U) {
+		view = run_tabs[run_active].view;
+		if (view != NULL && view->can_copy != NULL)
+			state->selection = view->can_copy(run->connection);
+	} else if (run_screen != NULL) {
 		/* A selected cell or range enables actions on the terminal's text. */
 		if (run_screen->selected || run_screen->range)
 			state->selection = 1;
 	}
 
 	/* Clipboard, type size, fullscreen and the width setting do not depend on a tab. */
-	state->clipboard = terminal_clipboard_has_text(&run_window);
+	if (run_window.view_active && run_tab_count > 0U && run_tabs[run_active].view != NULL && run_tabs[run_active].view->can_paste != NULL)
+		state->clipboard = run_tabs[run_active].view->can_paste(run->connection);
+	else
+		state->clipboard = terminal_clipboard_has_text(&run_window);
 	state->pixels = run->pixels;
 	state->fullscreen = run_window.fullscreen;
 	state->ambiguous_wide = run->ambiguous_wide;
 	state->theme = run->theme;
 	state->can_find_again = 0;
-	if (run_window.search_length != 0U)
+	if (!run_window.page_active && !run_window.picture_active && !run_window.view_active && run_window.search_length != 0U)
 		state->can_find_again = 1;
 	state->input_method_off = run_input_method_off;
+	if (options->can_open_sftp != NULL &&
+	    run_tab_count > 0U &&
+	    !run_tabs[run_active].settings &&
+	    run_tabs[run_active].picture == NULL &&
+	    run_tabs[run_active].view == NULL)
+		state->can_open_sftp = options->can_open_sftp(options->data, run->connection);
 }
 
 /*
@@ -1839,16 +1910,28 @@ run_tab_switch(
 	run_screen = run_tabs[index].screen;
 	run->connection = run_tabs[index].connection;
 
-	/* The picture's tab that had the keyboard loses it (one closed is told nothing); the inputs queued were the tab's before. */
+	/* The picture's or view's tab that had the keyboard loses it (one closed is told nothing); the inputs queued were the tab's before. */
 	if (run_picture_focused != 0U && run_picture_focused != run_tabs[index].id) {
 		found = run_tab_find(run_picture_focused);
-		if (found >= 0)
-			run_picture_focus((unsigned)found, 0);
+		if (found >= 0) {
+			if (run_tabs[found].picture != NULL)
+				run_picture_focus((unsigned)found, 0);
+			else if (run_tabs[found].view != NULL)
+				run_view_focus((unsigned)found, 0);
+		}
 		run_picture_focused = 0U;
 	}
-	leaving_picture = run_window.picture_active;
+	if (run_view_shown != 0U && run_view_shown != run_tabs[index].id) {
+		found = run_tab_find(run_view_shown);
+		if (found >= 0 && run_tabs[found].view != NULL && run_tabs[found].view->shown != NULL)
+			run_tabs[found].view->shown(run_tabs[found].connection, &run_window, 0);
+		run_view_shown = 0U;
+	}
+	leaving_picture = run_window.picture_active || run_window.view_active;
 	run_window.picture_active = 0;
+	run_window.view_active = 0;
 	run_window.picture_event_count = 0U;
+	run_window.view_drop_count = 0U;
 
 	/* The settings' tab takes the window's input; a grid's tab gets the text input back as its connection left it. */
 	if (run_tabs[index].settings) {
@@ -1859,12 +1942,21 @@ run_tab_switch(
 		kl_window_text_input(run_window.kui, !run_text_off);
 	}
 
-	/* A picture's tab takes the window's input as it comes, and the keyboard when the window has it. */
+	/* A picture's or view's tab takes the window's input as it comes, and the keyboard when the window has it. */
 	if (run_tabs[index].picture != NULL) {
 		run_window.picture_active = 1;
 		kl_window_text_input(run_window.kui, !run_input_method_off);
 		if (run_window.focused)
 			run_picture_focus(index, 1);
+	} else if (run_tabs[index].view != NULL) {
+		run_window.view_active = 1;
+		kl_window_text_input(run_window.kui, !run_input_method_off);
+		if (run_tabs[index].view->shown != NULL) {
+			run_tabs[index].view->shown(run_tabs[index].connection, &run_window, 1);
+			run_view_shown = run_tabs[index].id;
+		}
+		if (run_window.focused)
+			run_view_focus(index, 1);
 	} else if (leaving_picture && !run_tabs[index].settings) {
 		kl_window_text_input(run_window.kui, !run_text_off);
 	}
@@ -1900,6 +1992,12 @@ run_tab_close(
 	/* Its connection, hung up on and closed. */
 	tab = &run_tabs[index];
 	id = tab->id;
+	if (tab->view != NULL && tab->view->shown != NULL && id == run_view_shown) {
+		tab->view->shown(tab->connection, &run_window, 0);
+		run_view_shown = 0U;
+	}
+	if (id == run_picture_focused)
+		run_picture_focused = 0U;
 	tab->connection->ops->close(tab->connection);
 	tab->connection = NULL;
 
@@ -1987,8 +2085,10 @@ run_tab_requests(
 		if (request.kind == TERMINAL_TAB_ACTIVATE)
 			run_tab_switch(run, (unsigned)found);
 
-		/* A tab closed goes; the last one ends the run. */
+		/* A tab closed goes unless it asks to confirm first; the last one ends the run. */
 		if (request.kind == TERMINAL_TAB_CLOSE) {
+			if (!run_confirm_tab_close(options, run, (unsigned)found))
+				continue;
 			status = run_tab_close(options, run, (unsigned)found);
 			if (status != 0)
 				return 1;
@@ -3351,7 +3451,10 @@ run_tabs_take(
 			opened = connection->ops->take(connection);
 			if (opened == NULL)
 				break;
-			status = run_tab_picture_open(options, run, opened);
+			if (opened->ops->view != NULL)
+				status = run_tab_view_open(options, run, opened);
+			else
+				status = run_tab_picture_open(options, run, opened);
 			if (status != 0)
 				return -1;
 		}
@@ -3578,4 +3681,391 @@ run_picture_frame(
 	run->present_busy = 0;
 	run_screen->changed = 0;
 	return 0;
+}
+
+/*
+ * Opens a program's view tab for a connection at the end and makes it the
+ * active one; a full window, or a connection without view ops, has no tab
+ * (it is refused and closed).  Returns 0, or -1 with errno set when memory
+ * runs out (the connection is then closed).
+ */
+static int
+run_tab_view_open(
+	const struct terminal_run_options *options,
+	struct run_state *run,
+	struct terminal_connection *connection)
+{
+	const struct terminal_view_ops *view;
+	struct terminal_screen *screen;
+	struct run_tab *tab;
+
+	/* A full window, or a connection without view ops: the program keeps it another way. */
+	view = connection->ops->view;
+	if (view == NULL || run_tab_count == TERMINAL_TABS) {
+		if (view != NULL && view->refuse != NULL)
+			view->refuse(connection);
+		connection->ops->close(connection);
+		printf("ZTERM TAB refused run=%s count=%u\n", options->token, run_tab_count);
+		fflush(stdout);
+		return 0;
+	}
+
+	/* The tab's grid, which is never shown (every tab has one; its title is the view's). */
+	screen = malloc(sizeof(*screen));
+	if (screen == NULL) {
+		connection->ops->close(connection);
+		errno = ENOMEM;
+		return -1;
+	}
+
+	/* An empty grid of the window's size. */
+	terminal_screen_init(screen, run->columns, run->rows);
+
+	/* The tab, at the end, with its ID and the view's title. */
+	tab = &run_tabs[run_tab_count];
+	memset(tab, 0, sizeof(*tab));
+	tab->screen = screen;
+	tab->connection = connection;
+	tab->id = run_tab_next;
+	tab->view = view;
+	if (view->title != NULL)
+		view->title(connection, screen->title, sizeof(screen->title));
+	run_title_copy(tab->title, sizeof(tab->title), screen->title);
+	run_tab_next++;
+	run_tab_count++;
+
+	/* The view fills the grid's place. */
+	run_tell_size(run, connection);
+
+	/* Succeeded: it is the active one. */
+	run_tab_switch(run, run_tab_count - 1U);
+	printf("ZTERM TAB new run=%s id=%u count=%u view=1\n", options->token, tab->id, run_tab_count);
+	fflush(stdout);
+	return 0;
+}
+
+/* Takes a view tab's news: its title, and its pixels drawn again when shown. */
+static void
+run_view_output(
+	unsigned index,
+	unsigned ready)
+{
+	struct run_tab *tab;
+
+	/* Only news. */
+	if ((ready & TERMINAL_READY_OUTPUT) == 0U)
+		return;
+
+	/* The title, which the tabs and the window show; the view is drawn again. */
+	tab = &run_tabs[index];
+	if (tab->view->title != NULL)
+		tab->view->title(tab->connection, tab->screen->title, sizeof(tab->screen->title));
+	tab->screen->changed = 1;
+}
+
+/* Gives the active view tab the window's inputs queued for it, oldest first. */
+static void
+run_view_inputs(void)
+{
+	struct run_tab *tab;
+	const struct terminal_picture_event *event;
+	unsigned index;
+
+	/* Nothing queued, or no view to take it. */
+	if (!run_window.view_active || run_tab_count == 0U)
+		return;
+	if (run_window.picture_event_count == 0U)
+		return;
+
+	/* Each input in turn; the window's focus tells which tab has the keyboard. */
+	tab = &run_tabs[run_active];
+	for (index = 0U; index < run_window.picture_event_count; index++) {
+		event = &run_window.picture_events[index];
+		if (tab->view->input != NULL)
+			tab->view->input(tab->connection, event);
+		if (event->kind != TERMINAL_PICTURE_FOCUS)
+			continue;
+		run_picture_focused = 0U;
+		if (event->pressed)
+			run_picture_focused = tab->id;
+	}
+
+	/* All taken. */
+	run_window.picture_event_count = 0U;
+}
+
+/* Gives the active view tab the drag-and-drop events queued for it, answering enter and motion. */
+static void
+run_view_drops(void)
+{
+	struct run_tab *tab;
+	const struct terminal_drop_event *event;
+	unsigned actions;
+	unsigned index;
+
+	/* Nothing queued, or no view to take it. */
+	if (!run_window.view_active || run_tab_count == 0U) {
+		run_window.view_drop_count = 0U;
+		return;
+	}
+	if (run_window.view_drop_count == 0U)
+		return;
+
+	/* Each drop event in turn; enter and motion answer the compositor with the view's accepted actions. */
+	tab = &run_tabs[run_active];
+	for (index = 0U; index < run_window.view_drop_count; index++) {
+		event = &run_window.view_drops[index];
+		actions = 0U;
+		if (tab->view->drop != NULL)
+			actions = tab->view->drop(tab->connection, &run_window, event);
+		if (event->kind == TERMINAL_DROP_ENTER || event->kind == TERMINAL_DROP_MOTION)
+			kl_window_answer_drop(run_window.kui, actions, actions);
+		else if (event->kind == TERMINAL_DROP_DROP && tab->view->drop == NULL)
+			kl_window_finish_drop(run_window.kui, 0U);
+	}
+
+	/* All taken. */
+	run_window.view_drop_count = 0U;
+}
+
+/* Tells a view tab that it has the keyboard, or lost it. */
+static void
+run_view_focus(
+	unsigned index,
+	int focused)
+{
+	struct terminal_picture_event event;
+	struct run_tab *tab;
+
+	/* Only a view tab. */
+	tab = &run_tabs[index];
+	if (tab->view == NULL)
+		return;
+
+	/* The focus, as the window would give it. */
+	memset(&event, 0, sizeof(event));
+	event.kind = TERMINAL_PICTURE_FOCUS;
+	event.pressed = focused;
+	if (tab->view->input != NULL)
+		tab->view->input(tab->connection, &event);
+
+	/* Which tab has it now. */
+	run_picture_focused = 0U;
+	if (focused)
+		run_picture_focused = tab->id;
+}
+
+/*
+ * Draws the active view tab and shows it in the grid's place, when it
+ * changed and the window can take a frame.  Returns 0, or -1 when the
+ * drawing failed or memory ran out.
+ */
+static int
+run_view_frame(
+	struct run_state *run)
+{
+	struct terminal_view_state state;
+	struct run_tab *tab;
+	uint32_t *grown;
+	size_t count;
+	int asked;
+	int wait;
+	int status;
+	int error;
+
+	/* Nothing changed. */
+	if (!run_screen->changed)
+		return 0;
+
+	/* The window has not taken the last frame yet: the view waits for it. */
+	wait = terminal_window_frame_wait(&run_window, terminal_clock());
+	if (wait != 0)
+		return 0;
+
+	/* Pixels for the drawing's size. */
+	count = (size_t)run->width * (size_t)run->height;
+	if (count == 0U)
+		return 0;
+	if (count > run_picture_count) {
+		grown = realloc(run_picture_pixels, count * sizeof(*grown));
+		if (grown == NULL) {
+			run->operation = "run_view_frame";
+			errno = ENOMEM;
+			return -1;
+		}
+		run_picture_pixels = grown;
+		run_picture_count = count;
+	}
+
+	/* What the view is drawn with. */
+	memset(&state, 0, sizeof(state));
+	state.scale = run->scale;
+	state.theme = run->theme;
+	state.pixels = run->pixels;
+
+	/* The view, at the drawing's size. */
+	tab = &run_tabs[run_active];
+	asked = terminal_window_frame_ask(&run_window, terminal_clock());
+	status = 0;
+	if (tab->view->draw != NULL)
+		status = tab->view->draw(tab->connection, &state, run_picture_pixels, run->width, run->height);
+	if (status != 0) {
+		run->operation = "terminal_view_draw";
+		errno = status;
+		terminal_window_frame_shown(&run_window, asked, EIO);
+		return -1;
+	}
+
+	/* Shown in the grid's place. */
+	status = terminal_display_page(run_display, run_picture_pixels, run->width, run->height);
+	run->operation = terminal_display_operation(run_display, &run->result);
+	error = 0;
+	if (status != 0)
+		error = EIO;
+	terminal_window_frame_shown(&run_window, asked, error);
+
+	/* The window's buffers are all still with the compositor: draw again when one returns. */
+	if (status == EBUSY) {
+		run->present_busy = 1;
+		return 0;
+	}
+
+	/* A drawing out of date is remade, and the view drawn again. */
+	if (status == EAGAIN) {
+		run->present_busy = 0;
+		run_window.resized = 1;
+		return 0;
+	}
+
+	/* Any other failure ends the terminal. */
+	if (status != 0)
+		return -1;
+
+	/* Succeeded: the view is on the window. */
+	run->present_busy = 0;
+	run_screen->changed = 0;
+	return 0;
+}
+
+/* Copies the active view tab's selection to the clipboard. */
+static void
+run_view_copy(void)
+{
+	const struct terminal_view_ops *view;
+	size_t length;
+
+	/* Only a view with copy. */
+	if (!run_window.view_active || run_tab_count == 0U)
+		return;
+	view = run_tabs[run_active].view;
+	if (view == NULL || view->copy == NULL)
+		return;
+
+	/* The view's text, the terminal's clipboard from now on. */
+	length = view->copy(run_tabs[run_active].connection, run_clipboard, sizeof(run_clipboard));
+	if (length == 0U)
+		return;
+	run_clipboard_length = length;
+	printf("ZTERM COPY bytes=%lu\n", (unsigned long)run_clipboard_length);
+	fflush(stdout);
+
+	/* It is the selection other clients paste. */
+	terminal_clipboard_set(&run_window, run_clipboard, run_clipboard_length);
+}
+
+/* Pastes the clipboard's text into the active view tab. */
+static void
+run_view_paste(void)
+{
+	const struct terminal_view_ops *view;
+	int own;
+
+	/* Only a view with paste. */
+	if (!run_window.view_active || run_tab_count == 0U)
+		return;
+	view = run_tabs[run_active].view;
+	if (view == NULL || view->paste == NULL)
+		return;
+
+	/* Another client's selection is received first (the terminal's own copy is already here). */
+	own = terminal_clipboard_own(&run_window);
+	if (!own)
+		run_clipboard_length = terminal_clipboard_receive(&run_window, run_clipboard, sizeof(run_clipboard));
+
+	/* Into the view. */
+	view->paste(run_tabs[run_active].connection, run_clipboard, run_clipboard_length);
+}
+
+/*
+ * Asks a tab's view and the program whether a user-initiated close of the
+ * tab may proceed; switches to the tab and returns 0 when it keeps the tab
+ * open, or returns 1 to allow closing.
+ */
+static int
+run_confirm_tab_close(
+	const struct terminal_run_options *options,
+	struct run_state *run,
+	unsigned index)
+{
+	struct run_tab *tab;
+	int allow;
+
+	/* Only a tab that is there. */
+	if (index >= run_tab_count)
+		return 1;
+	tab = &run_tabs[index];
+
+	/* A view tab's own confirmation. */
+	if (tab->view != NULL && tab->view->confirm_close != NULL) {
+		allow = tab->view->confirm_close(tab->connection, &run_window);
+		if (!allow) {
+			run_tab_switch(run, index);
+			return 0;
+		}
+	}
+
+	/* The program's confirmation for any tab. */
+	if (options->confirm_close != NULL) {
+		allow = options->confirm_close(options->data, &run_window, tab->connection);
+		if (!allow)
+			return 0;
+	}
+
+	/* Allowed. */
+	return 1;
+}
+
+/*
+ * Asks every open view tab and the program whether closing the window may
+ * proceed; switches to the blocking tab and returns 0 when one keeps the
+ * window open, or returns 1 to allow closing.
+ */
+static int
+run_confirm_window_close(
+	const struct terminal_run_options *options,
+	struct run_state *run)
+{
+	unsigned index;
+	int allow;
+
+	/* Each open view tab. */
+	for (index = 0U; index < run_tab_count; index++) {
+		if (run_tabs[index].view == NULL || run_tabs[index].view->confirm_close == NULL)
+			continue;
+		allow = run_tabs[index].view->confirm_close(run_tabs[index].connection, &run_window);
+		if (!allow) {
+			run_tab_switch(run, index);
+			return 0;
+		}
+	}
+
+	/* The program's confirmation for the whole window. */
+	if (options->confirm_close != NULL) {
+		allow = options->confirm_close(options->data, &run_window, NULL);
+		if (!allow)
+			return 0;
+	}
+
+	/* Allowed. */
+	return 1;
 }
