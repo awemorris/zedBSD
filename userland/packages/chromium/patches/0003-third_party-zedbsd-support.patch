@@ -121,7 +121,7 @@
        "Algebra.h",
 --- a/third_party/dawn/src/dawn/common/SystemUtils.cpp
 +++ b/third_party/dawn/src/dawn/common/SystemUtils.cpp
-@@ -36,7 +36,7 @@
+@@ -36,10 +36,13 @@
  #include "src/utils/windows_with_undefs.h"
  
  #include <vector>
@@ -130,19 +130,30 @@
  #include <dlfcn.h>
  #include <limits.h>
  #include <unistd.h>
-@@ -149,6 +149,11 @@
++#if DAWN_PLATFORM_IS(ZEDBSD)
++#include <sys/sysctl.h>
++#endif
+ 
+ #include <cstdlib>
+ #elif DAWN_PLATFORM_IS(MACOS) || DAWN_PLATFORM_IS(IOS)
+@@ -149,6 +152,16 @@
      // UNIMPLEMENTED
      return {};
  }
 +#elif DAWN_PLATFORM_IS(ZEDBSD)
 +std::optional<std::string> GetExecutablePath() {
-+    // zedBSD has no /proc/self/exe and no other way to ask for the path.
-+    return {};
++    int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1};
++    std::array<char, PATH_MAX> buf = {};
++    size_t len = buf.size();
++    if (sysctl(mib, std::size(mib), buf.data(), &len, nullptr, 0) != 0 || len <= 1) {
++        return {};
++    }
++    return std::string(buf.data(), len - 1);
 +}
  #elif DAWN_PLATFORM_IS(EMSCRIPTEN)
  std::optional<std::string> GetExecutablePath() {
      return {};
-@@ -169,7 +174,8 @@
+@@ -169,7 +182,8 @@
      return exePath->substr(0, lastPathSepLoc + 1);
  }
  

@@ -166,26 +166,6 @@
    // Combine seconds and microseconds in a 64-bit field containing microseconds
    // since the epoch.  That's enough for nearly 600 centuries.  Adjust from
    // Unix (1970) to Windows (1601) epoch.
---- a/base/allocator/partition_allocator/src/partition_alloc/stack/stack.cc
-+++ b/base/allocator/partition_allocator/src/partition_alloc/stack/stack.cc
-@@ -54,6 +54,9 @@
- #elif PA_BUILDFLAG(IS_POSIX) || PA_BUILDFLAG(IS_FUCHSIA)
- 
- uintptr_t GetStackTop() {
-+#if defined(__ZEDBSD__)
-+  return 0;
-+#else
-   pthread_attr_t attr;
-   int error = pthread_getattr_np(pthread_self(), &attr);
-   if (!error) {
-@@ -74,6 +77,7 @@
- #else
-   return 0;
- #endif  // PA_BUILDFLAG(PA_LIBC_GLIBC)
-+#endif
- }
- 
- #else  // PA_BUILDFLAG(IS_WIN)
 --- a/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc
 +++ b/base/allocator/partition_allocator/src/partition_alloc/thread_isolation/pkey.cc
 @@ -9,7 +9,9 @@
@@ -240,6 +220,32 @@
  }
  
  PA_COMPONENT_EXPORT(PARTITION_ALLOC)
+--- a/base/base_paths_posix.cc
++++ b/base/base_paths_posix.cc
+@@ -26,7 +26,7 @@
+ #include "base/process/process_metrics.h"
+ #include "build/build_config.h"
+ 
+-#if BUILDFLAG(IS_FREEBSD)
++#if BUILDFLAG(IS_FREEBSD) || BUILDFLAG(IS_ZEDBSD)
+ #include <sys/param.h>
+ #include <sys/sysctl.h>
+ #elif BUILDFLAG(IS_SOLARIS) || BUILDFLAG(IS_AIX)
+@@ -52,6 +52,14 @@
+       if (!bin_dir.has_value() || bin_dir.value().length() <= 1) {
+         NOTREACHED() << "Unable to resolve path.";
+       }
++      *result = FilePath(bin_dir.value());
++      return true;
++#elif BUILDFLAG(IS_ZEDBSD)
++      std::optional<std::string> bin_dir =
++          StringSysctl({CTL_KERN, KERN_PROC, KERN_PROC_PATHNAME, -1});
++      if (!bin_dir.has_value() || bin_dir.value().length() <= 1) {
++        NOTREACHED() << "Unable to resolve path.";
++      }
+       *result = FilePath(bin_dir.value());
+       return true;
+ #elif BUILDFLAG(IS_SOLARIS)
 --- a/base/debug/elf_reader.cc
 +++ b/base/debug/elf_reader.cc
 @@ -6,6 +6,9 @@
@@ -1420,7 +1426,7 @@
      failure = !!result;
 --- /dev/null
 +++ b/base/zedbsd_rust_compat.c
-@@ -0,0 +1,43 @@
+@@ -0,0 +1,25 @@
 +#include <errno.h>
 +#include <pthread.h>
 +#include <stdint.h>
@@ -1436,13 +1442,6 @@
 +	return (int)(uintptr_t)pthread_self();
 +}
 +
-+int pthread_attr_get_np(pthread_t tid, pthread_attr_t *attr)
-+{
-+	(void)tid;
-+	(void)attr;
-+	return ENOSYS;
-+}
-+
 +int cpuset_getaffinity(int level, int which, int64_t id, size_t setsize, void *mask)
 +{
 +	(void)level;
@@ -1450,17 +1449,6 @@
 +	(void)id;
 +	(void)setsize;
 +	(void)mask;
-+	errno = ENOSYS;
-+	return -1;
-+}
-+
-+int _umtx_op(void *obj, int op, unsigned long val, void *uaddr, void *uaddr2)
-+{
-+	(void)obj;
-+	(void)op;
-+	(void)val;
-+	(void)uaddr;
-+	(void)uaddr2;
 +	errno = ENOSYS;
 +	return -1;
 +}
