@@ -525,17 +525,30 @@ kl_ui_window_text(
 {
 	struct kl_rect caret;
 	unsigned scale;
+	uint32_t focus_id;
+	uint32_t focus_index;
 	int right;
 	int bottom;
+	int focused;
 	int wanted;
 
 	/* The window, for the clipboard, and for the bar of the fingers' selection (ws190-p002). */
 	keiui_ui_set_window(ui, window, kl_window_copy, kl_window_paste);
 	keiui_ui_set_window_extras(ui, kl_window_can_paste, kl_window_keyboard_inset);
 
-	/* On while a field has the keyboard, off otherwise. */
+	/* On while a field has the keyboard, off otherwise; a switch between fields resets the input method. */
 	wanted = kl_ui_text_wanted(ui, &caret);
+	focus_id = 0U;
+	focus_index = 0U;
+	focused = wanted && keiui_ui_focused(ui, &focus_id, &focus_index);
+	if (focused && window->text_wanted && window->text_focus_valid &&
+	    (focus_id != window->text_focus_id || focus_index != window->text_focus_index)) {
+		kl_window_text_input(window, 0);
+	}
 	kl_window_text_input(window, wanted);
+	window->text_focus_valid = focused;
+	window->text_focus_id = focus_id;
+	window->text_focus_index = focus_index;
 	if (!wanted)
 		return;
 

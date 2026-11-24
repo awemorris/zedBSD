@@ -364,6 +364,7 @@ static void ui_drag_step(struct kl_ui *ui, uint64_t now_us);
 static void ui_content(const struct kl_ui *ui, double x, double y, double *content_x, double *content_y);
 static void ui_record(struct kl_ui *ui, enum ui_kind kind, uint32_t id, uint32_t index, unsigned flags, const struct kl_rect *rect, struct kl_scroll *scroll, struct kl_text_touch *touch);
 static void ui_focus_press(struct kl_ui *ui, const struct ui_record *record, double x, double y);
+static void ui_focus_commit_preedit(struct kl_ui *ui, int next_valid, uint32_t next_id, uint32_t next_index);
 static const struct ui_record *ui_focus_owner(const struct ui_key *key, const struct kl_ui *ui, double x, double y);
 static int ui_focus_move(struct kl_ui *ui, int backward);
 static const struct ui_record *ui_find_handle(const struct kl_ui *ui, double x, double y);
@@ -1409,6 +1410,9 @@ kl_ui_set_focus(
 	uint32_t id,
 	uint32_t index)
 {
+	/* Commit any composition on the widget losing focus before moving it. */
+	ui_focus_commit_preedit(ui, 1, id, index);
+
 	/* The widget (the flags come when it is drawn). */
 	ui->focus.valid = 1;
 	ui->focus_ring = 0;
@@ -1424,6 +1428,9 @@ void
 kl_ui_clear_focus(
 	struct kl_ui *ui)
 {
+	/* Commit any composition on the widget losing focus. */
+	ui_focus_commit_preedit(ui, 0, 0U, 0U);
+
 	/* No widget. */
 	ui->focus.valid = 0;
 }
@@ -2933,6 +2940,7 @@ ui_gesture(
 			ui->pointer_y = gesture->y;
 			owner = ui_focus_owner(&ui->touch_hit, ui, gesture->x, gesture->y);
 			if (owner != NULL) {
+				ui_focus_commit_preedit(ui, 1, owner->id, owner->index);
 				ui->focus.valid = 1;
 				ui->focus_ring = 0;
 				ui->focus.id = owner->id;
@@ -3200,6 +3208,7 @@ ui_focus_press(
 
 	/* It takes the focus. */
 	if (owner != NULL) {
+		ui_focus_commit_preedit(ui, 1, owner->id, owner->index);
 		ui->focus.valid = 1;
 		ui->focus_ring = 0;
 		ui->focus.id = owner->id;
@@ -3209,7 +3218,41 @@ ui_focus_press(
 	}
 
 	/* Anything else: no widget keeps the keyboard. */
+	ui_focus_commit_preedit(ui, 0, 0U, 0U);
 	ui->focus.valid = 0;
+}
+
+/* Commits any active composition to its widget before focus moves elsewhere or clears. */
+static void
+ui_focus_commit_preedit(
+	struct kl_ui *ui,
+	int next_valid,
+	uint32_t next_id,
+	uint32_t next_index)
+{
+	struct ui_press *press;
+
+	if (ui->preedit[0] == '\0')
+		return;
+	if (next_valid && ui->preedit_target.valid &&
+	    ui->preedit_target.id == next_id &&
+	    ui->preedit_target.index == next_index)
+		return;
+
+	if (ui->preedit_target.valid && ui->key_count < UI_KEYS) {
+		press = &ui->keys[ui->key_count];
+		memset(press, 0, sizeof(*press));
+		press->kind = KEIUI_INPUT_COMMIT;
+		memcpy(press->text, ui->preedit, sizeof(press->text));
+		press->text[sizeof(press->text) - 1U] = '\0';
+		press->target = ui->preedit_target;
+		ui->key_count++;
+	}
+
+	ui->preedit[0] = '\0';
+	ui->preedit_begin = -1;
+	ui->preedit_end = -1;
+	ui->preedit_target.valid = 0;
 }
 
 /* Finds the record that takes the keyboard for a widget pressed at a point: itself, or the one of its id under the point that does; NULL for none. */
@@ -3286,6 +3329,7 @@ ui_focus_move(
 		record = &ui->shown[low + place];
 		if (record->kind != UI_KIND_HIT || (record->flags & KEIUI_FOCUSABLE) == 0U)
 			continue;
+		ui_focus_commit_preedit(ui, 1, record->id, record->index);
 		ui->focus.valid = 1;
 		ui->focus_ring = 1;
 		ui->focus.id = record->id;

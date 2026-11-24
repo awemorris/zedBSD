@@ -546,6 +546,9 @@ struct kl_window {
 	int text_wanted;
 	int text_entered;
 	int text_enabled;
+	int text_focus_valid;
+	uint32_t text_focus_id;
+	uint32_t text_focus_index;
 	uint32_t text_commits;
 	int32_t text_cursor[4];
 	char text_commit[KL_WINDOW_TEXT_MAX];

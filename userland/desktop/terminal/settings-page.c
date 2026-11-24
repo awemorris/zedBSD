@@ -255,8 +255,9 @@ struct page_state {
 	struct kl_rect viewport;
 	int content_height;
 
-	/* Whether the window's text input was asked on, as last told (-1 before the first frame). */
+	/* Whether the window's text input was asked on, as last told (-1 before the first frame), and which field had it. */
 	int text_wanted;
+	struct kl_field *text_field;
 
 	/*
 	 * Hosts: the ssh_config's bytes as last read or saved (original, which
@@ -512,6 +513,7 @@ terminal_page_open(
 	/* Succeeded: the page is made, the Hosts pane first. */
 	page.pane = TERMINAL_PANE_HOSTS;
 	page.text_wanted = -1;
+	page.text_field = NULL;
 	page.dirty = 1;
 	page.made = 1;
 	return 0;
@@ -866,6 +868,7 @@ terminal_page_shown(
 	/* A frame, and the text input told on it. */
 	page.dirty = 1;
 	page.text_wanted = -1;
+	page.text_field = NULL;
 }
 
 /*
@@ -4021,6 +4024,7 @@ page_text_follow(
 	struct terminal_window *window)
 {
 	struct kl_rect caret;
+	struct kl_field *focused_field;
 	int wanted;
 	int width;
 	int height;
@@ -4029,12 +4033,23 @@ page_text_follow(
 
 	/* What the focused widget wants. */
 	wanted = kl_ui_text_wanted(page.ui, &caret);
+	focused_field = NULL;
+	if (wanted)
+		(void)page_focused(&focused_field);
+
+	/* Switching between text fields resets the input method so composing state never leaks. */
+	if (wanted && page.text_wanted == 1 &&
+	    focused_field != page.text_field) {
+		kl_window_text_input(window->kui, 0);
+		kl_window_text_input(window->kui, 1);
+	}
 
 	/* The window's text input on or off, when that changed. */
 	if (wanted != page.text_wanted) {
 		kl_window_text_input(window->kui, wanted);
 		page.text_wanted = wanted;
 	}
+	page.text_field = wanted ? focused_field : NULL;
 
 	/* The candidates' place at the caret, in the window's pixels. */
 	if (wanted) {
