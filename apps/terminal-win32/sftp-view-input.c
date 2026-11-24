@@ -654,6 +654,8 @@ input_handle_motion(
 	int idx;
 	int dx;
 	int dy;
+	int logical_w;
+	int logical_h;
 
 	/* Updates splitter width while dragging the divider. */
 	if (view->dragging_splitter) {
@@ -682,8 +684,20 @@ input_handle_motion(
 			view->drag_active = 1;
 	}
 
-	/* Highlights the drop target folder during an internal drag. */
+	/* Highlights the drop target folder during an internal drag, or starts an external OLE drag outside the view. */
 	if (view->drag_active) {
+		logical_w = input_to_logical(view, view->width);
+		logical_h = input_to_logical(view, view->height);
+		if (ux < 0 || uy < 0 ||
+		    (logical_w > 0 && ux >= logical_w) ||
+		    (logical_h > 0 && uy >= logical_h)) {
+			view->drag_active = 0;
+			view->drag_pending = 0;
+			view->drop_target_path[0] = '\0';
+			sftp_view_request_external_drag(view);
+			return;
+		}
+
 		hit = sftp_view_hit_folder_at(view, ux, uy, target, sizeof(target));
 		if (hit)
 			(void)snprintf(view->drop_target_path, sizeof(view->drop_target_path), "%s", target);

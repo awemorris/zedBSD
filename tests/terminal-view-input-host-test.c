@@ -226,7 +226,13 @@ static int mock_view_draw(struct terminal_connection *c, const struct terminal_v
 	(void)w;
 	(void)h;
 	v->draw_calls++;
-	v->dirty = 0;
+	if (v->input_count == 8U && v->draw_calls < 10) {
+		/* Simulates an active scroll animation keeping dirty=1 for one extra frame. */
+		v->dirty = 1;
+	} else {
+		v->dirty = 0;
+	}
+
 	return 0;
 }
 
@@ -420,6 +426,26 @@ main(void)
 	CHECK(g_view.inputs[5].modifiers == TERMINAL_MODIFIER_SHIFT);
 	CHECK(g_view.inputs[6].kind == TERMINAL_PICTURE_TEXT);
 	CHECK(strcmp(g_view.inputs[6].text, "abc") == 0);
+	CHECK(g_view.draw_calls >= 2);
+	CHECK(display_page_calls >= 2);
+
+	/* Second pass: a single KL_WINDOW_AXIS wheel event triggers immediate + animation redraws without a second mouse event. */
+	script_count = 0U;
+	script_pos = 0U;
+	dispatch_budget = 0;
+	display_page_calls = 0;
+	g_view_taken = 0;
+	memset(&g_view, 0, sizeof(g_view));
+	g_view.base.ops = &mock_view_conn_ops;
+	memset(&ev, 0, sizeof(ev));
+	ev.kind = KL_WINDOW_AXIS;
+	ev.dy = 48.0;
+	push_event(&ev);
+	opts.timeout = 1U;
+	st = terminal_run(&opts, &res);
+	CHECK(st == 0);
+	CHECK(g_view.input_count == 2U);
+	CHECK(g_view.inputs[1].kind == TERMINAL_PICTURE_AXIS);
 	CHECK(g_view.draw_calls >= 2);
 	CHECK(display_page_calls >= 2);
 

@@ -55,6 +55,7 @@ sftp_view_draw_frame(
 	int body_y;
 	int body_h;
 	int split_x;
+	int moving;
 	int error;
 
 	/* Validates frame dimensions and output pixel buffer. */
@@ -203,13 +204,17 @@ sftp_view_draw_frame(
 	if (view->dialog != SFTP_DIALOG_NONE)
 		draw_modal_dialog(view, &style, w, h);
 
-	/* Ends the immediate-mode UI frame and clears the dirty flag. */
+	/* Ends the immediate-mode UI frame and keeps dirty while animations run. */
+	moving = 0;
 	if (view->ui != NULL)
-		(void)kl_ui_end(view->ui, now_us);
+		moving = kl_ui_end(view->ui, now_us);
 
-	/* Clears the dirty flag under the view lock. */
+	/* Updates the dirty flag under the view lock. */
 	kl_mutex_lock(&view->lock);
-	view->dirty = 0;
+	if (moving)
+		view->dirty = 1;
+	else
+		view->dirty = 0;
 	kl_mutex_unlock(&view->lock);
 
 	/* Succeeded: frame rendered into pixels. */
@@ -722,13 +727,14 @@ draw_transfer_area(
 	size_t first;
 	size_t last;
 	size_t i;
-	char summary[256];
+	char summary[MIKUTERM_PATH_MAX + 512];
 	char done_s[32];
 	char total_s[32];
 	char clean_name[256];
+	char clean_dest[MIKUTERM_PATH_MAX];
 	char spd[32];
 	char tlabel[32];
-	char line[512];
+	char line[MIKUTERM_PATH_MAX + 512];
 	char clean_err[256];
 	unsigned eta;
 	double frac;
@@ -773,6 +779,9 @@ draw_transfer_area(
 		else
 			base = active_item->remote_path;
 		sftp_view_sanitize_text(base, clean_name, sizeof(clean_name));
+		clean_dest[0] = '\0';
+		if (active_item->local_path[0] != '\0')
+			sftp_view_sanitize_text(active_item->local_path, clean_dest, sizeof(clean_dest));
 		sftp_view_format_size(active_item->bytes_done, done_s, sizeof(done_s));
 		sftp_view_format_size(active_item->bytes_total, total_s, sizeof(total_s));
 		if (active_item->bytes_total > 0ULL)
@@ -783,20 +792,50 @@ draw_transfer_area(
 				eta = (unsigned)((double)(active_item->bytes_total - active_item->bytes_done) / view->transfer_speed);
 			else
 				eta = 0U;
-			if (active_item->direction == SFTP_TRANSFER_UPLOAD)
-				dir_verb = "Uploading";
-			else
-				dir_verb = "Downloading";
-			(void)snprintf(
-				summary,
-				sizeof(summary),
-				"%s %s  %s / %s  %s/s  %u s left",
-				dir_verb,
-				clean_name,
-				done_s,
-				total_s,
-				spd,
-				eta);
+			if (active_item->direction == SFTP_TRANSFER_UPLOAD) {
+				(void)snprintf(
+					summary,
+					sizeof(summary),
+					"Uploading %s  %s / %s  %s/s  %u s left",
+					clean_name,
+					done_s,
+					total_s,
+					spd,
+					eta);
+			} else if (clean_dest[0] != '\0') {
+				(void)snprintf(
+					summary,
+					sizeof(summary),
+					"Downloading %s to %s  %s / %s  %s/s  %u s left",
+					clean_name,
+					clean_dest,
+					done_s,
+					total_s,
+					spd,
+					eta);
+			} else {
+				(void)snprintf(
+					summary,
+					sizeof(summary),
+					"Downloading %s  %s / %s  %s/s  %u s left",
+					clean_name,
+					done_s,
+					total_s,
+					spd,
+					eta);
+			}
+		} else if (active_item->direction == SFTP_TRANSFER_DOWNLOAD && clean_dest[0] != '\0') {
+			if (active_item->state == SFTP_TRANSFER_DONE) {
+				(void)snprintf(summary, sizeof(summary), "Saved to %s", clean_dest);
+			} else {
+				(void)snprintf(
+					summary,
+					sizeof(summary),
+					"Download %s to %s  (%s)",
+					clean_name,
+					clean_dest,
+					draw_transfer_state_text(active_item->state));
+			}
 		} else {
 			if (active_item->direction == SFTP_TRANSFER_UPLOAD)
 				dir_verb = "Upload";
@@ -893,6 +932,9 @@ draw_transfer_area(
 			else
 				base = t->remote_path;
 			sftp_view_sanitize_text(base, clean_name, sizeof(clean_name));
+			clean_dest[0] = '\0';
+			if (t->local_path[0] != '\0')
+				sftp_view_sanitize_text(t->local_path, clean_dest, sizeof(clean_dest));
 			sftp_view_sanitize_text(t->error_text, clean_err, sizeof(clean_err));
 			sftp_view_format_size(t->bytes_done, done_s, sizeof(done_s));
 			sftp_view_format_size(t->bytes_total, total_s, sizeof(total_s));
@@ -909,6 +951,17 @@ draw_transfer_area(
 					clean_name,
 					draw_transfer_state_text(t->state),
 					clean_err);
+			} else if (t->direction == SFTP_TRANSFER_DOWNLOAD && clean_dest[0] != '\0') {
+				(void)snprintf(
+					line,
+					sizeof(line),
+					"%s %s -> %s - %s (%s / %s)",
+					dir_tag,
+					clean_name,
+					clean_dest,
+					draw_transfer_state_text(t->state),
+					done_s,
+					total_s);
 			} else {
 				(void)snprintf(
 					line,
@@ -1192,7 +1245,7 @@ draw_context_menu(
 		(float)r.width,
 		(float)r.height,
 		style->theme->control_radius,
-		style->theme->card);
+		KL_RGBA(style->theme->card, 0xf2U));
 	kl_canvas_round_border(
 		style->canvas,
 		(float)r.x,
