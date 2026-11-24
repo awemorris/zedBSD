@@ -3122,7 +3122,7 @@ page_items(
 	for (effect = TERMINAL_EFFECT_CONNECTION; effect <= TERMINAL_EFFECT_START; effect++) {
 		/* How many rows it has. */
 		rows = 0U;
-		for (index = 0U; index < page.program->item_count; index++) {
+		for (index = 0U; index < page.program->item_count && index < TERMINAL_ITEMS_MAX; index++) {
 			item = &page.program->items[index];
 			if (item->pane == pane && item->effect == effect)
 				rows++;
@@ -3145,7 +3145,7 @@ page_items(
 		card.width = width;
 		card.height = PAGE_CARD_TITLE + (int)rows * PAGE_ROW + PAGE_CARD_FOOT;
 		y = page_card(&card, title, NULL);
-		for (index = 0U; index < page.program->item_count; index++) {
+		for (index = 0U; index < page.program->item_count && index < TERMINAL_ITEMS_MAX; index++) {
 			item = &page.program->items[index];
 			if (item->pane != pane || item->effect != effect)
 				continue;
@@ -3763,7 +3763,7 @@ page_column(
 	}
 
 	/* And of the program's settings the pane shows. */
-	for (index = 0U; index < page.program->item_count; index++) {
+	for (index = 0U; index < page.program->item_count && index < TERMINAL_ITEMS_MAX; index++) {
 		item = &page.program->items[index];
 
 		/* A setting of another pane is not in this one. */

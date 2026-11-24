@@ -822,6 +822,7 @@ thread_rdp(
 	char key[LAUNCH_KEY_MAX];
 	char label[LAUNCH_LABEL_MAX];
 	char note[LAUNCH_NOTE_MAX];
+	char spec[LAUNCH_LINE_MAX];
 	unsigned event;
 	int taken;
 	struct rdp_host_entry target;
@@ -858,9 +859,11 @@ thread_rdp(
 		(void)launch_add(screen, key, LAUNCH_RDP_HOST, label, note);
 	}
 
+	/* Adds Connect and Back rows; explains how to connect when rdp/hosts is empty. */
+	(void)launch_add(screen, "c", LAUNCH_RDP_CONNECT, "Connect to host (user@host:port)...", NULL);
 	(void)launch_add(screen, "b", LAUNCH_BACK, "Back", NULL);
 	if (choice->rdp_hosts.count == 0U)
-		launch_say(screen, "rdp/hosts names no host: type user@host:port.");
+		launch_say(screen, "No hosts in rdp/hosts. Press Enter to connect, or type user@host:port.");
 
 	for (;;) {
 		error = thread_launch(choice, screen, &event);
@@ -887,6 +890,29 @@ thread_rdp(
 			index = (unsigned)taken;
 			if (screen->rows[index].kind == LAUNCH_BACK)
 				return EAGAIN;
+
+			if (screen->rows[index].kind == LAUNCH_RDP_CONNECT) {
+				/* Prompts for user@host:port when Connect is chosen. */
+				error = thread_ask(choice->session,
+						   "Host (user@host:port): ",
+						   SESSION_ASK_LINE,
+						   spec, sizeof(spec));
+				if (error == EPIPE)
+					return EPIPE;
+				if (error != 0) {
+					launch_choose(screen, index);
+					continue;
+				}
+
+				error = rdp_hosts_parse_target(spec, 3389U, &target);
+				if (error != 0) {
+					launch_say(screen, "Type [domain\\][user@]host[:port].");
+					launch_choose(screen, index);
+					continue;
+				}
+
+				break;
+			}
 
 			target = choice->rdp_hosts.entries[index];
 		}

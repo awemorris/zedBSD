@@ -68,6 +68,7 @@
 #define LAUNCH_SHELL		8U
 #define LAUNCH_RDP		9U
 #define LAUNCH_RDP_HOST		10U
+#define LAUNCH_RDP_CONNECT	11U
 
 /* What the keys came to: nothing yet, Enter, the user giving up (Ctrl+C, Ctrl+D), Escape. */
 #define LAUNCH_EVENT_NONE	0U
