@@ -8,6 +8,7 @@
 package io.noctvm.keiland;
 
 import android.content.Context;
+import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.inputmethod.BaseInputConnection;
 import android.view.inputmethod.InputMethodManager;
@@ -29,6 +30,9 @@ final class KeilandInputConnection extends BaseInputConnection {
 	/** The most the context keeps, in characters: a prediction keyboard looks back a few words only. */
 	private static final int CONTEXT_MAX = 200;
 
+	/** Time window (ms) to suppress a trailing Enter sent right after confirming composing text. */
+	private static final long CONFIRM_ENTER_SUPPRESS_MS = 100L;
+
 	/** The text committed lately (what the input method may take back), before the composing text. */
 	private final StringBuilder context = new StringBuilder();
 
@@ -41,6 +45,15 @@ final class KeilandInputConnection extends BaseInputConnection {
 	/** Whether an Enter press was consumed to finish composing text, so its release is consumed too. */
 	private boolean swallowNextEnterUp;
 
+	/** Nesting depth of beginBatchEdit/endBatchEdit from the IME. */
+	private int batchDepth;
+
+	/** Whether composing text was confirmed during the current batch edit. */
+	private boolean confirmedInBatch;
+
+	/** Uptime (ms) when a non-empty composition was last confirmed, or 0. */
+	private long lastConfirmUptimeMs;
+
 	KeilandInputConnection(InputView view) {
 		super(view, true);
 		inputView = view;
@@ -51,6 +64,9 @@ final class KeilandInputConnection extends BaseInputConnection {
 		context.setLength(0);
 		composing = "";
 		swallowNextEnterUp = false;
+		batchDepth = 0;
+		confirmedInBatch = false;
+		lastConfirmUptimeMs = 0L;
 		updateSelection();
 	}
 
@@ -82,15 +98,41 @@ final class KeilandInputConnection extends BaseInputConnection {
 	}
 
 	@Override
+	public boolean beginBatchEdit() {
+		batchDepth++;
+		return super.beginBatchEdit();
+	}
+
+	@Override
+	public boolean endBatchEdit() {
+		if (batchDepth > 0) {
+			batchDepth--;
+			if (batchDepth == 0) {
+				confirmedInBatch = false;
+			}
+		}
+		return super.endBatchEdit();
+	}
+
+	@Override
 	public boolean commitText(CharSequence text, int newCursorPosition) {
 		String committed;
+		boolean wasComposing;
 		int[] need;
 		int code;
 		int meta;
 
 		/* The committed text replaces whatever was being composed. */
+		wasComposing = !composing.isEmpty();
 		composing = "";
 		committed = text.toString();
+		if (wasComposing && committed.length() > 1
+		    && (committed.endsWith("\n") || committed.endsWith("\r"))) {
+			committed = committed.substring(0, committed.length() - 1);
+		}
+		if (wasComposing) {
+			noteConfirmed();
+		}
 
 		/* A character typed while Ctrl or Alt is held is that key with them, not text. */
 		meta = inputView.takeLatched();
@@ -181,6 +223,7 @@ final class KeilandInputConnection extends BaseInputConnection {
 		pending = composing;
 		composing = "";
 		if (!pending.isEmpty()) {
+			noteConfirmed();
 			keepOrClear(pending);
 			updateSelection();
 			KeilandBridge.nativeCommit(pending);
@@ -236,8 +279,7 @@ final class KeilandInputConnection extends BaseInputConnection {
 
 	@Override
 	public boolean performEditorAction(int editorAction) {
-		if (!composing.isEmpty()) {
-			finishComposingText();
+		if (consumeConfirmEnter()) {
 			return true;
 		}
 		return super.performEditorAction(editorAction);
@@ -247,19 +289,9 @@ final class KeilandInputConnection extends BaseInputConnection {
 	public boolean sendKeyEvent(KeyEvent event) {
 		int code = event.getKeyCode();
 
-		/* Pressing Enter while composing only confirms the composition and must not send Return to the program. */
-		if (code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER) {
-			if (event.getAction() == KeyEvent.ACTION_DOWN) {
-				if (!composing.isEmpty()) {
-					finishComposingText();
-					swallowNextEnterUp = true;
-					return true;
-				}
-				swallowNextEnterUp = false;
-			} else if (event.getAction() == KeyEvent.ACTION_UP && swallowNextEnterUp) {
-				swallowNextEnterUp = false;
-				return true;
-			}
+		/* Pressing Enter while composing (or right after confirming) must not send Return to the program. */
+		if (consumeEnterKey(event)) {
+			return true;
 		}
 
 		/* A Backspace takes the last character of the context; Enter and the keys that move the cursor end it. */
@@ -274,6 +306,58 @@ final class KeilandInputConnection extends BaseInputConnection {
 			}
 		}
 		return super.sendKeyEvent(event);
+	}
+
+	/** Records that a non-empty composition was just confirmed. */
+	private void noteConfirmed() {
+		lastConfirmUptimeMs = SystemClock.uptimeMillis();
+		if (batchDepth > 0) {
+			confirmedInBatch = true;
+		}
+	}
+
+	/**
+	 * Consumes an Enter/action triggered while composing or immediately after confirming
+	 * a composition (same batch edit or within CONFIRM_ENTER_SUPPRESS_MS).
+	 */
+	private boolean consumeConfirmEnter() {
+		long now;
+
+		if (!composing.isEmpty()) {
+			finishComposingText();
+			confirmedInBatch = false;
+			lastConfirmUptimeMs = 0L;
+			return true;
+		}
+		now = SystemClock.uptimeMillis();
+		if (confirmedInBatch || (lastConfirmUptimeMs != 0L && (now - lastConfirmUptimeMs) <= CONFIRM_ENTER_SUPPRESS_MS)) {
+			confirmedInBatch = false;
+			lastConfirmUptimeMs = 0L;
+			return true;
+		}
+		return false;
+	}
+
+	/** Consumes an Enter key event if it only confirms (or trails) a composition. */
+	boolean consumeEnterKey(KeyEvent event) {
+		int code = event.getKeyCode();
+
+		if (code != KeyEvent.KEYCODE_ENTER && code != KeyEvent.KEYCODE_NUMPAD_ENTER) {
+			return false;
+		}
+		if (event.getAction() == KeyEvent.ACTION_DOWN) {
+			if (consumeConfirmEnter()) {
+				swallowNextEnterUp = true;
+				return true;
+			}
+			swallowNextEnterUp = false;
+			return false;
+		}
+		if (event.getAction() == KeyEvent.ACTION_UP && swallowNextEnterUp) {
+			swallowNextEnterUp = false;
+			return true;
+		}
+		return false;
 	}
 
 	/**
