@@ -1591,6 +1591,7 @@ font_names_family(
 				return error;
 			continue;
 		}
+
 		if (family == &font_families[1]) {
 			for (index = 0U; index < sizeof(font_unifont_sizes) / sizeof(font_unifont_sizes[0]); index++) {
 				spec.pixel = font_unifont_sizes[index];
@@ -1601,6 +1602,7 @@ font_names_family(
 				if (error != 0)
 					return error;
 			}
+
 			continue;
 		}
 
@@ -2098,6 +2100,7 @@ font_make_special(
 {
 	struct x11_font *font;
 	int same;
+	int has_fixed;
 	int error;
 
 	/* The font, named as it was opened. */
@@ -2109,13 +2112,14 @@ font_make_special(
 
 	/* The cursor font: the standard cursors' numbers, one cell each. */
 	same = strcmp(name, FONT_CURSOR_NAME) == 0;
+	has_fixed = x11_face_has_own(&server->faces, X11_FACE_FIXED);
 	if (same) {
 		font->kind = X11_FONT_CURSOR;
 		font->max_byte2 = (uint8_t)(FONT_CURSOR_CHARS - 1U);
 		font->cell_width = FONT_CURSOR_CELL;
 		font->ascent = FONT_CURSOR_CELL;
 		font->descent = 0;
-	} else if (x11_face_has_own(&server->faces, X11_FACE_FIXED)) {
+	} else if (has_fixed) {
 		/*
 		 * zed-unicode with Unifont: 16px cells over the Unicode BMP,
 		 * half-width 8x16 and full-width 16x16.
@@ -2188,6 +2192,7 @@ font_make_mono(
 	const struct font_cell *cell;
 	unsigned pixels;
 	int has_face;
+	int has_fixed;
 	int ascent;
 	int descent;
 	int advance;
@@ -2252,9 +2257,10 @@ font_make_mono(
 
 	/* Every character's metrics: per-character half/full widths for wide fixed fonts, else one cell. */
 	font->line_drawing = 1;
+	has_fixed = x11_face_has_own(&server->faces, X11_FACE_FIXED);
 	if (spec->wide &&
 	    font->role == X11_FACE_FIXED &&
-	    x11_face_has_own(&server->faces, X11_FACE_FIXED) &&
+	    has_fixed &&
 	    width == (int)(font->pixels / 2U)) {
 		error = font_make_fixed_metrics(server, font);
 		if (error != 0)
@@ -2262,6 +2268,7 @@ font_make_mono(
 		return 0;
 	}
 
+	/* One cell for every character. */
 	font->min_bounds.left = 0;
 	font->min_bounds.right = (int16_t)width;
 	font->min_bounds.width = (int16_t)width;
@@ -2294,6 +2301,7 @@ font_make_fixed_metrics(
 		font->metric_count = 0U;
 		return ENOMEM;
 	}
+
 	font->metrics = metrics;
 
 	/* Measure each printable BMP code point and DEC line-drawing entry. */
@@ -2307,6 +2315,7 @@ font_make_fixed_metrics(
 			metrics[index].descent = (int16_t)font->descent;
 			continue;
 		}
+
 		if (index < 0x20U || (index >= 0x7fU && index < 0xa0U))
 			continue;
 		error = x11_face_char_advance(&server->faces, font->role, font->pixels, (uint32_t)index, &advance);
