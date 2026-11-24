@@ -202,7 +202,10 @@ enum engine_kind {
 	ENGINE_KIND_DIRECT = 2,
 
 	/* A forwarded-tcpip channel the server opened. */
-	ENGINE_KIND_FORWARDED = 3
+	ENGINE_KIND_FORWARDED = 3,
+
+	/* A session channel opened for a subsystem. */
+	ENGINE_KIND_SUBSYSTEM = 4
 };
 
 /* Where a remote forwarding (tcpip-forward) is. */
@@ -342,6 +345,9 @@ struct ssh_engine {
 	size_t held[SSH_CHANNEL_MAX];
 	enum engine_kind kinds[SSH_CHANNEL_MAX];
 	int close_wanted[SSH_CHANNEL_MAX];
+	int subsystem_reply[SSH_CHANNEL_MAX];
+	char subsystem_names[SSH_CHANNEL_MAX][SSH_CHANNEL_ENV_NAME_MAX + 1];
+	int more_sessions;
 	struct engine_forward forwards[SSH_ENGINE_REMOTE_FORWARDS_MAX];
 	unsigned forward_count;
 	uint32_t globals[ENGINE_GLOBALS_MAX];
@@ -401,6 +407,7 @@ static int engine_take_x11(struct ssh_engine *engine);
 static int engine_take_forwarded(struct ssh_engine *engine);
 static int engine_take_open_reply(struct ssh_engine *engine);
 static int engine_take_direct_reply(struct ssh_engine *engine, struct ssh_channel *channel, int refused, uint32_t reason);
+static int engine_take_subsystem_open(struct ssh_engine *engine, struct ssh_channel *channel, int refused, uint32_t reason);
 static int engine_take_global_reply(struct ssh_engine *engine);
 static int engine_find_forward(const struct ssh_engine *engine, const uint8_t *address, size_t size, uint32_t port, unsigned *forward);
 static unsigned engine_count_kind(const struct ssh_engine *engine, enum engine_kind kind);
@@ -1166,6 +1173,74 @@ ssh_engine_open_direct(
 }
 
 /*
+ * Opens a "session" channel and asks it for the subsystem name.
+ */
+int
+ssh_engine_open_subsystem(
+	struct ssh_engine *engine,
+	const char *name,
+	uint32_t *channel)
+{
+	struct ssh_channel *slot;
+	unsigned open_count;
+	int text_ok;
+	int error;
+
+	/* Starts with no number given. */
+	*channel = 0;
+
+	/* Nothing goes after the end, nor when more_sessions is disabled. */
+	if (engine->phase == ENGINE_PHASE_CLOSED)
+		return EPIPE;
+	if (!engine->more_sessions)
+		return EPERM;
+
+	/* Allowed only while the main session channel is open (keeps slot 0). */
+	if (engine->phase != ENGINE_PHASE_CONNECTED ||
+	    !engine->session ||
+	    engine->session_over ||
+	    engine->channel == NULL ||
+	    engine->channel->close_sent)
+		return EINVAL;
+
+	/* Refuses a subsystem name that cannot be sent in a channel request. */
+	if (name == NULL)
+		return EINVAL;
+	text_ok = engine_text_ok(name, SSH_CHANNEL_ENV_NAME_MAX, 0);
+	if (!text_ok)
+		return EINVAL;
+
+	/* Refuses a channel beyond the subsystems' limit. */
+	open_count = engine_count_kind(engine, ENGINE_KIND_SUBSYSTEM);
+	if (open_count >= SSH_ENGINE_SUBSYSTEMS_MAX)
+		return EAGAIN;
+
+	/* Opens a "session" channel with the subsystem window. */
+	ssh_buf_reset(&engine->out);
+	slot = NULL;
+	error = ssh_channel_open(&engine->channels, "session", SSH_ENGINE_SUBSYSTEM_WINDOW, NULL, 0, &engine->out, &slot);
+	if (error == EAGAIN)
+		return EAGAIN;
+	if (error == 0)
+		error = engine_send_out(engine);
+	if (error != 0) {
+		engine_end(engine, error, SSH_DISCONNECT_BY_APPLICATION, "cannot send");
+		return EPIPE;
+	}
+
+	/* Records the subsystem channel state. */
+	engine->kinds[slot->local_id] = ENGINE_KIND_SUBSYSTEM;
+	engine->close_wanted[slot->local_id] = 0;
+	engine->held[slot->local_id] = 0;
+	engine->subsystem_reply[slot->local_id] = 0;
+	engine_copy_text(engine->subsystem_names[slot->local_id], sizeof(engine->subsystem_names[slot->local_id]), name);
+
+	/* Succeeded: the open is on its way. */
+	*channel = slot->local_id;
+	return 0;
+}
+
+/*
  * Sends bytes on a channel.
  */
 int
@@ -1294,10 +1369,11 @@ ssh_engine_channel_close(
 	if (engine->phase == ENGINE_PHASE_CLOSED)
 		return EPIPE;
 
-	/* A direct-tcpip channel waiting for its answer is closed once it opens (CLOSE needs the server's number, RFC 4254 5.3). */
+	/* A direct-tcpip or subsystem channel waiting for its answer is closed once it opens (CLOSE needs the server's number, RFC 4254 5.3). */
 	if (channel < SSH_CHANNEL_MAX &&
 	    engine->channels.channel[channel].state == SSH_CHANNEL_OPENING &&
-	    engine->kinds[channel] == ENGINE_KIND_DIRECT) {
+	    (engine->kinds[channel] == ENGINE_KIND_DIRECT ||
+	     engine->kinds[channel] == ENGINE_KIND_SUBSYSTEM)) {
 		engine->close_wanted[channel] = 1;
 		return 0;
 	}
@@ -1633,6 +1709,7 @@ engine_copy_options(
 
 	/* The session and its terminal. */
 	engine->session = options->session;
+	engine->more_sessions = options->more_sessions;
 	engine->pty = options->pty;
 	engine_copy_text(engine->term, sizeof(engine->term), ENGINE_DEFAULT_TERM);
 	if (options->term != NULL)
@@ -2399,12 +2476,14 @@ engine_opened(
 		engine->x11_state = ENGINE_X11_ASKED;
 	}
 
-	/* Tells the server no other session will be opened on this connection (OpenSSH PROTOCOL 2.2). */
-	ssh_buf_reset(&engine->out);
-	ssh_channel_put_no_more_sessions(&engine->out);
-	error = engine_send_out(engine);
-	if (error != 0)
-		return error;
+	/* Tells the server no other session will be opened on this connection unless more_sessions is set (OpenSSH PROTOCOL 2.2). */
+	if (!engine->more_sessions) {
+		ssh_buf_reset(&engine->out);
+		ssh_channel_put_no_more_sessions(&engine->out);
+		error = engine_send_out(engine);
+		if (error != 0)
+			return error;
+	}
 
 	/* Starts the command, or the shell when there is none (RFC 4254 6.5). */
 	ssh_buf_reset(&engine->out);
@@ -2539,11 +2618,13 @@ engine_take_end(
 	if (!freed)
 		return 0;
 
-	/* An X11 or forwarded channel ends alone; the connection ends with it when it was the last after the session. */
+	/* An X11, forwarded or subsystem channel ends alone; the connection ends with it when it was the last after the session. */
 	if (channel != engine->channel) {
 		engine->held[number] = 0;
 		engine->kinds[number] = ENGINE_KIND_NONE;
 		engine->close_wanted[number] = 0;
+		engine->subsystem_reply[number] = 0;
+		engine->subsystem_names[number][0] = '\0';
 		event = engine_event(engine, SSH_ENGINE_CHANNEL_CLOSED);
 		if (event != NULL)
 			event->channel = number;
@@ -2636,8 +2717,36 @@ engine_take_reply(
 	if (error != 0)
 		return EPROTO;
 
-	/* Refuses a reply nothing waits for: only the session's requests want one. */
-	if (engine->reply_count == 0 || channel != engine->channel)
+	/* Handles a reply for a subsystem channel before checking the session's FIFO. */
+	if (channel != engine->channel) {
+		if (engine->kinds[channel->local_id] != ENGINE_KIND_SUBSYSTEM ||
+		    !engine->subsystem_reply[channel->local_id])
+			return EPROTO;
+		engine->subsystem_reply[channel->local_id] = 0;
+		if (channel->close_sent)
+			return 0;
+		event = engine_event(engine, SSH_ENGINE_SUBSYSTEM_REPLY);
+		if (event != NULL) {
+			event->channel = channel->local_id;
+			event->accepted = success;
+			if (!success) {
+				event->code = 0;
+				engine_copy_text(event->reason, sizeof(event->reason), "subsystem request failed on channel ");
+				engine_append_number(event->reason, sizeof(event->reason), channel->local_id);
+			}
+		}
+		if (!success && !channel->close_sent) {
+			ssh_buf_reset(&engine->out);
+			ssh_channel_put_close(channel, &engine->out);
+			error = engine_send_out(engine);
+			if (error != 0)
+				return error;
+		}
+		return 0;
+	}
+
+	/* Refuses a reply nothing waits for on the session channel. */
+	if (engine->reply_count == 0)
 		return EPROTO;
 
 	/* Takes the oldest request off the list. */
@@ -3225,8 +3334,10 @@ engine_take_open_reply(
 	if (error == EACCES)
 		refused = 1;
 
-	/* The answer for a direct-tcpip channel. */
+	/* The answer for a direct-tcpip or subsystem channel. */
 	if (channel != engine->channel) {
+		if (engine->kinds[channel->local_id] == ENGINE_KIND_SUBSYSTEM)
+			return engine_take_subsystem_open(engine, channel, refused, reason);
 		error = engine_take_direct_reply(engine, channel, refused, reason);
 		if (error != 0)
 			return error;
@@ -3336,6 +3447,94 @@ engine_take_direct_reply(
 	}
 
 	/* Succeeded: the answer is handled. */
+	return 0;
+}
+
+/*
+ * Takes the answer for a subsystem "session" channel: on confirmation,
+ * sends the subsystem request; on refusal, reports SSH_ENGINE_SUBSYSTEM_REPLY.
+ */
+static int
+engine_take_subsystem_open(
+	struct ssh_engine *engine,
+	struct ssh_channel *channel,
+	int refused,
+	uint32_t reason)
+{
+	struct ssh_engine_event *event;
+	struct ssh_reader reader;
+	const uint8_t *description;
+	size_t description_size;
+	uint32_t number;
+	int error;
+
+	number = channel->local_id;
+
+	/* A refusal frees the number at once. */
+	if (refused) {
+		engine->kinds[number] = ENGINE_KIND_NONE;
+		engine->held[number] = 0;
+		engine->subsystem_reply[number] = 0;
+		engine->subsystem_names[number][0] = '\0';
+
+		/* A channel the caller closed ends without an answer of its own. */
+		if (engine->close_wanted[number]) {
+			engine->close_wanted[number] = 0;
+			event = engine_event(engine, SSH_ENGINE_CHANNEL_CLOSED);
+			if (event != NULL)
+				event->channel = number;
+			engine_finish(engine);
+			return 0;
+		}
+
+		/* Reads the server's description (RFC 4254 5.1), read whole before. */
+		ssh_reader_init(&reader, engine->payload.data, engine->payload.size);
+		(void)ssh_reader_get_u8(&reader);
+		(void)ssh_reader_get_u32(&reader);
+		(void)ssh_reader_get_u32(&reader);
+		ssh_reader_get_string(&reader, &description, &description_size);
+
+		/* Tells the caller why, as OpenSSH's client words it. */
+		event = engine_event(engine, SSH_ENGINE_SUBSYSTEM_REPLY);
+		if (event != NULL) {
+			event->channel = number;
+			event->accepted = 0;
+			event->code = reason;
+			engine_copy_text(event->reason, sizeof(event->reason), "channel ");
+			engine_append_number(event->reason, sizeof(event->reason), number);
+			engine_append_safe(event->reason, sizeof(event->reason), (const uint8_t *)": open failed: ", 15);
+			engine_append_safe(event->reason, sizeof(event->reason), (const uint8_t *)engine_open_words(reason), strlen(engine_open_words(reason)));
+			if (description_size > 0) {
+				engine_append_safe(event->reason, sizeof(event->reason), (const uint8_t *)": ", 2);
+				engine_append_safe(event->reason, sizeof(event->reason), description, description_size);
+			}
+		}
+
+		/* A refused channel may have been the last one after the session. */
+		engine_finish(engine);
+		return 0;
+	}
+
+	/* A channel the caller closed before the answer is closed now; its close coming back ends it. */
+	engine->held[number] = 0;
+	if (engine->close_wanted[number]) {
+		ssh_buf_reset(&engine->out);
+		ssh_channel_put_close(channel, &engine->out);
+		error = engine_send_out(engine);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Asks the open session channel for the named subsystem (RFC 4254 6.5). */
+	ssh_buf_reset(&engine->out);
+	ssh_channel_put_subsystem(channel, engine->subsystem_names[number], &engine->out);
+	error = engine_send_out(engine);
+	if (error != 0)
+		return error;
+	engine->subsystem_reply[number] = 1;
+
+	/* Succeeded: the subsystem request is on its way. */
 	return 0;
 }
 
@@ -3490,17 +3689,24 @@ engine_count_kind(
 	return count;
 }
 
-/* Returns the most forwarded channels open at once: fewer on a connection that asks for X11, whose channels keep their room. */
+/* Returns the most forwarded channels open at once: fewer on a connection that asks for X11 or subsystems, whose channels keep their room. */
 static unsigned
 engine_forward_channels_max(
 	const struct ssh_engine *engine)
 {
-	/* X11 keeps its share of the table. */
-	if (engine->x11)
-		return ENGINE_FORWARD_CHANNELS_X11;
+	unsigned limit;
 
-	/* Every slot but the session's. */
-	return SSH_ENGINE_FORWARD_CHANNELS_MAX;
+	/* X11 keeps its share of the table. */
+	limit = SSH_ENGINE_FORWARD_CHANNELS_MAX;
+	if (engine->x11)
+		limit = ENGINE_FORWARD_CHANNELS_X11;
+
+	/* Subsystems keep their share when more_sessions is enabled. */
+	if (engine->more_sessions)
+		limit -= SSH_ENGINE_SUBSYSTEMS_MAX;
+
+	/* Returns the limit. */
+	return limit;
 }
 
 /* Appends a global request whose answer is awaited to the list (which the callers keep from overflowing). */

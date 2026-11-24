@@ -129,6 +129,12 @@
 /* The most forwarded TCP channels open at once on a connection that does not ask for X11 (32 on one that does). */
 #define SSH_ENGINE_FORWARD_CHANNELS_MAX	64U
 
+/* The most subsystem channels open at once. */
+#define SSH_ENGINE_SUBSYSTEMS_MAX	2U
+
+/* The window of a subsystem channel: the largest a channel keeps. */
+#define SSH_ENGINE_SUBSYSTEM_WINDOW	SSH_CHANNEL_WINDOW
+
 /* What an event says. */
 enum ssh_engine_event_kind {
 	/*
@@ -243,7 +249,19 @@ enum ssh_engine_event_kind {
 	 * OpenSSH's client shows them after "open failed: " (text made safe);
 	 * the number is then free.
 	 */
-	SSH_ENGINE_OPEN_REPLY = 16
+	SSH_ENGINE_OPEN_REPLY = 16,
+
+	/*
+	 * The server answered ssh_engine_open_subsystem for channel: accepted
+	 * 1 (the subsystem runs; the channel carries its bytes), or accepted 0
+	 * with code the open failure's reason (RFC 4254 5.1; 0 when the
+	 * channel opened and the subsystem request failed) and reason the
+	 * words OpenSSH's client shows.  A refused open frees the number at
+	 * once; a failed request is followed by SSH_ENGINE_CHANNEL_CLOSED when
+	 * the channel's close went both ways, and the number is free only
+	 * then.
+	 */
+	SSH_ENGINE_SUBSYSTEM_REPLY = 17
 };
 
 /* What to do with a host key after looking it up (ssh_engine_host_decide). */
@@ -350,6 +368,7 @@ struct ssh_engine_options {
 	int x11;
 	const char *x11_cookie;
 	int x11_single;
+	int more_sessions;
 };
 
 /*
@@ -476,6 +495,20 @@ int ssh_engine_forward_listen(struct ssh_engine *engine, const char *address, un
  * no free channel) or EPIPE.
  */
 int ssh_engine_open_direct(struct ssh_engine *engine, const char *host, unsigned port, const char *origin, unsigned origin_port, uint32_t *channel);
+
+/*
+ * Opens a "session" channel (RFC 4254 6.1) and asks it for the subsystem
+ * name (6.5, want_reply TRUE), such as "sftp".  Allowed once the user is
+ * authenticated and while the main session's channel is open (it holds
+ * channel 0, so the new one never takes that number).  *channel receives
+ * the number; SSH_ENGINE_SUBSYSTEM_REPLY tells how it went, and nothing is
+ * sent on it before.  Returns 0; EPERM on a connection whose options have
+ * more_sessions 0; EINVAL when not allowed now (before the login, no
+ * session, the session closing or over) or for a name that is empty,
+ * longer than SSH_CHANNEL_ENV_NAME_MAX or not printable; EAGAIN
+ * (SSH_ENGINE_SUBSYSTEMS_MAX open, or no free channel); or EPIPE.
+ */
+int ssh_engine_open_subsystem(struct ssh_engine *engine, const char *name, uint32_t *channel);
 
 /*
  * Sends bytes on a channel: SSH_ENGINE_SESSION_CHANNEL as
