@@ -74,3 +74,19 @@ in the environment (it is never put on a command line):
       -DMIKUTERM_DEBUGGABLE=OFF
 
 Keep the key store out of the source tree.
+
+X11 forwarding
+--------------
+
+mikuterm runs its X server on an in-process thread per SSH connection when `ForwardX11 yes` is
+set in `ssh/config`.
+
+- Top-level X windows open as tabs (menus, tooltips, and owned dialogs are composited over their
+  home tab); `X11WindowTabify` is ignored because Android has no separate OS windows.
+- `X11RootWindow WxH` opens the whole root window in a single tab with two-finger pan and pinch
+  zoom (snapping to the fit scale and 1.0).
+- `X11Render` is always CPU rendering and X11/Android clipboard bridging is not enabled.
+- `X11Scale` defaults to the screen density (`X11Scale auto`).
+- Developer note: the `io.noctvm.keiland.DEBUG_PINCH` and `io.noctvm.keiland.DEBUG_PAN` debug
+  broadcasts are accepted only when the package is debuggable (`MIKUTERM_DEBUGGABLE=OFF` disables
+  them in release builds).

@@ -22,6 +22,7 @@
 #include "apps/terminal-android/jni/mikuterm-android.h"
 
 #include "mikuterm.h"
+#include "x11-thread.h"
 
 #include "userland/desktop/terminal/run.h"
 
@@ -350,4 +351,21 @@ main_forget_passphrases(
 
 	/* Every passphrase kept goes. */
 	(void)mikuterm_passphrases_forget_all();
+}
+
+/*
+ * Returns the logical window size and X scale percent for the X server thread.
+ */
+void
+mikuterm_x11_screen(
+	unsigned *width,
+	unsigned *height,
+	unsigned *percent)
+{
+	unsigned scale;
+
+	scale = 0U;
+	keiland_android_screen(width, height, &scale);
+	if (percent != NULL)
+		*percent = (scale != 0U) ? (scale * 100U / KL_SCALE_BASE) : 0U;
 }

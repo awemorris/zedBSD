@@ -204,6 +204,12 @@ int android_places_unpack(ANativeActivity *activity);
 unsigned keiland_android_scale(void);
 
 /*
+ * Returns the current logical window size in pixels and the screen scale
+ * (96 = 100 %), or 0 if not yet laid out.  May be called from any thread.
+ */
+void keiland_android_screen(unsigned *width, unsigned *height, unsigned *scale);
+
+/*
  * Returns the looper of M, for a program that waits for more than the events.
  *
  * Called on M.

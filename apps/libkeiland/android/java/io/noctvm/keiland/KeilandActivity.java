@@ -8,9 +8,13 @@
 package io.noctvm.keiland;
 
 import android.app.NativeActivity;
+import android.content.BroadcastReceiver;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
+import android.content.pm.ApplicationInfo;
 import android.content.res.Configuration;
 import android.graphics.Insets;
 import android.os.Build;
@@ -41,6 +45,9 @@ public class KeilandActivity extends NativeActivity {
 	/** The system's clipboard, for the native code to read from. */
 	private ClipboardManager clipboard;
 	private ClipboardManager.OnPrimaryClipChangedListener clipListener;
+
+	/** Optional debug receiver for pinch/pan test intents when debuggable. */
+	private BroadcastReceiver debugReceiver;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -90,6 +97,34 @@ public class KeilandActivity extends NativeActivity {
 		KeilandBridge.attach(this);
 		sendConfig(getResources().getConfiguration());
 
+		/* Accepts debug touch intents only when the package is debuggable. */
+		if ((getApplicationInfo().flags & ApplicationInfo.FLAG_DEBUGGABLE) != 0) {
+			debugReceiver = new BroadcastReceiver() {
+				@Override
+				public void onReceive(Context context, Intent intent) {
+					String action = intent.getAction();
+					if ("io.noctvm.keiland.DEBUG_PINCH".equals(action)) {
+						int cx = intent.getIntExtra("cx", 400);
+						int cy = intent.getIntExtra("cy", 400);
+						float ratio = intent.getFloatExtra("ratio", 1.0f);
+						KeilandBridge.nativeDebugTouch(1, cx, cy, ratio);
+					} else if ("io.noctvm.keiland.DEBUG_PAN".equals(action)) {
+						int dx = intent.getIntExtra("dx", 0);
+						int dy = intent.getIntExtra("dy", 0);
+						KeilandBridge.nativeDebugTouch(0, dx, dy, 0.0f);
+					}
+				}
+			};
+			IntentFilter filter = new IntentFilter();
+			filter.addAction("io.noctvm.keiland.DEBUG_PINCH");
+			filter.addAction("io.noctvm.keiland.DEBUG_PAN");
+			if (Build.VERSION.SDK_INT >= 33) {
+				registerReceiver(debugReceiver, filter, Context.RECEIVER_EXPORTED);
+			} else {
+				registerReceiver(debugReceiver, filter);
+			}
+		}
+
 		onKeilandCreated();
 	}
 
@@ -112,6 +147,10 @@ public class KeilandActivity extends NativeActivity {
 
 	@Override
 	protected void onDestroy() {
+		if (debugReceiver != null) {
+			unregisterReceiver(debugReceiver);
+			debugReceiver = null;
+		}
 		keyBarWindow.dismiss();
 		if (clipboard != null) {
 			clipboard.removePrimaryClipChangedListener(clipListener);

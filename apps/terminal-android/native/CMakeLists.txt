@@ -70,6 +70,15 @@ target_compile_definitions(mikuterm_flags INTERFACE _GNU_SOURCE)
 target_compile_options(mikuterm_flags INTERFACE
 	$<$<COMPILE_LANGUAGE:C>:-std=gnu11 -Wall -Wextra -Werror -fvisibility=hidden>)
 
+# The X server core (CPU rendering, no Wayland backend).
+set(MIKUTERM_XSERVER_NAMES
+	client glyphs keymap protocol rootless selection window resource event property region
+	render-cpu render-vulkan present-vulkan gc draw shape colormap colornames input wm font cursor
+	xkb xinput rooted extension shape-ext xfixes sync render-ext render-composite coverage randr
+	xinerama win32/scale)
+list(TRANSFORM MIKUTERM_XSERVER_NAMES PREPEND ${MIKUTERM_ROOT}/userland/desktop/xserver/ OUTPUT_VARIABLE MIKUTERM_XSERVER_SOURCES)
+list(TRANSFORM MIKUTERM_XSERVER_SOURCES APPEND .c)
+
 # The libraries, each a static library of the tree's files.
 add_library(mikuterm_z STATIC ${MIKUTERM_Z_SOURCES})
 add_library(mikuterm_png STATIC ${MIKUTERM_PNG_SOURCES})
@@ -79,9 +88,11 @@ add_library(mikuterm_ssh STATIC ${MIKUTERM_SSH_SOURCES})
 add_library(keiland_common STATIC ${MIKUTERM_KEILAND_COMMON})
 add_library(keiland_android STATIC ${MIKUTERM_KEILAND_ANDROID})
 add_library(mikuterm_terminal STATIC ${MIKUTERM_TERMINAL_SOURCES})
-add_library(mikuterm_common STATIC ${MIKUTERM_COMMON_SOURCES} ${MIKUTERM_COMMON_NO_WSL_SOURCES} ${MIKUTERM_COMMON_NO_X11_SOURCES})
+add_library(mikuterm_xserver STATIC ${MIKUTERM_XSERVER_SOURCES})
+add_library(mikuterm_common STATIC ${MIKUTERM_COMMON_SOURCES} ${MIKUTERM_COMMON_NO_WSL_SOURCES}
+	${MIKUTERM_COMMON_X11_SOURCES} ${MIKUTERM_COMMON_X11_THREAD_SOURCES})
 foreach(library mikuterm_z mikuterm_png mikuterm_truetype mikuterm_crypto mikuterm_ssh keiland_common keiland_android
-	mikuterm_terminal mikuterm_common)
+	mikuterm_terminal mikuterm_xserver mikuterm_common)
 	target_link_libraries(${library} PRIVATE mikuterm_flags)
 endforeach()
 target_include_directories(keiland_android PRIVATE ${MIKUTERM_ROOT}/apps/libkeiland/android)
@@ -90,13 +101,14 @@ target_link_libraries(mikuterm_ssh PUBLIC mikuterm_crypto)
 target_link_libraries(keiland_common PUBLIC mikuterm_truetype mikuterm_png)
 target_link_libraries(keiland_android PUBLIC keiland_common)
 target_link_libraries(mikuterm_terminal PUBLIC keiland_android mikuterm_ssh)
+target_link_libraries(mikuterm_xserver PUBLIC keiland_common)
 
 # The files every mikuterm shares (the settings, the connections, the launch screen and the settings' tab).  This
-# build has no WSL, no X11 forwarding and no local programs; Windows' _stricmp is the C library's strcasecmp.
+# build has no WSL, X11 forwarding in a thread and no local programs; Windows' _stricmp is the C library's strcasecmp.
 target_include_directories(mikuterm_common PRIVATE ${MIKUTERM_COMMON_DIR})
-target_compile_definitions(mikuterm_common PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=0 MIKUTERM_HAVE_X11=0 MIKUTERM_HAVE_KEY_PASTE=1
+target_compile_definitions(mikuterm_common PRIVATE MIKUTERM_HAVE_WSL=0 MIKUTERM_HAVE_OPENER=0 MIKUTERM_HAVE_X11=1 MIKUTERM_HAVE_KEY_PASTE=1
 	_stricmp=strcasecmp)
-target_link_libraries(mikuterm_common PUBLIC mikuterm_terminal)
+target_link_libraries(mikuterm_common PUBLIC mikuterm_terminal mikuterm_xserver)
 
 set(MIKUTERM_ANDROID_SOURCES ${MIKUTERM_ROOT}/apps/terminal-android/jni/entry.c)
 if(MIKUTERM_ANDROID_HELLO)
@@ -130,11 +142,11 @@ target_compile_definitions(mikuterm PRIVATE
 	MIKUTERM_ANDROID_ECHO=${MIKUTERM_ANDROID_ECHO_VALUE}
 	MIKUTERM_HAVE_WSL=0
 	MIKUTERM_HAVE_OPENER=0
-	MIKUTERM_HAVE_X11=0
+	MIKUTERM_HAVE_X11=1
 	MIKUTERM_HAVE_KEY_PASTE=1
 	_stricmp=strcasecmp)
 target_compile_options(mikuterm PRIVATE -std=gnu11 -Wall -Wextra -Werror -fvisibility=hidden)
-target_link_libraries(mikuterm PRIVATE mikuterm_common mikuterm_terminal keiland_android)
+target_link_libraries(mikuterm PRIVATE mikuterm_common mikuterm_terminal keiland_android mikuterm_xserver)
 
 # The system's native-activity loader looks the entry point up in the library, and the runtime
 # looks JNI_OnLoad up, so both stay in the library's symbols even though nothing in the library

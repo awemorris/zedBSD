@@ -766,6 +766,40 @@ tab_input(
 	case TERMINAL_PICTURE_LEAVE:
 		tab_queue(tab, X11_LINK_INPUT_LEAVE, 0U, 0U, 0U, NULL);
 		break;
+	case TERMINAL_PICTURE_TOUCH_DOWN:
+	case TERMINAL_PICTURE_TOUCH_MOVE:
+	case TERMINAL_PICTURE_TOUCH_UP:
+	case TERMINAL_PICTURE_TOUCH_CANCEL: {
+		struct x11_touch_action actions[8];
+		unsigned touch_kind;
+		unsigned count;
+		unsigned i;
+		int32_t ax;
+		int32_t ay;
+
+		touch_kind = X11_TOUCH_DOWN + (event->kind - TERMINAL_PICTURE_TOUCH_DOWN);
+		count = x11_touch_take(&tab->touch, touch_kind, event->id, event->x, event->y, kl_clock_us(), actions, 8U);
+		for (i = 0U; i < count; i++) {
+			ax = x11_win32_scale_to_x(actions[i].x, tab->scale);
+			ay = x11_win32_scale_to_x(actions[i].y, tab->scale);
+			if (actions[i].kind == X11_TOUCH_MOTION) {
+				tab_pointer(tab, 0U, 0, ax, ay);
+			} else if (actions[i].kind == X11_TOUCH_BUTTON) {
+				tab_pointer(tab, actions[i].button, actions[i].pressed, ax, ay);
+			} else if (actions[i].kind == X11_TOUCH_WHEEL) {
+				tab_wheel(tab, &tab->wheel_y, (double)actions[i].notches * TAB_WHEEL_NOTCH,
+					  TAB_X_WHEEL_UP, TAB_X_WHEEL_DOWN, ax, ay);
+			} else if (actions[i].kind == X11_TOUCH_PAN) {
+				tab_queue(tab, X11_LINK_INPUT_PAN, 0U, (uint32_t)actions[i].dx, (uint32_t)actions[i].dy, NULL);
+			} else if (actions[i].kind == X11_TOUCH_PINCH) {
+				uint32_t ratio_q16;
+
+				ratio_q16 = (uint32_t)(actions[i].scale_ratio * 65536.0 + 0.5);
+				tab_queue(tab, X11_LINK_INPUT_PINCH, ratio_q16, (uint32_t)actions[i].x, (uint32_t)actions[i].y, NULL);
+			}
+		}
+		break;
+	}
 	default:
 		/* An input the window does not take. */
 		return;

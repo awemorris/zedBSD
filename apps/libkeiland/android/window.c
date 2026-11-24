@@ -24,12 +24,21 @@
 #include "apps/libkeiland/android/bridge-jni.h"
 
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* The size a window has before the system gives its own, and the least it takes. */
 #define WINDOW_FIRST_WIDTH	800U
 #define WINDOW_FIRST_HEIGHT	600U
+
+/*
+ * Atomic snapshot of the current logical window size and scale (96 = 100 %)
+ * published on layout so worker threads can read it without locking.
+ */
+static atomic_uint screen_width_atomic;
+static atomic_uint screen_height_atomic;
+static atomic_uint screen_scale_atomic;
 
 static void window_input(struct kl_window *window, unsigned kind, int pressed);
 static void window_purge(struct kl_app *app, struct kl_window *window);
@@ -413,6 +422,11 @@ android_window_layout(
 		android_titlebar_resize(window);
 		if (changed || window == app->windows)
 			window_input(window, KL_WINDOW_RESIZE, 0);
+		if (window == app->windows) {
+			atomic_store(&screen_width_atomic, width);
+			atomic_store(&screen_height_atomic, height);
+			atomic_store(&screen_scale_atomic, app->scale != 0U ? app->scale : KL_SCALE_BASE);
+		}
 	}
 
 	/* The window shown, of the size it was, is painted again from its last frame (the native window may be new and empty). */
@@ -448,6 +462,23 @@ android_window_exists(
 
 	/* Not one of them. */
 	return 0;
+}
+
+/*
+ * Reads the latest logical window size and scale (96 = 100 %) from any thread.
+ */
+void
+keiland_android_screen(
+	unsigned *width,
+	unsigned *height,
+	unsigned *scale)
+{
+	if (width != NULL)
+		*width = atomic_load(&screen_width_atomic);
+	if (height != NULL)
+		*height = atomic_load(&screen_height_atomic);
+	if (scale != NULL)
+		*scale = atomic_load(&screen_scale_atomic);
 }
 
 /* Queues an input of a kind with no more than the kind and whether it is pressed (a focus, 1 when it came). */
