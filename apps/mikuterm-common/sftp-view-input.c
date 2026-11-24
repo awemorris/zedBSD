@@ -816,11 +816,11 @@ input_handle_touch_move(
 			view->touch_moved = 1;
 	}
 	if (view->touch_moved && !view->touch_long_pressed && view->ui != NULL)
-		(void)kl_ui_wheel(view->ui, 0.0, (double)(uy - view->touch_last_y), kl_clock_us());
+		(void)kl_ui_wheel(view->ui, 0.0, (double)(view->touch_last_y - uy), kl_clock_us());
 	view->touch_last_y = uy;
 }
 
-/* Handles touch up: single-tap navigates folders or toggles file selection. */
+/* Handles touch up: single-tap navigates folders or selects the tapped file. */
 static void
 input_handle_touch_up(
 	struct sftp_view *view,
@@ -866,9 +866,13 @@ input_handle_touch_up(
 				if (view->rows[idx].entry.is_dir || view->rows[idx].entry.link_is_dir) {
 					input_activate_row(view, (size_t)idx);
 				} else {
-					view->rows[idx].selected = !view->rows[idx].selected;
+					size_t i;
+
+					for (i = 0U; i < view->row_count; i++)
+						view->rows[i].selected = (i == (size_t)idx) ? 1 : 0;
 					view->focus_row = (long)idx;
 					view->anchor_row = (long)idx;
+					view->dirty = 1;
 				}
 			}
 		}

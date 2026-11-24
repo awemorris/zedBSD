@@ -824,15 +824,40 @@ sftp_view_download_selected(
 	char downloads[MIKUTERM_PATH_MAX];
 	char remote[SSH_SFTP_PATH_MAX];
 	size_t i;
+	int has_selection;
 	int is_dir;
 	int error;
 
-	/* Resolves the local Downloads folder before queueing downloads. */
+	/* Validates view/worker and checks whether any rows are selected. */
 	if (view == NULL || view->worker == NULL)
 		return;
-	error = sftp_local_downloads_dir(downloads, sizeof(downloads));
-	if (error != 0) {
-		sftp_view_show_error(view, "Download failed", "Could not locate the Downloads folder.");
+	has_selection = 0;
+	for (i = 0U; i < view->row_count; i++) {
+		if (view->rows[i].selected) {
+			has_selection = 1;
+			break;
+		}
+	}
+	if (!has_selection)
+		return;
+
+	/* Resolves the local Downloads folder before queueing downloads. */
+	if (view->download_dir[0] != '\0') {
+		(void)snprintf(downloads, sizeof(downloads), "%s", view->download_dir);
+	} else {
+		error = sftp_local_downloads_dir(downloads, sizeof(downloads));
+		if (error != 0) {
+			sftp_view_show_error(view, "Download failed", "Could not locate the Downloads folder.");
+			return;
+		}
+		(void)snprintf(view->download_dir, sizeof(view->download_dir), "%s", downloads);
+	}
+
+	/* Prompts for a SAF folder on platforms that provide a folder picker. */
+	if (view->on_change_download_dir != NULL &&
+	    strncmp(downloads, "saf-tree://", 11U) != 0) {
+		view->pending_download = 1;
+		view->on_change_download_dir(view->platform_data, view);
 		return;
 	}
 
@@ -849,6 +874,28 @@ sftp_view_download_selected(
 
 	/* Marks the view dirty to show the transfer bar. */
 	view->dirty = 1;
+}
+
+/*
+ * Updates the view's download destination and resumes any pending download.
+ */
+void
+sftp_view_set_download_dir(
+	struct sftp_view *view,
+	const char *dir)
+{
+	int pending;
+
+	if (view == NULL)
+		return;
+	pending = view->pending_download;
+	view->pending_download = 0;
+	if (dir == NULL || dir[0] == '\0')
+		return;
+	(void)snprintf(view->download_dir, sizeof(view->download_dir), "%s", dir);
+	view->dirty = 1;
+	if (pending)
+		sftp_view_download_selected(view);
 }
 
 /*

@@ -25,7 +25,6 @@
 static int checks;
 static int failures;
 static uint64_t g_now_us = 1000000ULL;
-static int g_external_drag_calls;
 static char g_navigated_path[256];
 static unsigned g_download_btn_flags;
 static int g_upload_clicked;
@@ -34,6 +33,11 @@ static char g_captured_texts[32][512];
 static size_t g_captured_count;
 static int g_dummy_gesture;
 static int g_dummy_scroller;
+static int g_dummy_worker;
+static int g_change_download_dir_calls;
+static int g_enqueue_download_calls;
+static char g_last_download_remote[512];
+static char g_last_download_local[512];
 
 #define CHECK(cond) do { \
 	checks++; \
@@ -47,8 +51,13 @@ static int g_dummy_scroller;
 
 uint64_t kl_clock_us(void) { return g_now_us; }
 uint64_t kl_monotonic_us(void) { return g_now_us; }
+int kl_mutex_init(struct kl_mutex *m) { (void)m; return 0; }
+void kl_mutex_destroy(struct kl_mutex *m) { (void)m; }
 void kl_mutex_lock(struct kl_mutex *m) { (void)m; }
 void kl_mutex_unlock(struct kl_mutex *m) { (void)m; }
+int kl_app_post(struct kl_app *a, unsigned c, void *d) { (void)a; (void)c; (void)d; return 0; }
+int kl_text_open(struct kl_text *t, const char *p, const char *f) { (void)t; (void)p; (void)f; return 0; }
+void kl_text_close(struct kl_text *t) { (void)t; }
 
 int
 kl_text_center(unsigned pixels, int y, int height)
@@ -216,45 +225,53 @@ unsigned kl_field(struct kl_ui *u, const struct kl_style *s, uint32_t id, const 
 void kl_field_set(struct kl_field *f, const char *t) { (void)f; (void)t; }
 void kl_breadcrumb(struct kl_ui *u, const struct kl_style *s, uint32_t id, const struct kl_rect *r, const char *p, void *cb, void *d) { (void)u; (void)s; (void)id; (void)r; (void)p; (void)cb; (void)d; }
 
-void sftp_view_request_external_drag(struct sftp_view *v) { (void)v; g_external_drag_calls++; }
-void sftp_view_refresh_all(struct sftp_view *v) { (void)v; }
-void sftp_view_begin_rename(struct sftp_view *v) { (void)v; }
-void sftp_view_begin_delete(struct sftp_view *v) { (void)v; }
-void sftp_view_navigate_up(struct sftp_view *v) { (void)v; }
-void sftp_view_navigate_back(struct sftp_view *v) { (void)v; }
-void sftp_view_navigate_forward(struct sftp_view *v) { (void)v; }
-void sftp_view_select_all(struct sftp_view *v) { (void)v; }
-void sftp_view_save_split(const struct sftp_view *v) { (void)v; }
-void sftp_view_sort_rows(struct sftp_view *v) { (void)v; }
-void sftp_view_toggle_tree_node(struct sftp_view *v, struct sftp_tree_node *n) { (void)v; (void)n; }
-void sftp_view_navigate(struct sftp_view *v, const char *p, int h, int f) { (void)v; (void)h; (void)f; if (p != NULL) (void)snprintf(g_navigated_path, sizeof(g_navigated_path), "%s", p); }
-void sftp_view_open_more_menu(struct sftp_view *v, int ux, int uy) { (void)v; (void)ux; (void)uy; g_more_opened++; }
-void sftp_view_download_selected(struct sftp_view *v) { (void)v; }
-void sftp_view_move_selected_to(struct sftp_view *v, const char *p) { (void)v; (void)p; }
-void sftp_view_execute_ctx(struct sftp_view *v, int id) { (void)v; (void)id; }
-void sftp_view_commit_rename(struct sftp_view *v) { (void)v; }
-void sftp_view_commit_dialog(struct sftp_view *v) { (void)v; }
-void sftp_view_cancel_dialog(struct sftp_view *v) { (void)v; }
-void sftp_view_resolve_conflict(struct sftp_view *v, enum sftp_conflict_action a) { (void)v; (void)a; }
-void sftp_view_begin_new_folder(struct sftp_view *v) { (void)v; }
+int sftp_view_platform_confirm_close(size_t active_transfers) { (void)active_transfers; return 1; }
 int sftp_link_is_ended(struct sftp_link *l) { (void)l; return 0; }
+void sftp_link_retain(struct sftp_link *l) { (void)l; }
+void sftp_link_release(struct sftp_link *l) { (void)l; }
+void sftp_dir_listing_free(struct sftp_dir_listing *l) { (void)l; }
+int sftp_local_downloads_dir(char *p, size_t s) { (void)snprintf(p, s, "/tmp/downloads"); return 0; }
+int sftp_local_stat(const char *p, struct sftp_local_entry *e) { (void)p; (void)e; return -1; }
+int mikuterm_path(char *p, size_t s, const char *r) { (void)p; (void)s; (void)r; return -1; }
+int mikuterm_file_read(const char *p, size_t m, char **o, size_t *s) { (void)p; (void)m; (void)o; (void)s; return -1; }
+int mikuterm_file_replace(const char *p, const void *d, size_t s) { (void)p; (void)d; (void)s; return -1; }
+int mikuterm_conf_set(const char *t, size_t ts, const char *k, const char *v, char **o, size_t *os) { (void)t; (void)ts; (void)k; (void)v; (void)o; (void)os; return -1; }
+void mikuterm_session_detach_sftp(struct mikuterm_session *s, const struct terminal_connection *vc) { (void)s; (void)vc; }
+void terminal_clipboard_set(struct terminal_window *w, const char *s, size_t l) { (void)w; (void)s; (void)l; }
+int sftp_worker_start(struct sftp_link *l, int p, void (*cb)(void *), void *d, struct sftp_worker **out) { (void)l; (void)p; (void)cb; (void)d; *out = NULL; return -1; }
+void sftp_worker_stop(struct sftp_worker *w) { (void)w; }
+void sftp_worker_status(struct sftp_worker *w, enum sftp_worker_state *st, char *h, size_t hc, char *e, size_t ec) { (void)w; if (st) *st = SFTP_WORKER_READY; (void)h; (void)hc; (void)e; (void)ec; }
+int sftp_worker_list_dir(struct sftp_worker *w, const char *p, int f, struct sftp_dir_listing **o) { (void)w; (void)f; (void)o; if (p != NULL) (void)snprintf(g_navigated_path, sizeof(g_navigated_path), "%s", p); return -1; }
+int sftp_worker_rename(struct sftp_worker *w, const char *o, const char *n, char *e, size_t c) { (void)w; (void)o; (void)n; (void)e; (void)c; return 0; }
+int sftp_worker_delete_count(struct sftp_worker *w, const char *p, size_t *items, size_t *folders, int *is_sym) { (void)w; (void)p; (void)items; (void)folders; (void)is_sym; return 0; }
+int sftp_worker_enqueue_download(struct sftp_worker *w, const char *r, const char *l, int d, uint64_t *id) {
+	(void)w;
+	(void)d;
+	(void)id;
+	g_enqueue_download_calls++;
+	if (r != NULL)
+		(void)snprintf(g_last_download_remote, sizeof(g_last_download_remote), "%s", r);
+	if (l != NULL)
+		(void)snprintf(g_last_download_local, sizeof(g_last_download_local), "%s", l);
+	return 0;
+}
+int sftp_worker_transfers(struct sftp_worker *w, struct sftp_transfer_snapshot **o, size_t *c, size_t *a) { (void)w; *o = NULL; *c = 0U; *a = 0U; return 0; }
+void sftp_worker_transfers_free(struct sftp_transfer_snapshot *t) { (void)t; }
 void sftp_worker_retry(struct sftp_worker *w) { (void)w; }
 void sftp_worker_resolve_conflict(struct sftp_worker *w, uint64_t id, enum sftp_conflict_action a) { (void)w; (void)id; (void)a; }
 int sftp_worker_delete(struct sftp_worker *w, const char *p, char *e, size_t c) { (void)w; (void)p; (void)e; (void)c; return 0; }
 int sftp_worker_mkdir(struct sftp_worker *w, const char *p, char *e, size_t c) { (void)w; (void)p; (void)e; (void)c; return 0; }
-int sftp_local_stat(const char *p, struct sftp_local_entry *e) { (void)p; (void)e; return -1; }
-void sftp_view_show_error(struct sftp_view *v, const char *t, const char *m) { (void)v; (void)t; (void)m; }
-void
-sftp_view_sanitize_text(const char *s, char *out, size_t cap)
-{
-	if (s == NULL)
-		s = "";
-	(void)snprintf(out, cap, "%s", s);
-}
-void sftp_view_format_size(uint64_t b, char *out, size_t cap) { (void)snprintf(out, cap, "%llu B", (unsigned long long)b); }
 int sftp_worker_enqueue_upload(struct sftp_worker *w, const char *l, const char *r, int d, uint64_t *id) { (void)w; (void)l; (void)r; (void)d; (void)id; return 0; }
 void sftp_worker_cancel_transfer(struct sftp_worker *w, uint64_t id) { (void)w; (void)id; }
 void sftp_worker_cancel_all(struct sftp_worker *w) { (void)w; }
+
+static void
+mock_on_change_download_dir(void *data, struct sftp_view *view)
+{
+	(void)data;
+	(void)view;
+	g_change_download_dir_calls++;
+}
 
 int
 sftp_transfer_join_remote(char *out, size_t cap, const char *dir, const char *name)
@@ -389,7 +406,6 @@ main(void)
 	view.ctx_open = 0;
 
 	/* 3. Drag-and-drop trigger on motion outside view bounds. */
-	g_external_drag_calls = 0;
 	/* Sends a single wheel event over the file list. */
 	memset(&pev, 0, sizeof(pev));
 	pev.kind = TERMINAL_PICTURE_BUTTON;
@@ -412,8 +428,8 @@ main(void)
 	pev.x = -10;
 	pev.y = view.rect_list.y + 10;
 	sftp_view_handle_input(&view, &pev);
-	CHECK(g_external_drag_calls == 1);
 	CHECK(view.drag_active == 0);
+	CHECK(view.drag_pending == 0);
 
 	/* 4. Download destination path shown in transfer bar (active and done). */
 	view.text_ready = 1;
@@ -440,20 +456,48 @@ main(void)
 	CHECK(sftp_view_draw_frame(&view, &state, pixels, w, h) == 0);
 	CHECK(has_captured_substring("Saved to C:\\Users\\test\\Downloads\\alpha.txt"));
 
-	/* 5. Touch UX: single-tap file toggles selection, folder navigates, long-press opens menu. */
+	/* 5. Touch UX: swipe scroll direction, exclusive tap selection, folder nav, long-press. */
+	view.worker = (struct sftp_worker *)&g_dummy_worker;
 	view.worker_state = SFTP_WORKER_READY;
-	view.row_count = 2U;
+	view.file_list.scroll.y = 0.0;
+	CHECK(sftp_view_draw_frame(&view, &state, pixels, w, h) == 0);
+	{
+		double scroll_before = view.file_list.scroll.y;
+
+		/* Touch swipe up (uy < start_y) scrolls down (scroll.y increases). */
+		memset(&pev, 0, sizeof(pev));
+		pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
+		pev.code = 1U;
+		pev.x = view.rect_list.x + 20;
+		pev.y = view.rect_list.y + 120;
+		sftp_view_handle_input(&view, &pev);
+		pev.kind = TERMINAL_PICTURE_TOUCH_MOVE;
+		pev.y = view.rect_list.y + 120 - SFTP_TOUCH_SLOP - 40;
+		sftp_view_handle_input(&view, &pev);
+		pev.kind = TERMINAL_PICTURE_TOUCH_UP;
+		sftp_view_handle_input(&view, &pev);
+		g_now_us += 100000ULL;
+		CHECK(sftp_view_draw_frame(&view, &state, pixels, w, h) == 0);
+		CHECK(view.file_list.scroll.y > scroll_before);
+	}
+
+	view.row_count = 3U;
 	rows[0].entry.is_dir = 0;
 	(void)snprintf(rows[0].entry.name, sizeof(rows[0].entry.name), "file.txt");
 	rows[0].selected = 0;
-	rows[1].entry.is_dir = 1;
-	(void)snprintf(rows[1].entry.name, sizeof(rows[1].entry.name), "docs");
+	rows[1].entry.is_dir = 0;
+	(void)snprintf(rows[1].entry.name, sizeof(rows[1].entry.name), "other.txt");
 	rows[1].selected = 0;
+	rows[2].entry.is_dir = 1;
+	(void)snprintf(rows[2].entry.name, sizeof(rows[2].entry.name), "docs");
+	rows[2].selected = 0;
 	view.file_list.scroll.y = 0.0;
+	view.transfers = NULL;
+	view.transfer_count = 0U;
 	CHECK(sftp_view_draw_frame(&view, &state, pixels, w, h) == 0);
 	CHECK((g_download_btn_flags & KL_BUTTON_DISABLED) != 0U);
 
-	/* Single-tap file row 0: toggles selection on and enables Download button. */
+	/* Single-tap file row 0: selects row 0 and enables Download button. */
 	memset(&pev, 0, sizeof(pev));
 	pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
 	pev.code = 1U;
@@ -463,21 +507,50 @@ main(void)
 	pev.kind = TERMINAL_PICTURE_TOUCH_UP;
 	sftp_view_handle_input(&view, &pev);
 	CHECK(rows[0].selected == 1);
+	CHECK(rows[1].selected == 0);
 	CHECK(sftp_view_draw_frame(&view, &state, pixels, w, h) == 0);
 	CHECK((g_download_btn_flags & KL_BUTTON_DISABLED) == 0U);
 
-	/* Second single-tap on file row 0: toggles selection off. */
+	/* Single-tap file row 1: exclusive selection moves to row 1 (deselects row 0). */
 	pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
+	pev.y = view.rect_list.y + SFTP_ROW_HEIGHT + 8;
 	sftp_view_handle_input(&view, &pev);
 	pev.kind = TERMINAL_PICTURE_TOUCH_UP;
 	sftp_view_handle_input(&view, &pev);
 	CHECK(rows[0].selected == 0);
+	CHECK(rows[1].selected == 1);
 
-	/* Single-tap on folder row 1: navigates into folder. */
+	/* 6. First download with mediastore://downloads prompts SAF picker and completes after set_download_dir. */
+	(void)snprintf(view.download_dir, sizeof(view.download_dir), "mediastore://downloads");
+	view.on_change_download_dir = mock_on_change_download_dir;
+	g_change_download_dir_calls = 0;
+	g_enqueue_download_calls = 0;
+	sftp_view_download_selected(&view);
+	CHECK(g_change_download_dir_calls == 1);
+	CHECK(view.pending_download == 1);
+	CHECK(g_enqueue_download_calls == 0);
+
+	/* Completing the SAF picker sets download_dir and enqueues the pending download. */
+	sftp_view_set_download_dir(&view, "saf-tree://1");
+	CHECK(view.pending_download == 0);
+	CHECK(strcmp(view.download_dir, "saf-tree://1") == 0);
+	CHECK(g_enqueue_download_calls == 1);
+	CHECK(strcmp(g_last_download_remote, "/home/user/other.txt") == 0);
+	CHECK(strcmp(g_last_download_local, "saf-tree://1") == 0);
+
+	/* Cancelling the SAF picker clears pending_download without enqueuing. */
+	(void)snprintf(view.download_dir, sizeof(view.download_dir), "mediastore://downloads");
+	sftp_view_download_selected(&view);
+	CHECK(view.pending_download == 1);
+	sftp_view_set_download_dir(&view, NULL);
+	CHECK(view.pending_download == 0);
+	CHECK(g_enqueue_download_calls == 1);
+
+	/* Single-tap on folder row 2: navigates into folder. */
 	g_navigated_path[0] = '\0';
 	pev.kind = TERMINAL_PICTURE_TOUCH_DOWN;
 	pev.x = view.rect_list.x + 20;
-	pev.y = view.rect_list.y + SFTP_ROW_HEIGHT + 8;
+	pev.y = view.rect_list.y + 2 * SFTP_ROW_HEIGHT + 8;
 	sftp_view_handle_input(&view, &pev);
 	pev.kind = TERMINAL_PICTURE_TOUCH_UP;
 	sftp_view_handle_input(&view, &pev);

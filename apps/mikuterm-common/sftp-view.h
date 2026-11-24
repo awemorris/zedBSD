@@ -275,6 +275,8 @@ struct sftp_view {
 	void (*on_upload)(void *data, struct sftp_view *view);
 	void (*on_change_download_dir)(void *data, struct sftp_view *view);
 	void *platform_data;
+	char download_dir[MIKUTERM_PATH_MAX];
+	int pending_download;
 
 	/* Cached hit rectangles (logical units) for input and drop hit-testing. */
 	struct kl_rect rect_tree;
@@ -307,6 +309,7 @@ void sftp_view_commit_rename(struct sftp_view *view);
 void sftp_view_begin_new_folder(struct sftp_view *view);
 void sftp_view_begin_delete(struct sftp_view *view);
 void sftp_view_download_selected(struct sftp_view *view);
+void sftp_view_set_download_dir(struct sftp_view *view, const char *dir);
 void sftp_view_select_all(struct sftp_view *view);
 void sftp_view_toggle_hidden(struct sftp_view *view);
 void sftp_view_show_error(struct sftp_view *view, const char *title, const char *message);
