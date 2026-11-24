@@ -1252,15 +1252,21 @@ mikuterm_session_can_open_sftp(
 	const struct mikuterm_session *session;
 	int allowed;
 
+	/* Rejects non-SSH sessions, process sessions, and connections with SFTP disabled. */
 	if (connection == NULL || connection->ops != &connection_ops)
 		return 0;
 	session = (const struct mikuterm_session *)connection;
 	if (session->process != NULL || !session->sftp)
 		return 0;
 
+	/* Checks under the session lock whether SFTP is ready and no tab is open. */
 	kl_mutex_lock((struct kl_mutex *)&session->lock);
+
 	allowed = session->sftp_ready && !session->closing && session->sftp_view == NULL;
+
 	kl_mutex_unlock((struct kl_mutex *)&session->lock);
+
+	/* Returns whether an SFTP tab may be opened. */
 	return allowed;
 }
 
@@ -1276,11 +1282,14 @@ mikuterm_session_open_sftp(
 {
 	struct mikuterm_session *session;
 
+	/* Validates the SSH session, view connection, and relay pointer. */
 	if (connection == NULL || connection->ops != &connection_ops || view_connection == NULL || link == NULL)
 		return EINVAL;
 	session = (struct mikuterm_session *)connection;
 
+	/* Attaches the SFTP view and relay if the session is ready and idle. */
 	kl_mutex_lock(&session->lock);
+
 	if (!session->sftp_ready || session->closing || session->sftp_view != NULL) {
 		kl_mutex_unlock(&session->lock);
 		return EBUSY;
@@ -1294,12 +1303,15 @@ mikuterm_session_open_sftp(
 	session->sftp_view = view_connection;
 	session->sftp_pending_tab = view_connection;
 	session->references++;
+
 	kl_mutex_unlock(&session->lock);
 
 	/* Requests the SFTP subsystem channel and wakes the network and UI threads. */
 	sftp_link_request_open(link);
 	kl_socket_waker_ring(session->waker);
 	session_post(session);
+
+	/* Succeeded: the SFTP tab is queued and the subsystem open is requested. */
 	return 0;
 }
 
@@ -1312,14 +1324,21 @@ mikuterm_session_detach_sftp(
 	struct mikuterm_session *session,
 	const struct terminal_connection *view_connection)
 {
+	/* Ignores a NULL session. */
 	if (session == NULL)
 		return;
+
+	/* Clears the active and pending SFTP view pointers if they match. */
 	kl_mutex_lock(&session->lock);
+
 	if (session->sftp_view == view_connection)
 		session->sftp_view = NULL;
 	if (session->sftp_pending_tab == view_connection)
 		session->sftp_pending_tab = NULL;
+
 	kl_mutex_unlock(&session->lock);
+
+	/* Releases the session reference held by the SFTP view. */
 	session_release(session);
 }
 
@@ -1334,12 +1353,19 @@ mikuterm_session_sftp_view(
 	struct mikuterm_session *session;
 	struct terminal_connection *view;
 
+	/* Ignores non-SSH connections. */
 	if (connection == NULL || connection->ops != &connection_ops)
 		return NULL;
 	session = (struct mikuterm_session *)connection;
+
+	/* Reads the attached SFTP view under the session lock. */
 	kl_mutex_lock(&session->lock);
+
 	view = session->sftp_view;
+
 	kl_mutex_unlock(&session->lock);
+
+	/* Returns the attached view connection, or NULL. */
 	return view;
 }
 
@@ -1354,11 +1380,14 @@ mikuterm_session_host(
 {
 	const struct mikuterm_session *session;
 
+	/* Clears the output buffer when non-empty. */
 	if (size == 0U)
 		return;
 	host[0] = '\0';
 	if (connection == NULL || connection->ops != &connection_ops)
 		return;
 	session = (const struct mikuterm_session *)connection;
+
+	/* Copies the target host name. */
 	(void)snprintf(host, size, "%s", session->host);
 }

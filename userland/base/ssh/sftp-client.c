@@ -227,6 +227,8 @@ sftp_client_next(
 	uint32_t id;
 	uint32_t read_length;
 	unsigned slot;
+	int in_flight;
+	int matches;
 	int error;
 
 	/* Clears any leftover NAME iteration and initializes the reply. */
@@ -244,14 +246,22 @@ sftp_client_next(
 	/* Reads the packet type byte. */
 	ssh_reader_init(&reader, client->packet.data, client->packet.size);
 	type = ssh_reader_get_u8(&reader);
-	if (ssh_reader_error(&reader) != 0)
+	error = ssh_reader_error(&reader);
+	if (error != 0)
 		return EPROTO;
 
-	/* The first packet from the server must be SSH_FXP_VERSION. */
+	/* Checks whether any bytes remain and handles the initial handshake. */
 	if (!client->version_seen) {
 		if (type != SSH_FXP_VERSION)
 			return EPROTO;
-		return client_parse_version(client, &reader, reply);
+
+		/* Parses the server's version packet. */
+		error = client_parse_version(client, &reader, reply);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the version handshake reply is ready. */
+		return 0;
 	}
 
 	/* Rejects unexpected handshake packets after VERSION. */
@@ -260,13 +270,18 @@ sftp_client_next(
 
 	/* Reads the request-id and matches it against in-flight requests. */
 	id = ssh_reader_get_u32(&reader);
-	if (ssh_reader_error(&reader) != 0)
+	error = ssh_reader_error(&reader);
+	if (error != 0)
 		return EPROTO;
-	if (!client_id_in_flight(client, id, &slot))
+
+	/* Verifies that the request-id is currently awaiting a reply. */
+	in_flight = client_id_in_flight(client, id, &slot);
+	if (!in_flight)
 		return EPROTO;
 
 	/* Rejects a reply type that cannot answer the matching request. */
-	if (!client_reply_matches(client->inflight[slot].type, type))
+	matches = client_reply_matches(client->inflight[slot].type, type);
+	if (!matches)
 		return EPROTO;
 
 	/* Retires the in-flight slot now that its reply arrived. */
@@ -332,12 +347,14 @@ sftp_client_name_next(
 	ssh_reader_get_string(&client->name_reader, name, name_size);
 	ssh_reader_get_string(&client->name_reader, long_name, long_size);
 	error = client_parse_attrs(&client->name_reader, attrs);
-	if (error != 0 || ssh_reader_error(&client->name_reader) != 0) {
+	if (error == 0)
+		error = ssh_reader_error(&client->name_reader);
+	if (error != 0) {
 		client->name_left = 0;
 		return EAGAIN;
 	}
 
-	/* Advances to the next entry. */
+	/* Succeeded: advances to the next entry. */
 	client->name_left--;
 	return 0;
 }
@@ -375,7 +392,8 @@ sftp_client_open_file(
 	int error;
 
 	/* Validates the path and reserves an in-flight slot. */
-	if (client_check_path(path, size) != 0)
+	error = client_check_path(path, size);
+	if (error != 0)
 		return EINVAL;
 	error = client_begin_request(client, SSH_FXP_OPEN, 0U, &slot, &start);
 	if (error != 0)
@@ -393,7 +411,12 @@ sftp_client_open_file(
 	client_put_attrs(attrs, &client->out);
 
 	/* Finalizes the packet length and commits the in-flight slot. */
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the open request is queued. */
+	return 0;
 }
 
 /*
@@ -406,7 +429,15 @@ sftp_client_close_handle(
 	size_t handle_size,
 	uint32_t *id)
 {
-	return client_queue_handle_only(client, SSH_FXP_CLOSE, handle, handle_size, id);
+	int error;
+
+	/* Queues the handle-only CLOSE request. */
+	error = client_queue_handle_only(client, SSH_FXP_CLOSE, handle, handle_size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the close request is queued. */
+	return 0;
 }
 
 /*
@@ -426,7 +457,8 @@ sftp_client_read(
 	int error;
 
 	/* Validates the handle and requested length. */
-	if (client_check_handle(handle, handle_size) != 0)
+	error = client_check_handle(handle, handle_size);
+	if (error != 0)
 		return EINVAL;
 	if (length == 0 || length > SSH_SFTP_READ_MAX)
 		return EINVAL;
@@ -442,7 +474,12 @@ sftp_client_read(
 	ssh_buf_put_u32(&client->out, length);
 
 	/* Finalizes the packet length and commits the in-flight slot. */
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the read request is queued. */
+	return 0;
 }
 
 /*
@@ -463,7 +500,8 @@ sftp_client_write(
 	int error;
 
 	/* Validates the handle and data pointer. */
-	if (client_check_handle(handle, handle_size) != 0)
+	error = client_check_handle(handle, handle_size);
+	if (error != 0)
 		return EINVAL;
 	if (size > 0 && data == NULL)
 		return EINVAL;
@@ -481,7 +519,12 @@ sftp_client_write(
 	ssh_buf_put_string(&client->out, data, size);
 
 	/* Finalizes the packet length and commits the in-flight slot. */
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the write request is queued. */
+	return 0;
 }
 
 /*
@@ -494,7 +537,15 @@ sftp_client_lstat(
 	size_t size,
 	uint32_t *id)
 {
-	return client_queue_path_only(client, SSH_FXP_LSTAT, path, size, id);
+	int error;
+
+	/* Queues the path-only LSTAT request. */
+	error = client_queue_path_only(client, SSH_FXP_LSTAT, path, size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the lstat request is queued. */
+	return 0;
 }
 
 /*
@@ -507,7 +558,15 @@ sftp_client_fstat(
 	size_t handle_size,
 	uint32_t *id)
 {
-	return client_queue_handle_only(client, SSH_FXP_FSTAT, handle, handle_size, id);
+	int error;
+
+	/* Queues the handle-only FSTAT request. */
+	error = client_queue_handle_only(client, SSH_FXP_FSTAT, handle, handle_size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the fstat request is queued. */
+	return 0;
 }
 
 /*
@@ -526,7 +585,8 @@ sftp_client_setstat(
 	int error;
 
 	/* Validates the path and attributes. */
-	if (client_check_path(path, size) != 0 || attrs == NULL)
+	error = client_check_path(path, size);
+	if (error != 0 || attrs == NULL)
 		return EINVAL;
 	error = client_begin_request(client, SSH_FXP_SETSTAT, 0U, &slot, &start);
 	if (error != 0)
@@ -537,7 +597,12 @@ sftp_client_setstat(
 	client_put_attrs(attrs, &client->out);
 
 	/* Finalizes the packet length and commits the in-flight slot. */
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the setstat request is queued. */
+	return 0;
 }
 
 /*
@@ -556,7 +621,8 @@ sftp_client_fsetstat(
 	int error;
 
 	/* Validates the handle and attributes. */
-	if (client_check_handle(handle, handle_size) != 0 || attrs == NULL)
+	error = client_check_handle(handle, handle_size);
+	if (error != 0 || attrs == NULL)
 		return EINVAL;
 	error = client_begin_request(client, SSH_FXP_FSETSTAT, 0U, &slot, &start);
 	if (error != 0)
@@ -567,7 +633,12 @@ sftp_client_fsetstat(
 	client_put_attrs(attrs, &client->out);
 
 	/* Finalizes the packet length and commits the in-flight slot. */
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the fsetstat request is queued. */
+	return 0;
 }
 
 /*
@@ -580,7 +651,15 @@ sftp_client_opendir(
 	size_t size,
 	uint32_t *id)
 {
-	return client_queue_path_only(client, SSH_FXP_OPENDIR, path, size, id);
+	int error;
+
+	/* Queues the path-only OPENDIR request. */
+	error = client_queue_path_only(client, SSH_FXP_OPENDIR, path, size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the opendir request is queued. */
+	return 0;
 }
 
 /*
@@ -593,7 +672,15 @@ sftp_client_readdir(
 	size_t handle_size,
 	uint32_t *id)
 {
-	return client_queue_handle_only(client, SSH_FXP_READDIR, handle, handle_size, id);
+	int error;
+
+	/* Queues the handle-only READDIR request. */
+	error = client_queue_handle_only(client, SSH_FXP_READDIR, handle, handle_size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the readdir request is queued. */
+	return 0;
 }
 
 /*
@@ -606,7 +693,15 @@ sftp_client_remove(
 	size_t size,
 	uint32_t *id)
 {
-	return client_queue_path_only(client, SSH_FXP_REMOVE, path, size, id);
+	int error;
+
+	/* Queues the path-only REMOVE request. */
+	error = client_queue_path_only(client, SSH_FXP_REMOVE, path, size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the remove request is queued. */
+	return 0;
 }
 
 /*
@@ -626,7 +721,8 @@ sftp_client_mkdir(
 	int error;
 
 	/* Validates the path and reserves an in-flight slot. */
-	if (client_check_path(path, size) != 0)
+	error = client_check_path(path, size);
+	if (error != 0)
 		return EINVAL;
 	error = client_begin_request(client, SSH_FXP_MKDIR, 0U, &slot, &start);
 	if (error != 0)
@@ -643,7 +739,12 @@ sftp_client_mkdir(
 	client_put_attrs(attrs, &client->out);
 
 	/* Finalizes the packet length and commits the in-flight slot. */
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the mkdir request is queued. */
+	return 0;
 }
 
 /*
@@ -656,7 +757,15 @@ sftp_client_rmdir(
 	size_t size,
 	uint32_t *id)
 {
-	return client_queue_path_only(client, SSH_FXP_RMDIR, path, size, id);
+	int error;
+
+	/* Queues the path-only RMDIR request. */
+	error = client_queue_path_only(client, SSH_FXP_RMDIR, path, size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the rmdir request is queued. */
+	return 0;
 }
 
 /*
@@ -669,7 +778,15 @@ sftp_client_realpath(
 	size_t size,
 	uint32_t *id)
 {
-	return client_queue_path_only(client, SSH_FXP_REALPATH, path, size, id);
+	int error;
+
+	/* Queues the path-only REALPATH request. */
+	error = client_queue_path_only(client, SSH_FXP_REALPATH, path, size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the realpath request is queued. */
+	return 0;
 }
 
 /*
@@ -682,7 +799,15 @@ sftp_client_stat(
 	size_t size,
 	uint32_t *id)
 {
-	return client_queue_path_only(client, SSH_FXP_STAT, path, size, id);
+	int error;
+
+	/* Queues the path-only STAT request. */
+	error = client_queue_path_only(client, SSH_FXP_STAT, path, size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the stat request is queued. */
+	return 0;
 }
 
 /*
@@ -702,8 +827,11 @@ sftp_client_rename(
 	int error;
 
 	/* Validates both paths and reserves an in-flight slot. */
-	if (client_check_path(old_path, old_size) != 0 ||
-	    client_check_path(new_path, new_size) != 0)
+	error = client_check_path(old_path, old_size);
+	if (error != 0)
+		return EINVAL;
+	error = client_check_path(new_path, new_size);
+	if (error != 0)
 		return EINVAL;
 	error = client_begin_request(client, SSH_FXP_RENAME, 0U, &slot, &start);
 	if (error != 0)
@@ -714,7 +842,12 @@ sftp_client_rename(
 	ssh_buf_put_string(&client->out, new_path, new_size);
 
 	/* Finalizes the packet length and commits the in-flight slot. */
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the rename request is queued. */
+	return 0;
 }
 
 /*
@@ -727,7 +860,15 @@ sftp_client_readlink(
 	size_t size,
 	uint32_t *id)
 {
-	return client_queue_path_only(client, SSH_FXP_READLINK, path, size, id);
+	int error;
+
+	/* Queues the path-only READLINK request. */
+	error = client_queue_path_only(client, SSH_FXP_READLINK, path, size, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the readlink request is queued. */
+	return 0;
 }
 
 /*
@@ -748,8 +889,11 @@ sftp_client_symlink(
 	int error;
 
 	/* Validates both paths and reserves an in-flight slot. */
-	if (client_check_path(target, target_size) != 0 ||
-	    client_check_path(link_path, link_size) != 0)
+	error = client_check_path(target, target_size);
+	if (error != 0)
+		return EINVAL;
+	error = client_check_path(link_path, link_size);
+	if (error != 0)
 		return EINVAL;
 	error = client_begin_request(client, SSH_FXP_SYMLINK, 0U, &slot, &start);
 	if (error != 0)
@@ -760,7 +904,12 @@ sftp_client_symlink(
 	ssh_buf_put_string(&client->out, link_path, link_size);
 
 	/* Finalizes the packet length and commits the in-flight slot. */
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the symlink request is queued. */
+	return 0;
 }
 
 /* Reports whether id is currently in flight and sets *slot to its index. */
@@ -791,6 +940,7 @@ client_alloc_id(
 	struct sftp_client *client)
 {
 	uint32_t candidate;
+	int in_flight;
 
 	/* Advances next_id, skipping 0 and any id still in flight. */
 	for (;;) {
@@ -798,7 +948,8 @@ client_alloc_id(
 		client->next_id++;
 		if (candidate == 0)
 			continue;
-		if (!client_id_in_flight(client, candidate, NULL))
+		in_flight = client_id_in_flight(client, candidate, NULL);
+		if (!in_flight)
 			return candidate;
 	}
 }
@@ -826,6 +977,8 @@ client_begin_request(
 		if (!client->inflight[index].active)
 			break;
 	}
+
+	/* Reports EAGAIN if no slot was free. */
 	if (index >= SFTP_CLIENT_REQUESTS)
 		return EAGAIN;
 
@@ -876,6 +1029,8 @@ client_check_path(
 	const uint8_t *path,
 	size_t size)
 {
+	const void *nul;
+
 	/* Rejects a NULL pointer for a non-empty path or an overlong path. */
 	if (size > 0 && path == NULL)
 		return EINVAL;
@@ -883,8 +1038,11 @@ client_check_path(
 		return EINVAL;
 
 	/* Rejects an embedded NUL byte. */
-	if (size > 0 && memchr(path, '\0', size) != NULL)
-		return EINVAL;
+	if (size > 0) {
+		nul = memchr(path, '\0', size);
+		if (nul != NULL)
+			return EINVAL;
+	}
 
 	/* Valid path. */
 	return 0;
@@ -923,6 +1081,8 @@ client_put_attrs(
 		ssh_buf_put_u32(out, attrs->uid);
 		ssh_buf_put_u32(out, attrs->gid);
 	}
+
+	/* Appends permissions and timestamps when present. */
 	if ((flags & SSH_FILEXFER_ATTR_PERMISSIONS) != 0)
 		ssh_buf_put_u32(out, attrs->permissions);
 	if ((flags & SSH_FILEXFER_ATTR_ACMODTIME) != 0) {
@@ -962,6 +1122,8 @@ client_parse_attrs(
 		attrs->uid = ssh_reader_get_u32(reader);
 		attrs->gid = ssh_reader_get_u32(reader);
 	}
+
+	/* Reads the POSIX permission bits when present. */
 	if ((flags & SSH_FILEXFER_ATTR_PERMISSIONS) != 0)
 		attrs->permissions = ssh_reader_get_u32(reader);
 	if ((flags & SSH_FILEXFER_ATTR_ACMODTIME) != 0) {
@@ -1007,20 +1169,27 @@ client_parse_version(
 	size_t ext_data_size;
 	uint32_t version;
 	unsigned pairs;
+	size_t left;
+	int error;
 
 	/* Reads the server's version and refuses anything below version 3. */
 	version = ssh_reader_get_u32(reader);
-	if (ssh_reader_error(reader) != 0 || version < SSH_SFTP_VERSION)
+	error = ssh_reader_error(reader);
+	if (error != 0 || version < SSH_SFTP_VERSION)
 		return EPROTO;
 
 	/* Skips any extension name/data pairs (capped at SSH_SFTP_EXTENDED_MAX). */
 	pairs = 0;
-	while (ssh_reader_left(reader) > 0) {
+	for (;;) {
+		left = ssh_reader_left(reader);
+		if (left == 0)
+			break;
 		if (pairs >= SSH_SFTP_EXTENDED_MAX)
 			return EPROTO;
 		ssh_reader_get_string(reader, &ext_name, &ext_name_size);
 		ssh_reader_get_string(reader, &ext_data, &ext_data_size);
-		if (ssh_reader_error(reader) != 0)
+		error = ssh_reader_error(reader);
+		if (error != 0)
 			return EPROTO;
 		pairs++;
 	}
@@ -1050,17 +1219,25 @@ client_reply_matches(
 	switch (request_type) {
 	case SSH_FXP_OPEN:
 	case SSH_FXP_OPENDIR:
-		return reply_type == SSH_FXP_HANDLE;
+		if (reply_type == SSH_FXP_HANDLE)
+			return 1;
+		return 0;
 	case SSH_FXP_READ:
-		return reply_type == SSH_FXP_DATA;
+		if (reply_type == SSH_FXP_DATA)
+			return 1;
+		return 0;
 	case SSH_FXP_READDIR:
 	case SSH_FXP_REALPATH:
 	case SSH_FXP_READLINK:
-		return reply_type == SSH_FXP_NAME;
+		if (reply_type == SSH_FXP_NAME)
+			return 1;
+		return 0;
 	case SSH_FXP_LSTAT:
 	case SSH_FXP_FSTAT:
 	case SSH_FXP_STAT:
-		return reply_type == SSH_FXP_ATTRS;
+		if (reply_type == SSH_FXP_ATTRS)
+			return 1;
+		return 0;
 	default:
 		return 0;
 	}
@@ -1074,12 +1251,14 @@ client_parse_status(
 {
 	const uint8_t *lang;
 	size_t lang_size;
+	int error;
 
 	/* Reads code, message and language tag, rejecting trailing bytes. */
 	reply->code = ssh_reader_get_u32(reader);
 	ssh_reader_get_string(reader, &reply->message, &reply->message_size);
 	ssh_reader_get_string(reader, &lang, &lang_size);
-	if (ssh_reader_finish(reader) != 0) {
+	error = ssh_reader_finish(reader);
+	if (error != 0) {
 		reply->error = EPROTO;
 		reply->message = NULL;
 		reply->message_size = 0;
@@ -1092,9 +1271,12 @@ client_parse_handle(
 	struct ssh_reader *reader,
 	struct sftp_client_reply *reply)
 {
+	int error;
+
 	/* Reads the handle and checks its bounds and exact packet end. */
 	ssh_reader_get_string(reader, &reply->handle, &reply->handle_size);
-	if (ssh_reader_finish(reader) != 0 ||
+	error = ssh_reader_finish(reader);
+	if (error != 0 ||
 	    reply->handle_size == 0 ||
 	    reply->handle_size > CLIENT_HANDLE_MAX) {
 		reply->error = EPROTO;
@@ -1110,9 +1292,12 @@ client_parse_data(
 	uint32_t read_length,
 	struct sftp_client_reply *reply)
 {
+	int error;
+
 	/* Reads the data string and rejects replies longer than requested. */
 	ssh_reader_get_string(reader, &reply->data, &reply->data_size);
-	if (ssh_reader_finish(reader) != 0 || reply->data_size > read_length) {
+	error = ssh_reader_finish(reader);
+	if (error != 0 || reply->data_size > read_length) {
 		reply->error = EPROTO;
 		reply->data = NULL;
 		reply->data_size = 0;
@@ -1131,55 +1316,78 @@ client_parse_name(
 	size_t name_size;
 	const uint8_t *long_name;
 	size_t long_size;
+	const void *nul;
 	uint32_t count;
 	uint32_t index;
 	size_t entries_offset;
+	int error;
 
 	/* Reads the entry count and remembers where the entries start. */
 	count = ssh_reader_get_u32(reader);
-	if (ssh_reader_error(reader) != 0) {
+	error = ssh_reader_error(reader);
+	if (error != 0) {
 		reply->error = EPROTO;
 		return;
 	}
+
+	/* Records where the entries begin for the second pass. */
 	entries_offset = reader->offset;
 
 	/* Validates every entry upfront so sftp_client_name_next cannot fail mid-reply. */
 	for (index = 0; index < count; index++) {
 		ssh_reader_get_string(reader, &name, &name_size);
 		ssh_reader_get_string(reader, &long_name, &long_size);
-		if (ssh_reader_error(reader) != 0) {
+		error = ssh_reader_error(reader);
+		if (error != 0) {
 			reply->error = EPROTO;
 			return;
 		}
+
+		/* Rejects overlong filenames. */
 		if (name_size > SSH_SFTP_PATH_MAX) {
 			reply->error = EPROTO;
 			return;
 		}
-		if (name_size > 0 && memchr(name, '\0', name_size) != NULL) {
-			reply->error = EPROTO;
-			return;
+
+		/* Rejects embedded NUL bytes in the filename. */
+		if (name_size > 0) {
+			nul = memchr(name, '\0', name_size);
+			if (nul != NULL) {
+				reply->error = EPROTO;
+				return;
+			}
 		}
-		if (long_size > 0 && memchr(long_name, '\0', long_size) != NULL) {
-			reply->error = EPROTO;
-			return;
+
+		/* Rejects embedded NUL bytes in the long listing string. */
+		if (long_size > 0) {
+			nul = memchr(long_name, '\0', long_size);
+			if (nul != NULL) {
+				reply->error = EPROTO;
+				return;
+			}
 		}
-		if (client_parse_attrs(reader, &attrs) != 0) {
+
+		/* Validates the entry's file attributes. */
+		error = client_parse_attrs(reader, &attrs);
+		if (error != 0) {
 			reply->error = EPROTO;
 			return;
 		}
 	}
 
 	/* Rejects trailing bytes after the last entry. */
-	if (ssh_reader_finish(reader) != 0) {
+	error = ssh_reader_finish(reader);
+	if (error != 0) {
 		reply->error = EPROTO;
 		return;
 	}
 
 	/* Sets up the cursor for sftp_client_name_next. */
 	reply->count = count;
-	ssh_reader_init(&client->name_reader,
-	    client->packet.data + entries_offset,
-	    client->packet.size - entries_offset);
+	ssh_reader_init(
+		&client->name_reader,
+		client->packet.data + entries_offset,
+		client->packet.size - entries_offset);
 	client->name_left = count;
 }
 
@@ -1189,9 +1397,13 @@ client_parse_attrs_reply(
 	struct ssh_reader *reader,
 	struct sftp_client_reply *reply)
 {
+	int error;
+
 	/* Reads the attributes and rejects trailing bytes. */
-	if (client_parse_attrs(reader, &reply->attrs) != 0 ||
-	    ssh_reader_finish(reader) != 0) {
+	error = client_parse_attrs(reader, &reply->attrs);
+	if (error == 0)
+		error = ssh_reader_finish(reader);
+	if (error != 0) {
 		reply->error = EPROTO;
 		memset(&reply->attrs, 0, sizeof(reply->attrs));
 	}
@@ -1211,7 +1423,8 @@ client_queue_path_only(
 	int error;
 
 	/* Validates the path and reserves an in-flight slot. */
-	if (client_check_path(path, size) != 0)
+	error = client_check_path(path, size);
+	if (error != 0)
 		return EINVAL;
 	error = client_begin_request(client, type, 0U, &slot, &start);
 	if (error != 0)
@@ -1219,7 +1432,12 @@ client_queue_path_only(
 
 	/* Appends the path and finalizes the packet. */
 	ssh_buf_put_string(&client->out, path, size);
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the path-only request is queued. */
+	return 0;
 }
 
 /* Queues a request whose only payload after id is a single handle string. */
@@ -1236,7 +1454,8 @@ client_queue_handle_only(
 	int error;
 
 	/* Validates the handle and reserves an in-flight slot. */
-	if (client_check_handle(handle, size) != 0)
+	error = client_check_handle(handle, size);
+	if (error != 0)
 		return EINVAL;
 	error = client_begin_request(client, type, 0U, &slot, &start);
 	if (error != 0)
@@ -1244,5 +1463,10 @@ client_queue_handle_only(
 
 	/* Appends the handle and finalizes the packet. */
 	ssh_buf_put_string(&client->out, handle, size);
-	return client_finish_request(client, slot, start, id);
+	error = client_finish_request(client, slot, start, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the handle-only request is queued. */
+	return 0;
 }

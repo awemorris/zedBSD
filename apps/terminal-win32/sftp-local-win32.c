@@ -30,6 +30,7 @@
 #define WIN32_UNIX_EPOCH_100NS	116444736000000000ULL
 #define WIN32_100NS_PER_SEC	10000000ULL
 
+/* Open local file handle backed by a Win32 HANDLE. */
 struct sftp_local_file {
 	HANDLE handle;
 };
@@ -41,7 +42,9 @@ static uint32_t filetime_to_unix(FILETIME ft);
 static FILETIME unix_to_filetime(uint32_t sec);
 static int check_no_reparse_chain(const char *dir_path);
 
-/* Finds the user's Downloads folder in UTF-8. */
+/*
+ * Finds the user's Downloads folder in UTF-8.
+ */
 int
 sftp_local_downloads_dir(
 	char *path,
@@ -49,18 +52,28 @@ sftp_local_downloads_dir(
 {
 	PWSTR wide;
 	HRESULT hr;
+	int failed;
 	int error;
 
+	/* Queries the Known Folder path for Downloads. */
 	hr = SHGetKnownFolderPath(&FOLDERID_Downloads, 0, NULL, &wide);
-	if (FAILED(hr) || wide == NULL)
+	failed = FAILED(hr);
+	if (failed || wide == NULL)
 		return EIO;
 
+	/* Converts the UTF-16 folder path to UTF-8 and frees the shell buffer. */
 	error = local_utf8(wide, path, size);
 	CoTaskMemFree(wide);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: path holds the Downloads folder in UTF-8. */
+	return 0;
 }
 
-/* Queries metadata for path without following reparse points. */
+/*
+ * Queries metadata for path without following reparse points.
+ */
 int
 sftp_local_stat(
 	const char *path,
@@ -70,20 +83,29 @@ sftp_local_stat(
 	wchar_t *wide;
 	const char *base;
 	const char *slash;
+	BOOL ok;
+	DWORD last_err;
 	int error;
 
+	/* Converts the path to UTF-16 and clears the output entry. */
 	memset(entry, 0, sizeof(*entry));
 	error = local_wide(path, &wide);
 	if (error != 0)
 		return error;
 
-	if (!GetFileAttributesExW(wide, GetFileExInfoStandard, &data)) {
-		error = local_errno(GetLastError());
+	/* Queries Win32 file attributes without traversing reparse targets. */
+	ok = GetFileAttributesExW(wide, GetFileExInfoStandard, &data);
+	if (!ok) {
+		last_err = GetLastError();
 		free(wide);
+		error = local_errno(last_err);
 		return error;
 	}
+
+	/* Frees the temporary wide path buffer. */
 	free(wide);
 
+	/* Extracts the final path component for entry->name. */
 	base = path;
 	slash = strrchr(path, '\\');
 	if (slash != NULL)
@@ -93,6 +115,7 @@ sftp_local_stat(
 		base = slash + 1;
 	(void)snprintf(entry->name, sizeof(entry->name), "%s", base);
 
+	/* Populates directory, reparse, size, and modification time fields. */
 	entry->is_dir = (data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U;
 	entry->is_reparse = (data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U;
 	entry->size = ((uint64_t)data.nFileSizeHigh << 32) | (uint64_t)data.nFileSizeLow;
@@ -100,7 +123,9 @@ sftp_local_stat(
 	return 0;
 }
 
-/* Lists entries of dir_path, skipping "." and "..". */
+/*
+ * Lists entries of dir_path, skipping "." and "..".
+ */
 int
 sftp_local_list(
 	const char *dir_path,
@@ -115,45 +140,63 @@ sftp_local_list(
 	size_t count;
 	size_t cap;
 	struct sftp_local_entry *grown;
+	int cmp_dot;
+	int cmp_dotdot;
+	BOOL more;
+	DWORD last_err;
 	int error;
 
+	/* Builds the wildcard search pattern and converts it to UTF-16. */
 	*entries_out = NULL;
 	*count_out = 0U;
-
 	error = sftp_local_join_path(pattern, sizeof(pattern), dir_path, "*");
 	if (error != 0)
 		return error;
 
+	/* Converts the search pattern to wide characters. */
 	error = local_wide(pattern, &wide);
 	if (error != 0)
 		return error;
 
+	/* Opens the directory search handle. */
 	find = FindFirstFileExW(wide, FindExInfoBasic, &fdata, FindExSearchNameMatch, NULL, 0);
 	free(wide);
 	if (find == INVALID_HANDLE_VALUE) {
-		error = local_errno(GetLastError());
+		last_err = GetLastError();
+		error = local_errno(last_err);
 		if (error == ENOENT)
 			return 0;
 		return error;
 	}
 
+	/* Collects every non-dot entry into a dynamically grown array. */
 	list = NULL;
 	count = 0U;
 	cap = 0U;
 	for (;;) {
-		if (wcscmp(fdata.cFileName, L".") != 0 && wcscmp(fdata.cFileName, L"..") != 0) {
+		cmp_dot = wcscmp(fdata.cFileName, L".");
+		cmp_dotdot = wcscmp(fdata.cFileName, L"..");
+		if (cmp_dot != 0 && cmp_dotdot != 0) {
 			if (count == cap) {
-				cap = cap == 0U ? 32U : cap * 2U;
+				if (cap == 0U)
+					cap = 32U;
+				else
+					cap = cap * 2U;
 				grown = realloc(list, cap * sizeof(*list));
 				if (grown == NULL) {
 					FindClose(find);
 					free(list);
 					return ENOMEM;
 				}
+
+				/* Commits the grown entry array. */
 				list = grown;
 			}
+
+			/* Converts the entry name and copies its metadata. */
 			memset(&list[count], 0, sizeof(list[count]));
-			if (local_utf8(fdata.cFileName, list[count].name, sizeof(list[count].name)) == 0) {
+			error = local_utf8(fdata.cFileName, list[count].name, sizeof(list[count].name));
+			if (error == 0) {
 				list[count].is_dir = (fdata.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0U;
 				list[count].is_reparse = (fdata.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) != 0U;
 				list[count].size = ((uint64_t)fdata.nFileSizeHigh << 32) | (uint64_t)fdata.nFileSizeLow;
@@ -161,27 +204,36 @@ sftp_local_list(
 				count++;
 			}
 		}
-		if (!FindNextFileW(find, &fdata))
+
+		/* Advances to the next directory entry. */
+		more = FindNextFileW(find, &fdata);
+		if (!more)
 			break;
 	}
-	FindClose(find);
 
+	/* Closes the search handle and returns the collected entries. */
+	FindClose(find);
 	*entries_out = list;
 	*count_out = count;
 	return 0;
 }
 
-/* Frees a directory listing returned by sftp_local_list. */
+/*
+ * Frees a directory listing returned by sftp_local_list.
+ */
 void
 sftp_local_list_free(
 	struct sftp_local_entry *entries,
 	size_t count)
 {
+	/* Frees the entry array. */
 	(void)count;
 	free(entries);
 }
 
-/* Opens a local file for reading, refusing reparse points. */
+/*
+ * Opens a local file for reading, refusing reparse points.
+ */
 int
 sftp_local_open_read(
 	const char *path,
@@ -193,12 +245,13 @@ sftp_local_open_read(
 	struct sftp_local_file *file;
 	wchar_t *wide;
 	HANDLE handle;
+	DWORD last_err;
 	int error;
 
+	/* Clears outputs and inspects the path without following reparse points. */
 	*file_out = NULL;
 	*size = 0U;
 	*mtime = 0U;
-
 	error = sftp_local_stat(path, &entry);
 	if (error != 0)
 		return error;
@@ -207,20 +260,28 @@ sftp_local_open_read(
 	if (entry.is_dir)
 		return EISDIR;
 
+	/* Converts the path to UTF-16 and opens the file for reading. */
 	error = local_wide(path, &wide);
 	if (error != 0)
 		return error;
 
+	/* Opens the existing Win32 file handle. */
 	handle = CreateFileW(wide, GENERIC_READ, FILE_SHARE_READ, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
 	free(wide);
-	if (handle == INVALID_HANDLE_VALUE)
-		return local_errno(GetLastError());
+	if (handle == INVALID_HANDLE_VALUE) {
+		last_err = GetLastError();
+		error = local_errno(last_err);
+		return error;
+	}
 
+	/* Allocates the file wrapper and returns handle, size, and mtime. */
 	file = malloc(sizeof(*file));
 	if (file == NULL) {
 		CloseHandle(handle);
 		return ENOMEM;
 	}
+
+	/* Succeeded: publishes the open file handle and metadata. */
 	file->handle = handle;
 	*file_out = file;
 	*size = entry.size;
@@ -228,7 +289,9 @@ sftp_local_open_read(
 	return 0;
 }
 
-/* Reads up to size bytes at offset from an open local file. */
+/*
+ * Reads up to size bytes at offset from an open local file.
+ */
 int
 sftp_local_read_at(
 	struct sftp_local_file *file,
@@ -240,20 +303,28 @@ sftp_local_read_at(
 	OVERLAPPED ov;
 	DWORD nread;
 	DWORD err;
+	BOOL ok;
+	int mapped;
 
+	/* Sets up the overlapped offset and reads from the file handle. */
 	*got = 0U;
 	memset(&ov, 0, sizeof(ov));
 	ov.Offset = (DWORD)(offset & 0xffffffffU);
 	ov.OffsetHigh = (DWORD)(offset >> 32);
-
-	if (!ReadFile(file->handle, buf, (DWORD)size, &nread, &ov)) {
+	ok = ReadFile(file->handle, buf, (DWORD)size, &nread, &ov);
+	if (!ok) {
 		err = GetLastError();
 		if (err == ERROR_HANDLE_EOF) {
 			*got = 0U;
 			return 0;
 		}
-		return local_errno(err);
+
+		/* Maps Win32 read error to errno. */
+		mapped = local_errno(err);
+		return mapped;
 	}
+
+	/* Succeeded: reports the number of bytes read. */
 	*got = (size_t)nread;
 	return 0;
 }
@@ -274,43 +345,63 @@ sftp_local_open_temp_write(
 	struct sftp_local_file *file;
 	wchar_t *wide;
 	HANDLE handle;
+	DWORD last_err;
 	int written;
 	int error;
 
+	/* Verifies that no ancestor directory is a reparse point. */
 	*file_out = NULL;
 	error = check_no_reparse_chain(dir_path);
 	if (error != 0)
 		return error;
 
+	/* Builds the hidden temporary filename and joins it with dir_path. */
 	written = snprintf(temp_name, sizeof(temp_name), ".%s.mikuterm-part", final_name);
 	if (written < 0 || (size_t)written >= sizeof(temp_name))
 		return ENAMETOOLONG;
 
+	/* Joins dir_path and the temporary filename. */
 	error = sftp_local_join_path(temp_path, temp_cap, dir_path, temp_name);
 	if (error != 0)
 		return error;
 
+	/* Converts the temporary path to UTF-16 and creates the hidden file. */
 	error = local_wide(temp_path, &wide);
 	if (error != 0)
 		return error;
 
-	handle = CreateFileW(wide, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS,
-	    FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_NORMAL, NULL);
+	/* Creates the hidden temporary file exclusively for writing. */
+	handle = CreateFileW(
+		wide,
+		GENERIC_WRITE,
+		0,
+		NULL,
+		CREATE_ALWAYS,
+		FILE_ATTRIBUTE_HIDDEN | FILE_ATTRIBUTE_NORMAL,
+		NULL);
 	free(wide);
-	if (handle == INVALID_HANDLE_VALUE)
-		return local_errno(GetLastError());
+	if (handle == INVALID_HANDLE_VALUE) {
+		last_err = GetLastError();
+		error = local_errno(last_err);
+		return error;
+	}
 
+	/* Allocates the file wrapper. */
 	file = malloc(sizeof(*file));
 	if (file == NULL) {
 		CloseHandle(handle);
 		return ENOMEM;
 	}
+
+	/* Succeeded: publishes the open temporary file handle. */
 	file->handle = handle;
 	*file_out = file;
 	return 0;
 }
 
-/* Writes size bytes at offset to an open local file. */
+/*
+ * Writes size bytes at offset to an open local file.
+ */
 int
 sftp_local_write_at(
 	struct sftp_local_file *file,
@@ -320,52 +411,84 @@ sftp_local_write_at(
 {
 	OVERLAPPED ov;
 	DWORD wrote;
+	DWORD last_err;
 	const uint8_t *ptr;
 	size_t left;
+	BOOL ok;
+	int error;
 
+	/* Loops until all bytes are written at their respective offsets. */
 	ptr = buf;
 	left = size;
 	while (left != 0U) {
 		memset(&ov, 0, sizeof(ov));
 		ov.Offset = (DWORD)(offset & 0xffffffffU);
 		ov.OffsetHigh = (DWORD)(offset >> 32);
-		if (!WriteFile(file->handle, ptr, (DWORD)left, &wrote, &ov))
-			return local_errno(GetLastError());
+		ok = WriteFile(file->handle, ptr, (DWORD)left, &wrote, &ov);
+		if (!ok) {
+			last_err = GetLastError();
+			error = local_errno(last_err);
+			return error;
+		}
+
+		/* Fails if WriteFile reported zero bytes written without an error. */
 		if (wrote == 0U)
 			return EIO;
 		ptr += wrote;
 		offset += wrote;
 		left -= wrote;
 	}
+
+	/* Succeeded: all bytes were written. */
 	return 0;
 }
 
-/* Sets the modification time on an open local file. */
+/*
+ * Sets the modification time on an open local file.
+ */
 int
 sftp_local_set_mtime(
 	struct sftp_local_file *file,
 	uint32_t mtime)
 {
 	FILETIME ft;
+	BOOL ok;
+	DWORD last_err;
+	int error;
 
+	/* Converts the Unix timestamp to FILETIME and updates the file's write time. */
 	ft = unix_to_filetime(mtime);
-	if (!SetFileTime(file->handle, NULL, NULL, &ft))
-		return local_errno(GetLastError());
+	ok = SetFileTime(file->handle, NULL, NULL, &ft);
+	if (!ok) {
+		last_err = GetLastError();
+		error = local_errno(last_err);
+		return error;
+	}
+
+	/* Succeeded: modification time updated. */
 	return 0;
 }
 
-/* Closes a local file handle. */
+/*
+ * Closes a local file handle.
+ */
 void
 sftp_local_close(
 	struct sftp_local_file *file)
 {
+	/* Ignores a NULL file handle. */
 	if (file == NULL)
 		return;
+
+	/* Closes the Win32 handle and frees the wrapper. */
 	CloseHandle(file->handle);
 	free(file);
 }
 
-/* Clears the hidden attribute on temp_path and atomically replaces final_path. */
+/*
+ * Clears the hidden attribute on temp_path and atomically replaces
+ * final_path.
+ */
 int
 sftp_local_commit_temp(
 	const char *temp_path,
@@ -374,8 +497,11 @@ sftp_local_commit_temp(
 	wchar_t *temp_w;
 	wchar_t *final_w;
 	DWORD attrs;
+	DWORD last_err;
+	BOOL ok;
 	int error;
 
+	/* Converts both temporary and final paths to UTF-16. */
 	error = local_wide(temp_path, &temp_w);
 	if (error != 0)
 		return error;
@@ -385,70 +511,102 @@ sftp_local_commit_temp(
 		return error;
 	}
 
+	/* Clears the hidden attribute before moving into place. */
 	attrs = GetFileAttributesW(temp_w);
 	if (attrs != INVALID_FILE_ATTRIBUTES && (attrs & FILE_ATTRIBUTE_HIDDEN) != 0U)
 		(void)SetFileAttributesW(temp_w, attrs & ~FILE_ATTRIBUTE_HIDDEN);
 
-	if (!MoveFileExW(temp_w, final_w, MOVEFILE_REPLACE_EXISTING)) {
-		error = local_errno(GetLastError());
+	/* Atomically replaces final_path with temp_path. */
+	ok = MoveFileExW(temp_w, final_w, MOVEFILE_REPLACE_EXISTING);
+	if (!ok) {
+		last_err = GetLastError();
+		error = local_errno(last_err);
 		free(temp_w);
 		free(final_w);
 		return error;
 	}
 
+	/* Succeeded: frees path buffers. */
 	free(temp_w);
 	free(final_w);
 	return 0;
 }
 
-/* Removes a local file. */
+/*
+ * Removes a local file.
+ */
 int
 sftp_local_remove(
 	const char *path)
 {
 	wchar_t *wide;
+	BOOL ok;
+	DWORD last_err;
 	int error;
 
+	/* Converts the path to UTF-16 and deletes the file. */
 	error = local_wide(path, &wide);
 	if (error != 0)
 		return error;
 
-	if (!DeleteFileW(wide)) {
-		error = local_errno(GetLastError());
+	/* Deletes the Win32 file. */
+	ok = DeleteFileW(wide);
+	if (!ok) {
+		last_err = GetLastError();
+		error = local_errno(last_err);
 		free(wide);
 		return error;
 	}
+
+	/* Succeeded: file deleted. */
 	free(wide);
 	return 0;
 }
 
-/* Creates a local directory, succeeding if it already exists as a non-reparse directory. */
+/*
+ * Creates a local directory, succeeding if it already exists as a
+ * non-reparse directory.
+ */
 int
 sftp_local_mkdir(
 	const char *path)
 {
 	wchar_t *wide;
 	struct sftp_local_entry entry;
+	BOOL created;
+	DWORD last_err;
 	int error;
 
+	/* Converts the path to UTF-16 and attempts directory creation. */
 	error = local_wide(path, &wide);
 	if (error != 0)
 		return error;
 
-	if (CreateDirectoryW(wide, NULL)) {
+	/* Creates the directory on disk. */
+	created = CreateDirectoryW(wide, NULL);
+	if (created) {
 		free(wide);
 		return 0;
 	}
-	error = local_errno(GetLastError());
+
+	/* Maps the failure and accepts an existing non-reparse directory. */
+	last_err = GetLastError();
+	error = local_errno(last_err);
 	free(wide);
 	if (error == EEXIST) {
-		if (sftp_local_stat(path, &entry) == 0 && entry.is_dir && !entry.is_reparse)
+		error = sftp_local_stat(path, &entry);
+		if (error == 0 && entry.is_dir && !entry.is_reparse)
 			return 0;
+		return EEXIST;
 	}
+
+	/* Reports the directory creation failure. */
 	return error;
 }
 
-/* Joins dir and name with a backslash separator. */
+/*
+ * Joins dir and name with a backslash separator.
+ */
 int
 sftp_local_join_path(
 	char *out,
@@ -459,14 +617,18 @@ sftp_local_join_path(
 	size_t len;
 	int written;
 
+	/* Formats the joined path without duplicating a trailing separator. */
 	len = strlen(dir);
 	if (len != 0U && (dir[len - 1U] == '\\' || dir[len - 1U] == '/'))
 		written = snprintf(out, out_cap, "%s%s", dir, name);
 	else
 		written = snprintf(out, out_cap, "%s\\%s", dir, name);
 
+	/* Reports ENAMETOOLONG if the joined path was truncated. */
 	if (written < 0 || (size_t)written >= out_cap)
 		return ENAMETOOLONG;
+
+	/* Succeeded: out holds the joined path. */
 	return 0;
 }
 
@@ -480,16 +642,20 @@ local_wide(
 	int converted;
 	wchar_t *wide;
 	size_t i;
+	size_t wlen;
 
+	/* Measures the required UTF-16 buffer length. */
 	*wide_out = NULL;
 	units = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, NULL, 0);
 	if (units <= 0)
 		return EINVAL;
 
+	/* Allocates extra room for an optional \\?\ long-path prefix. */
 	wide = malloc(((size_t)units + 4U) * sizeof(*wide));
 	if (wide == NULL)
 		return ENOMEM;
 
+	/* Converts the UTF-8 string to UTF-16. */
 	converted = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, path, -1, wide, units);
 	if (converted != units) {
 		free(wide);
@@ -503,7 +669,8 @@ local_wide(
 	}
 
 	/* Prepends \\?\ for long absolute drive paths so LongPathsEnabled=0 still works. */
-	if (wcslen(wide) >= 248U &&
+	wlen = wcslen(wide);
+	if (wlen >= 248U &&
 	    ((wide[0] >= L'A' && wide[0] <= L'Z') || (wide[0] >= L'a' && wide[0] <= L'z')) &&
 	    wide[1] == L':' && wide[2] == L'\\') {
 		memmove(wide + 4, wide, ((size_t)units) * sizeof(*wide));
@@ -513,6 +680,7 @@ local_wide(
 		wide[3] = L'\\';
 	}
 
+	/* Succeeded: returns the wide string. */
 	*wide_out = wide;
 	return 0;
 }
@@ -526,9 +694,12 @@ local_utf8(
 {
 	int n;
 
+	/* Encodes the UTF-16 string as UTF-8. */
 	n = WideCharToMultiByte(CP_UTF8, 0, wide, -1, out, (int)out_cap, NULL, NULL);
 	if (n <= 0)
 		return ENAMETOOLONG;
+
+	/* Succeeded: out holds the UTF-8 string. */
 	return 0;
 }
 
@@ -537,6 +708,7 @@ static int
 local_errno(
 	DWORD error)
 {
+	/* Translates Win32 GetLastError codes used by SFTP local I/O. */
 	switch (error) {
 	case ERROR_FILE_NOT_FOUND:
 	case ERROR_PATH_NOT_FOUND:
@@ -564,12 +736,15 @@ filetime_to_unix(
 	uint64_t v;
 	uint64_t sec;
 
+	/* Converts 100-ns intervals since 1601 to Unix seconds. */
 	v = ((uint64_t)ft.dwHighDateTime << 32) | (uint64_t)ft.dwLowDateTime;
 	if (v < WIN32_UNIX_EPOCH_100NS)
 		return 0U;
 	sec = (v - WIN32_UNIX_EPOCH_100NS) / WIN32_100NS_PER_SEC;
 	if (sec > 0xffffffffULL)
 		return 0U;
+
+	/* Returns the clamped 32-bit timestamp. */
 	return (uint32_t)sec;
 }
 
@@ -581,6 +756,7 @@ unix_to_filetime(
 	FILETIME ft;
 	uint64_t v;
 
+	/* Shifts Unix seconds to the Windows FILETIME epoch. */
 	v = (uint64_t)sec * WIN32_100NS_PER_SEC + WIN32_UNIX_EPOCH_100NS;
 	ft.dwLowDateTime = (DWORD)(v & 0xffffffffU);
 	ft.dwHighDateTime = (DWORD)(v >> 32);
@@ -593,19 +769,23 @@ check_no_reparse_chain(
 	const char *dir_path)
 {
 	char copy[MIKUTERM_PATH_MAX];
+	char saved;
 	size_t len;
 	size_t i;
 	wchar_t *wide;
 	DWORD attrs;
+	DWORD last_err;
+	int written;
 	int error;
 
-	if (snprintf(copy, sizeof(copy), "%s", dir_path) >= (int)sizeof(copy))
+	/* Copies dir_path so each prefix can be NUL-terminated in place. */
+	written = snprintf(copy, sizeof(copy), "%s", dir_path);
+	if (written < 0 || written >= (int)sizeof(copy))
 		return ENAMETOOLONG;
 
+	/* Inspects every directory prefix for FILE_ATTRIBUTE_REPARSE_POINT. */
 	len = strlen(copy);
 	for (i = 0U; i <= len; i++) {
-		char saved;
-
 		if (i < len && copy[i] != '\\' && copy[i] != '/')
 			continue;
 		if (i == 0U || (i == 2U && copy[1] == ':'))
@@ -615,13 +795,22 @@ check_no_reparse_chain(
 		error = local_wide(copy, &wide);
 		if (error != 0)
 			return error;
+
+		/* Queries the attributes of this directory prefix. */
 		attrs = GetFileAttributesW(wide);
 		free(wide);
-		if (attrs == INVALID_FILE_ATTRIBUTES)
-			return local_errno(GetLastError());
+		if (attrs == INVALID_FILE_ATTRIBUTES) {
+			last_err = GetLastError();
+			error = local_errno(last_err);
+			return error;
+		}
+
+		/* Refuses any reparse point (junction or symlink) along the chain. */
 		if ((attrs & FILE_ATTRIBUTE_REPARSE_POINT) != 0U)
 			return ELOOP;
 		copy[i] = saved;
 	}
+
+	/* Succeeded: no directory segment is a reparse point. */
 	return 0;
 }

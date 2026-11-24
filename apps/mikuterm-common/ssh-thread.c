@@ -2741,8 +2741,11 @@ thread_events(
 				if (open_count != 0U)
 					session_say(session, "\r\nThe shell ended; the connection stays open while forwarded connections remain (close the tab to end them).\r\n");
 			}
-			if (link->sftp_link != NULL && sftp_link_channel_open(link->sftp_link))
-				session_say(session, "\r\nThe shell ended; the connection stays open while SFTP is open (close the tab to end it).\r\n");
+			if (link->sftp_link != NULL) {
+				open_count = (unsigned)sftp_link_channel_open(link->sftp_link);
+				if (open_count != 0U)
+					session_say(session, "\r\nThe shell ended; the connection stays open while SFTP is open (close the tab to end it).\r\n");
+			}
 			break;
 		case SSH_ENGINE_CLOSED:
 			thread_closed(link, &event);
