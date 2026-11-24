@@ -21,6 +21,9 @@ size_t strlen(const char *string);
 size_t strnlen(const char *string, size_t maximum);
 int strcmp(const char *left, const char *right);
 int strncmp(const char *left, const char *right, size_t count);
+/* Case-insensitive string comparisons, also declared in <strings.h>. */
+int strcasecmp(const char *, const char *);
+int strncasecmp(const char *, const char *, size_t);
 char *strcpy(char *destination, const char *source);
 char *strncpy(char *destination, const char *source, size_t count);
 char *strcat(char *destination, const char *source);
