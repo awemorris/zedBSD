@@ -280,7 +280,8 @@ kl_window_close(
 		}
 	}
 
-	/* The input method's TSF and the touch pad's DirectManipulation stop while the HWNDs are there. */
+	/* The input method's TSF, the drop target and the touch pad's DirectManipulation stop while the HWNDs are there. */
+	keiui_win32_drop_close(window);
 	keiui_win32_manipulation_close(window);
 	keiui_win32_tsf_close(window);
 

@@ -3862,33 +3862,6 @@ kl_ui_window_text(
 
 /* Not on Windows. */
 int
-kl_window_accept_drops(
-	struct kl_window *window,
-	unsigned types)
-{
-	(void)window;
-	(void)types;
-
-	/* Not on Windows. */
-	return ENOTSUP;
-}
-
-/* Not on Windows. */
-void
-kl_window_answer_drop(
-	struct kl_window *window,
-	unsigned actions,
-	unsigned preferred)
-{
-	(void)window;
-	(void)actions;
-	(void)preferred;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-int
 kl_window_desktop_place(
 	const struct kl_window *window,
 	int32_t *x,
@@ -3974,18 +3947,6 @@ kl_window_edit_state(
 {
 	(void)window;
 	(void)state;
-
-	/* Nothing is done on Windows. */
-}
-
-/* Not on Windows. */
-void
-kl_window_finish_drop(
-	struct kl_window *window,
-	unsigned action)
-{
-	(void)window;
-	(void)action;
 
 	/* Nothing is done on Windows. */
 }
@@ -4155,23 +4116,6 @@ kl_window_press_serial(
 
 	/* Not on Windows. */
 	return 0;
-}
-
-/* Not on Windows. */
-int
-kl_window_receive_drop(
-	struct kl_window *window,
-	char **data,
-	size_t *length,
-	unsigned *type)
-{
-	(void)window;
-	(void)data;
-	(void)length;
-	(void)type;
-
-	/* Not on Windows. */
-	return ENOTSUP;
 }
 
 /* Not on Windows. */
@@ -4391,23 +4335,6 @@ kl_window_take(
 
 	/* Not on Windows. */
 	return ENOTSUP;
-}
-
-/* Not on Windows. */
-size_t
-kl_window_take_drop(
-	struct kl_window *window,
-	char *text,
-	size_t size,
-	unsigned *type)
-{
-	(void)window;
-	(void)text;
-	(void)size;
-	(void)type;
-
-	/* Not on Windows. */
-	return 0;
 }
 
 /* Not on Windows. */

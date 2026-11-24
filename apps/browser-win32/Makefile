@@ -147,7 +147,8 @@ LIBKEILAND_WIN32_OWN_SOURCES := \
 	apps/libkeiland/win32/ime.c \
 	apps/libkeiland/win32/clipboard.c \
 	apps/libkeiland/win32/pointer.c \
-	apps/libkeiland/win32/drag.c
+	apps/libkeiland/win32/drag.c \
+	apps/libkeiland/win32/drop.c
 
 LIBKEILAND_WIN32_CRT_SOURCES := userland/desktop/libkeiland/ui/text.c
 LIBKEILAND_WIN32_STUB_SOURCES := apps/libkeiland/win32/unsupported.c

@@ -71,6 +71,7 @@ set(KEILAND_WIN32_SOURCES
 	apps/libkeiland/win32/clipboard.c
 	apps/libkeiland/win32/pointer.c
 	apps/libkeiland/win32/drag.c
+	apps/libkeiland/win32/drop.c
 	apps/libkeiland/win32/unsupported.c)
 
 set(KEILAND_POSIX_SOURCES
