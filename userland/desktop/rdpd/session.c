@@ -25,6 +25,10 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+static int write_str_fd(int fd, const char *s, size_t len);
+static void drop_privileges(uid_t uid, gid_t gid, const char *user, const char *home, const char *shell);
+
+/* Writes len bytes to fd, retrying on EINTR. */
 static int
 write_str_fd(
 	int fd,
@@ -32,19 +36,21 @@ write_str_fd(
 	size_t len)
 {
 	size_t off;
-
+	ssize_t n;
 	off = 0U;
 	while (off < len) {
-		ssize_t n;
-
 		n = write(fd, s + off, len - off);
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
 			return EIO;
 		}
+
+		/* Advances past the written slice. */
 		off += (size_t)n;
 	}
+
+	/* Succeeded. */
 	return 0;
 }
 
@@ -69,22 +75,30 @@ rdpd_auth_user(
 	char reply[128];
 	ssize_t n;
 	int status;
-
+	int rc;
+	int d1;
+	int d2;
+	char *argv[3];
+	pid_t wp;
+	int exited;
+	int exit_code;
 	if (user == NULL || user[0] == '\0' || password == NULL)
 		return EINVAL;
-
 	res = NULL;
-	if (getpwnam_r(user, &pwd, buf, sizeof(buf), &res) != 0 || res == NULL)
+	rc = getpwnam_r(user, &pwd, buf, sizeof(buf), &res);
+	if (rc != 0 || res == NULL)
 		return EACCES;
-
-	if (pipe(in_pipe) != 0)
+	rc = pipe(in_pipe);
+	if (rc != 0)
 		return errno;
-	if (pipe(out_pipe) != 0) {
+	rc = pipe(out_pipe);
+	if (rc != 0) {
 		close(in_pipe[0]);
 		close(in_pipe[1]);
 		return errno;
 	}
 
+	/* Spawns passkey to verify the password. */
 	pid = fork();
 	if (pid < 0) {
 		close(in_pipe[0]);
@@ -94,13 +108,13 @@ rdpd_auth_user(
 		return errno;
 	}
 
+	/* Child executes passkey check. */
 	if (pid == 0) {
-		char *argv[3];
-
 		close(in_pipe[1]);
 		close(out_pipe[0]);
-		if (dup2(in_pipe[0], STDIN_FILENO) < 0 ||
-		    dup2(out_pipe[1], STDOUT_FILENO) < 0)
+		d1 = dup2(in_pipe[0], STDIN_FILENO);
+		d2 = dup2(out_pipe[1], STDOUT_FILENO);
+		if (d1 < 0 || d2 < 0)
 			_exit(127);
 		close(in_pipe[0]);
 		close(out_pipe[1]);
@@ -111,27 +125,31 @@ rdpd_auth_user(
 		_exit(127);
 	}
 
+	/* Sends user and password lines and waits for passkey exit code. */
 	close(in_pipe[0]);
 	close(out_pipe[1]);
-
 	(void)write_str_fd(in_pipe[1], user, strlen(user));
 	(void)write_str_fd(in_pipe[1], "\n", 1U);
 	(void)write_str_fd(in_pipe[1], password, strlen(password));
 	(void)write_str_fd(in_pipe[1], "\n", 1U);
 	close(in_pipe[1]);
-
 	memset(reply, 0, sizeof(reply));
 	n = read(out_pipe[0], reply, sizeof(reply) - 1U);
 	close(out_pipe[0]);
-
 	status = 0;
-	while (waitpid(pid, &status, 0) < 0 && errno == EINTR)
-		;
+	for (;;) {
+		wp = waitpid(pid, &status, 0);
+		if (wp < 0 && errno == EINTR)
+			continue;
+		break;
+	}
 
-	if (!WIFEXITED(status) || WEXITSTATUS(status) != 0)
+	/* Verifies passkey exit status. */
+	exited = WIFEXITED(status);
+	exit_code = WEXITSTATUS(status);
+	if (!exited || exit_code != 0)
 		return EACCES;
 	(void)n;
-
 	if (out_uid != NULL)
 		*out_uid = pwd.pw_uid;
 	if (out_gid != NULL)
@@ -143,6 +161,7 @@ rdpd_auth_user(
 	return 0;
 }
 
+/* Drops root privileges and prepares session environment variables. */
 static void
 drop_privileges(
 	uid_t uid,
@@ -152,7 +171,6 @@ drop_privileges(
 	const char *shell)
 {
 	char runtime_dir[64];
-
 	(void)snprintf(runtime_dir, sizeof(runtime_dir), "/run/user/%lu",
 		       (unsigned long)uid);
 	(void)setgid(gid);
@@ -184,21 +202,26 @@ rdpd_session_start(
 	char opt_sock[160];
 	pid_t comp_pid;
 	pid_t sess_pid;
-
+	int rc;
+	int err;
+	char *comp_argv[8];
+	char *sess_argv[2];
 	memset(sess, 0, sizeof(*sess));
 	sess->rdp_fd = -1;
-	sess->width = width != 0U ? width : 1280U;
-	sess->height = height != 0U ? height : 720U;
-
+	sess->width = 1280U;
+	if (width != 0U)
+		sess->width = width;
+	sess->height = 720U;
+	if (height != 0U)
+		sess->height = height;
 	(void)mkdir("/run/user", 0755);
 	(void)snprintf(runtime_dir, sizeof(runtime_dir), "/run/user/%lu",
 		       (unsigned long)uid);
 	(void)mkdir(runtime_dir, 0700);
 	(void)chown(runtime_dir, uid, gid);
-
-	if (socketpair(AF_UNIX, SOCK_STREAM, 0, sv) != 0)
+	rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
+	if (rc != 0)
 		return errno;
-
 	(void)snprintf(sess->wayland_socket, sizeof(sess->wayland_socket),
 		       "%s/wayland-rdp-%ld", runtime_dir, (long)getpid());
 	(void)snprintf(opt_width, sizeof(opt_width), "--width=%u", sess->width);
@@ -206,49 +229,47 @@ rdpd_session_start(
 	(void)snprintf(opt_fd, sizeof(opt_fd), "--rdp-fd=%d", sv[1]);
 	(void)snprintf(opt_sock, sizeof(opt_sock), "--socket=%s",
 		       sess->wayland_socket);
-
 	comp_pid = fork();
 	if (comp_pid < 0) {
-		int err = errno;
+		err = errno;
 		close(sv[0]);
 		close(sv[1]);
 		return err;
 	}
 
+	/* Child drops privileges and execs headless wayland. */
 	if (comp_pid == 0) {
-		char *argv[8];
-
 		close(sv[0]);
 		(void)fcntl(sv[1], F_SETFD, 0);
 		drop_privileges(uid, gid, user, home, shell);
-		argv[0] = (char *)RDPD_WAYLAND_PATH;
-		argv[1] = (char *)"--headless";
-		argv[2] = opt_width;
-		argv[3] = opt_height;
-		argv[4] = opt_fd;
-		argv[5] = opt_sock;
-		argv[6] = (char *)"--session";
-		argv[7] = NULL;
-		execv(RDPD_WAYLAND_PATH, argv);
+		comp_argv[0] = (char *)RDPD_WAYLAND_PATH;
+		comp_argv[1] = (char *)"--headless";
+		comp_argv[2] = opt_width;
+		comp_argv[3] = opt_height;
+		comp_argv[4] = opt_fd;
+		comp_argv[5] = opt_sock;
+		comp_argv[6] = (char *)"--session";
+		comp_argv[7] = NULL;
+		execv(RDPD_WAYLAND_PATH, comp_argv);
 		_exit(127);
 	}
 
+	/* Records compositor state and spawns the user session script. */
 	close(sv[1]);
 	sess->compositor_pid = comp_pid;
 	sess->rdp_fd = sv[0];
-
 	sess_pid = fork();
 	if (sess_pid == 0) {
-		char *argv[2];
-
 		close(sv[0]);
 		drop_privileges(uid, gid, user, home, shell);
 		(void)setenv("WAYLAND_DISPLAY", sess->wayland_socket, 1);
-		argv[0] = (char *)RDPD_SESSION_PATH;
-		argv[1] = NULL;
-		execv(RDPD_SESSION_PATH, argv);
+		sess_argv[0] = (char *)RDPD_SESSION_PATH;
+		sess_argv[1] = NULL;
+		execv(RDPD_SESSION_PATH, sess_argv);
 		_exit(127);
 	}
+
+	/* Saves the session process PID. */
 	sess->session_pid = sess_pid;
 	return 0;
 }
@@ -261,7 +282,6 @@ rdpd_session_resize(
 	uint32_t height)
 {
 	uint8_t msg[KWL_RDP_CTRL_HDR_SIZE];
-
 	if (sess == NULL || sess->rdp_fd < 0)
 		return;
 	sess->width = width;
@@ -276,7 +296,6 @@ rdpd_session_force_key(
 	struct rdpd_session *sess)
 {
 	uint8_t msg[KWL_RDP_CTRL_HDR_SIZE];
-
 	if (sess == NULL || sess->rdp_fd < 0)
 		return;
 	kwl_rdp_pack_ctrl(msg, KWL_RDP_MSG_FORCE_KEY, 0U, 0U);
@@ -289,23 +308,39 @@ rdpd_session_stop(
 	struct rdpd_session *sess)
 {
 	int status;
-
+	pid_t wp;
 	if (sess == NULL)
 		return;
 	if (sess->rdp_fd >= 0) {
 		close(sess->rdp_fd);
 		sess->rdp_fd = -1;
 	}
+
+	/* Stops the session script process. */
 	if (sess->session_pid > 0) {
 		(void)kill(sess->session_pid, SIGTERM);
-		while (waitpid(sess->session_pid, &status, 0) < 0 && errno == EINTR)
-			;
+		for (;;) {
+			wp = waitpid(sess->session_pid, &status, 0);
+			if (wp < 0 && errno == EINTR)
+				continue;
+			break;
+		}
+
+		/* Clears the stopped session PID. */
 		sess->session_pid = 0;
 	}
+
+	/* Stops the headless Wayland compositor process. */
 	if (sess->compositor_pid > 0) {
 		(void)kill(sess->compositor_pid, SIGTERM);
-		while (waitpid(sess->compositor_pid, &status, 0) < 0 && errno == EINTR)
-			;
+		for (;;) {
+			wp = waitpid(sess->compositor_pid, &status, 0);
+			if (wp < 0 && errno == EINTR)
+				continue;
+			break;
+		}
+
+		/* Clears the stopped compositor PID. */
 		sess->compositor_pid = 0;
 	}
 }

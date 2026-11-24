@@ -101,40 +101,33 @@ rdp_app_session_start(
 	struct rdp_app_session *s;
 	struct kl_thread_options opts;
 	int error;
-
 	if (app == NULL || window == NULL || target == NULL || out == NULL)
 		return EINVAL;
-
 	*out = NULL;
 	s = (struct rdp_app_session *)calloc(1U, sizeof(*s));
 	if (s == NULL)
 		return ENOMEM;
-
 	error = kl_mutex_init(&s->lock);
 	if (error != 0) {
 		free(s);
 		return error;
 	}
-
 	error = kl_socket_waker_open(&s->waker);
 	if (error != 0) {
 		kl_mutex_destroy(&s->lock);
 		free(s);
 		return error;
 	}
-
 	s->app = app;
 	s->window = window;
 	s->target = *target;
 	s->width = target->width > 0U ? target->width : 1280U;
 	s->height = target->height > 0U ? target->height : 720U;
-
 	memset(&opts, 0, sizeof(opts));
 	opts.run = rdp_thread_entry;
 	opts.argument = s;
 	opts.name = "rdp-client";
 	opts.priority = KL_THREAD_PRIORITY_NORMAL;
-
 	error = kl_thread_start(&opts, &s->thread);
 	if (error != 0) {
 		kl_socket_waker_close(s->waker);
@@ -142,7 +135,6 @@ rdp_app_session_start(
 		free(s);
 		return error;
 	}
-
 	*out = s;
 
 	/* Succeeded: RDP session thread running. */
@@ -158,15 +150,12 @@ rdp_app_session_stop(
 {
 	if (session == NULL)
 		return;
-
 	kl_mutex_lock(&session->lock);
 	session->stop = 1;
 	kl_mutex_unlock(&session->lock);
-
 	kl_socket_waker_ring(session->waker);
 	if (session->thread != NULL)
 		(void)kl_thread_join(session->thread);
-
 	if (session->scaler != NULL)
 		media_scaler_free(session->scaler);
 	if (session->decoder != NULL)
@@ -177,7 +166,6 @@ rdp_app_session_stop(
 		SSL_CTX_free(session->ssl_ctx);
 	if (session->sock != NULL)
 		kl_socket_close(session->sock);
-
 	kl_socket_waker_close(session->waker);
 	kl_mutex_destroy(&session->lock);
 	free(session->fb);
@@ -236,13 +224,11 @@ rdp_app_session_request_resize(
 {
 	if (session == NULL || width == 0U || height == 0U)
 		return;
-
 	kl_mutex_lock(&session->lock);
 	session->wanted_w = (width + 1U) & ~1U;
 	session->wanted_h = (height + 1U) & ~1U;
 	session->wanted_resize = 1;
 	kl_mutex_unlock(&session->lock);
-
 	kl_socket_waker_ring(session->waker);
 }
 
@@ -260,10 +246,8 @@ rdp_app_session_copy_frame(
 	uint32_t copy_w;
 	uint32_t copy_h;
 	int copied;
-
 	if (session == NULL || pixels == NULL)
 		return 0;
-
 	copied = 0;
 	kl_mutex_lock(&session->lock);
 	if (session->fb != NULL && session->fb_w > 0U && session->fb_h > 0U) {
@@ -274,7 +258,6 @@ rdp_app_session_copy_frame(
 			       session->fb + (size_t)y * session->fb_w,
 			       (size_t)copy_w * sizeof(*pixels));
 		}
-
 		copied = 1;
 	}
 
@@ -298,7 +281,6 @@ rdp_thread_entry(
 	int ssl_rc;
 	int stopping;
 	int error;
-
 	s = (struct rdp_app_session *)arg;
 
 	/* Opens libmedia H.264 decoder (vkvideo or h264sw fallback). */
@@ -309,10 +291,8 @@ rdp_thread_entry(
 	track.height = s->height;
 	if (media_decoder_open(&track, &s->decoder) != 0)
 		goto done;
-
 	if (session_connect_tcp(s) != 0)
 		goto done;
-
 	memset(&cb, 0, sizeof(cb));
 	cb.send_bytes = session_send_bytes;
 	cb.on_tls_required = session_on_tls;
@@ -320,11 +300,9 @@ rdp_thread_entry(
 	cb.on_avc_frame = session_on_avc_frame;
 	cb.on_resize = session_on_resize;
 	cb.on_disconnect = session_on_disconnect;
-
 	s->client = rdp_client_create(&cb, s);
 	if (s->client == NULL)
 		goto done;
-
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.width = s->width;
 	cfg.height = s->height;
@@ -332,62 +310,50 @@ rdp_thread_entry(
 	cfg.user_name = s->target.user;
 	cfg.password = s->target.password;
 	cfg.client_name = "zedbsd-rdp";
-
 	if (rdp_client_connect(s->client, &cfg) != RDP_OK)
 		goto done;
-
 	for (;;) {
 		kl_mutex_lock(&s->lock);
 		stopping = s->stop;
 		kl_mutex_unlock(&s->lock);
 		if (stopping != 0 || s->disconnected != 0)
 			break;
-
 		session_drain_inputs(s);
-
 		memset(waits, 0, sizeof(waits));
 		waits[0].socket = s->sock;
 		waits[0].events = KL_SOCKET_READABLE;
 		waits[1].waker = s->waker;
 		waits[1].events = KL_SOCKET_READABLE;
-
 		ready = 0U;
 		error = kl_socket_poll(waits, 2U, 200, &ready);
 		if (error != 0 && error != ETIMEDOUT)
 			break;
-
 		if (waits[0].ready == 0U)
 			continue;
-
 		for (;;) {
 			if (s->tls_active != 0) {
 				ssl_rc = SSL_read(s->ssl, rxbuf,
 						  (int)sizeof(rxbuf));
 				if (ssl_rc <= 0) {
 					int err;
-
 					err = SSL_get_error(s->ssl, ssl_rc);
 					if (err == SSL_ERROR_WANT_READ ||
 					    err == SSL_ERROR_WANT_WRITE)
 						break;
-
 					s->disconnected = 1;
 					break;
 				}
-
 				got = (size_t)ssl_rc;
 			} else {
 				error = kl_socket_receive(s->sock, rxbuf,
 							  sizeof(rxbuf), &got);
 				if (error == EAGAIN || error == EWOULDBLOCK)
 					break;
-
 				if (error != 0 || got == 0U) {
 					s->disconnected = 1;
 					break;
 				}
 			}
-
 			if (rdp_client_feed(s->client, rxbuf, got) != RDP_OK) {
 				s->disconnected = 1;
 				break;
@@ -401,7 +367,6 @@ done:
 		rdp_client_destroy(s->client);
 		s->client = NULL;
 	}
-
 	(void)kl_app_post(s->app, RDP_APP_POST_END, NULL);
 }
 
@@ -417,20 +382,17 @@ session_connect_tcp(
 	struct kl_socket_wait wait;
 	size_t ready;
 	int error;
-
 	count = 0U;
 	if (kl_socket_resolve(s->target.host, s->target.port, KL_ADDRESS_ANY,
 			      KL_SOCKET_STREAM, addrs, 8U, &count) != 0 ||
 	    count == 0U) {
 		return EHOSTUNREACH;
 	}
-
 	for (i = 0U; i < count; i++) {
 		error = kl_socket_open(addrs[i].family, KL_SOCKET_STREAM,
 				       KL_SOCKET_NONBLOCKING, &sock);
 		if (error != 0)
 			continue;
-
 		error = kl_socket_connect(sock, &addrs[i]);
 		if (error == EINPROGRESS || error == EWOULDBLOCK) {
 			memset(&wait, 0, sizeof(wait));
@@ -441,16 +403,13 @@ session_connect_tcp(
 			if (error == 0)
 				error = kl_socket_connect_result(sock);
 		}
-
 		if (error == 0) {
 			(void)kl_socket_set_option(sock, KL_SOCKET_NO_DELAY, 1);
 			s->sock = sock;
 			return 0;
 		}
-
 		kl_socket_close(sock);
 	}
-
 	return ECONNREFUSED;
 }
 
@@ -468,7 +427,6 @@ session_send_bytes(
 	struct kl_socket_wait wait;
 	size_t ready;
 	int error;
-
 	s = (struct rdp_app_session *)user;
 	off = 0U;
 	while (off < len) {
@@ -478,7 +436,6 @@ session_send_bytes(
 				off += (size_t)rc;
 				continue;
 			}
-
 			rc = SSL_get_error(s->ssl, rc);
 			if (rc != SSL_ERROR_WANT_WRITE &&
 			    rc != SSL_ERROR_WANT_READ)
@@ -490,11 +447,9 @@ session_send_bytes(
 				off += sent;
 				continue;
 			}
-
 			if (error != EAGAIN && error != EWOULDBLOCK)
 				return -1;
 		}
-
 		memset(&wait, 0, sizeof(wait));
 		wait.socket = s->sock;
 		wait.events = KL_SOCKET_WRITABLE;
@@ -502,7 +457,6 @@ session_send_bytes(
 		if (kl_socket_poll(&wait, 1U, 5000, &ready) != 0)
 			return -1;
 	}
-
 	return 0;
 }
 
@@ -516,35 +470,29 @@ session_on_tls(
 	int err;
 	struct kl_socket_wait wait;
 	size_t ready;
-
 	s = (struct rdp_app_session *)user;
 	s->ssl_ctx = SSL_CTX_new(TLS_client_method());
 	if (s->ssl_ctx == NULL) {
 		s->disconnected = 1;
 		return;
 	}
-
 	SSL_CTX_set_verify(s->ssl_ctx, SSL_VERIFY_NONE, NULL);
 	s->ssl = SSL_new(s->ssl_ctx);
 	if (s->ssl == NULL) {
 		s->disconnected = 1;
 		return;
 	}
-
 	(void)SSL_set_fd(s->ssl, (int)kl_socket_native(s->sock));
 	(void)SSL_set_tlsext_host_name(s->ssl, s->target.host);
-
 	for (;;) {
 		rc = SSL_connect(s->ssl);
 		if (rc == 1)
 			break;
-
 		err = SSL_get_error(s->ssl, rc);
 		if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
 			s->disconnected = 1;
 			return;
 		}
-
 		memset(&wait, 0, sizeof(wait));
 		wait.socket = s->sock;
 		wait.events = (err == SSL_ERROR_WANT_WRITE) ?
@@ -555,7 +503,6 @@ session_on_tls(
 			return;
 		}
 	}
-
 	s->tls_active = 1;
 	if (rdp_client_tls_established(s->client) != RDP_OK)
 		s->disconnected = 1;
@@ -569,7 +516,6 @@ session_on_connected(
 	uint32_t height)
 {
 	struct rdp_app_session *s;
-
 	s = (struct rdp_app_session *)user;
 	s->width = width;
 	s->height = height;
@@ -596,13 +542,11 @@ session_on_avc_frame(
 	if (s->decoder == NULL || avc->luma.data == NULL ||
 	    avc->luma.data_len == 0U)
 		return;
-
 	memset(&pkt, 0, sizeof(pkt));
 	pkt.data = avc->luma.data;
 	pkt.size = avc->luma.data_len;
 	pkt.keyframe = 1;
 	(void)media_decoder_send(s->decoder, &pkt);
-
 	pts = 0;
 	if (media_decoder_receive(s->decoder, &pts) == 0) {
 		frame = media_decoder_picture(s->decoder);
@@ -616,7 +560,6 @@ session_on_avc_frame(
 					s->scratch_cap = need;
 				}
 			}
-
 			if (s->scratch != NULL &&
 			    media_frame_scale(frame, &s->scaler, s->scratch,
 					      (size_t)s->width * 4U,
@@ -633,7 +576,6 @@ session_on_avc_frame(
 						s->fb_h = s->height;
 					}
 				}
-
 				if (s->fb != NULL && s->fb_w == s->width &&
 				    s->fb_h == s->height) {
 					memcpy(s->fb, s->scratch,
@@ -644,11 +586,9 @@ session_on_avc_frame(
 				(void)kl_app_post(s->app, RDP_APP_POST_FRAME,
 						  NULL);
 			}
-
 			media_frame_free(&frame);
 		}
 	}
-
 	(void)rdp_client_send_frame_ack(s->client, frame_id, 0U);
 }
 
@@ -660,7 +600,6 @@ session_on_resize(
 	uint32_t height)
 {
 	struct rdp_app_session *s;
-
 	s = (struct rdp_app_session *)user;
 	s->width = width;
 	s->height = height;
@@ -690,23 +629,19 @@ session_drain_inputs(
 	uint32_t rw;
 	uint32_t rh;
 	int do_resize;
-
 	if (rdp_client_is_connected(s->client) == 0)
 		return;
-
 	kl_mutex_lock(&s->lock);
 	count = s->input_count;
 	if (count > 0U) {
 		memcpy(batch, s->inputs, count * sizeof(batch[0]));
 		s->input_count = 0U;
 	}
-
 	do_resize = s->wanted_resize;
 	rw = s->wanted_w;
 	rh = s->wanted_h;
 	s->wanted_resize = 0;
 	kl_mutex_unlock(&s->lock);
-
 	for (i = 0U; i < count; i++) {
 		if (batch[i].kind == RDP_IN_KEY) {
 			(void)rdp_client_send_key(s->client, batch[i].code,
@@ -719,7 +654,6 @@ session_drain_inputs(
 						    batch[i].x, batch[i].y);
 		}
 	}
-
 	if (do_resize != 0)
 		(void)rdp_client_request_resize(s->client, rw, rh);
 }
@@ -735,7 +669,6 @@ queue_input(
 	uint16_t y)
 {
 	struct rdp_in_event *ev;
-
 	kl_mutex_lock(&s->lock);
 	if (s->input_count < RDP_SESSION_INPUTS) {
 		ev = &s->inputs[s->input_count++];

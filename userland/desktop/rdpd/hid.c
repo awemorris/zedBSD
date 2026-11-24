@@ -108,11 +108,9 @@ rdpd_hid_descriptor(
 	size_t cap)
 {
 	size_t sz;
-
 	sz = sizeof(rdpd_hid_desc_bytes);
 	if (out == NULL || cap < sz)
 		return 0U;
-
 	memcpy(out, rdpd_hid_desc_bytes, sz);
 	return sz;
 }
@@ -145,9 +143,9 @@ rdpd_ps2_to_hid_usage(
 		}
 	}
 
+	/* Falls back to the base PS/2 Set 1 table. */
 	if (scancode < 0x59U)
 		return ps2_base_to_hid[scancode];
-
 	return 0x00U;
 }
 
@@ -162,18 +160,15 @@ rdpd_hid_format_key(
 	uint8_t usage;
 	int release;
 	size_t i;
-
+	uint8_t bit;
+	int already;
 	if (hid == NULL || report == NULL)
 		return EINVAL;
-
 	usage = rdpd_ps2_to_hid_usage(scancode, flags);
 	if (usage == 0U)
 		return EINVAL;
-
 	release = (flags & RDP_KBD_FLAG_RELEASE) != 0U;
 	if (usage >= 0xE0U && usage <= 0xE7U) {
-		uint8_t bit;
-
 		bit = (uint8_t)(1U << (usage - 0xE0U));
 		if (release)
 			hid->modifiers &= (uint8_t)~bit;
@@ -186,8 +181,6 @@ rdpd_hid_format_key(
 					hid->keys[i] = 0U;
 			}
 		} else {
-			int already;
-
 			already = 0;
 			for (i = 0U; i < 6U; i++) {
 				if (hid->keys[i] == usage) {
@@ -195,6 +188,8 @@ rdpd_hid_format_key(
 					break;
 				}
 			}
+
+			/* Appends the newly pressed key into the first free 6KRO slot. */
 			if (!already) {
 				for (i = 0U; i < 6U; i++) {
 					if (hid->keys[i] == 0U) {
@@ -206,6 +201,7 @@ rdpd_hid_format_key(
 		}
 	}
 
+	/* Encodes Report ID 1 (modifiers, reserved, 6KRO keys). */
 	report[0] = 0x01U;
 	report[1] = hid->modifiers;
 	report[2] = 0x00U;
@@ -227,32 +223,36 @@ rdpd_hid_format_mouse(
 	uint32_t w;
 	uint32_t h;
 	int8_t wheel;
-
 	if (hid == NULL || report == NULL)
 		return EINVAL;
-
-	w = hid->width > 1U ? hid->width : 1280U;
-	h = hid->height > 1U ? hid->height : 720U;
+	w = 1280U;
+	if (hid->width > 1U)
+		w = hid->width;
+	h = 720U;
+	if (hid->height > 1U)
+		h = hid->height;
 	if (x >= w)
 		x = (uint16_t)(w - 1U);
 	if (y >= h)
 		y = (uint16_t)(h - 1U);
-
 	sx = ((uint32_t)x * 32767U) / (w - 1U);
 	sy = ((uint32_t)y * 32767U) / (h - 1U);
-
 	if ((flags & RDP_PTR_FLAG_BUTTON1) != 0U) {
 		if ((flags & RDP_PTR_FLAG_DOWN) != 0U)
 			hid->buttons |= 0x01U;
 		else
 			hid->buttons &= (uint8_t)~0x01U;
 	}
+
+	/* Updates button 2 state. */
 	if ((flags & RDP_PTR_FLAG_BUTTON2) != 0U) {
 		if ((flags & RDP_PTR_FLAG_DOWN) != 0U)
 			hid->buttons |= 0x02U;
 		else
 			hid->buttons &= (uint8_t)~0x02U;
 	}
+
+	/* Updates button 3 state. */
 	if ((flags & RDP_PTR_FLAG_BUTTON3) != 0U) {
 		if ((flags & RDP_PTR_FLAG_DOWN) != 0U)
 			hid->buttons |= 0x04U;
@@ -260,11 +260,16 @@ rdpd_hid_format_mouse(
 			hid->buttons &= (uint8_t)~0x04U;
 	}
 
+	/* Encodes Report ID 2 (buttons, scaled X/Y, wheel). */
 	wheel = 0;
 	if ((flags & RDP_PTR_FLAG_WHEEL) != 0U) {
-		wheel = (flags & RDP_PTR_FLAG_WHEEL_NEGATIVE) != 0U ? -1 : 1;
+		if ((flags & RDP_PTR_FLAG_WHEEL_NEGATIVE) != 0U)
+			wheel = -1;
+		else
+			wheel = 1;
 	}
 
+	/* Writes the 7-byte absolute mouse report. */
 	report[0] = 0x02U;
 	report[1] = hid->buttons;
 	report[2] = (uint8_t)(sx & 0xFFU);
@@ -285,16 +290,26 @@ rdpd_hid_open(
 	struct input_bridge_setup setup;
 	size_t dlen;
 	uint32_t dev;
-
+	ssize_t wr;
+	int err;
+	int rc;
 	memset(hid, 0, sizeof(*hid));
 	hid->fd = -1;
-	hid->width = width != 0U ? width : 1280U;
-	hid->height = height != 0U ? height : 720U;
-
+	hid->width = 1280U;
+	if (width != 0U)
+		hid->width = width;
+	hid->height = 720U;
+	if (height != 0U)
+		hid->height = height;
 	hid->fd = open(RDPD_INPUT_BRIDGE, O_RDWR | O_CLOEXEC);
-	if (hid->fd < 0)
-		return errno != 0 ? errno : EIO;
+	if (hid->fd < 0) {
+		err = errno;
+		if (err == 0)
+			err = EIO;
+		return err;
+	}
 
+	/* Registers the composite HID report descriptor. */
 	memset(&setup, 0, sizeof(setup));
 	setup.magic = INPUT_BRIDGE_MAGIC;
 	setup.version = INPUT_BRIDGE_VERSION;
@@ -304,18 +319,21 @@ rdpd_hid_open(
 	(void)snprintf(setup.name, sizeof(setup.name), "zedBSD RDP Virtual Input");
 	dlen = rdpd_hid_descriptor(setup.descriptor, sizeof(setup.descriptor));
 	setup.descriptor_size = (uint32_t)dlen;
-
-	if (write(hid->fd, &setup, sizeof(setup)) != (ssize_t)sizeof(setup)) {
-		int err = errno != 0 ? errno : EIO;
+	wr = write(hid->fd, &setup, sizeof(setup));
+	if (wr != (ssize_t)sizeof(setup)) {
+		err = errno;
+		if (err == 0)
+			err = EIO;
 		close(hid->fd);
 		hid->fd = -1;
 		return err;
 	}
 
+	/* Queries the assigned /dev/input/eventN index. */
 	dev = 0U;
-	if (ioctl(hid->fd, INPUT_BRIDGE_GET_DEVICE, &dev) == 0)
+	rc = ioctl(hid->fd, INPUT_BRIDGE_GET_DEVICE, &dev);
+	if (rc == 0)
 		hid->event_dev = dev;
-
 	return 0;
 }
 
@@ -342,10 +360,11 @@ rdpd_hid_key(
 	uint16_t flags)
 {
 	uint8_t report[9];
-
+	int rc;
 	if (hid == NULL || hid->fd < 0)
 		return;
-	if (rdpd_hid_format_key(hid, scancode, flags, report) == 0)
+	rc = rdpd_hid_format_key(hid, scancode, flags, report);
+	if (rc == 0)
 		(void)write(hid->fd, report, sizeof(report));
 }
 
@@ -358,10 +377,11 @@ rdpd_hid_mouse(
 	uint16_t y)
 {
 	uint8_t report[7];
-
+	int rc;
 	if (hid == NULL || hid->fd < 0)
 		return;
-	if (rdpd_hid_format_mouse(hid, flags, x, y, report) == 0)
+	rc = rdpd_hid_format_mouse(hid, flags, x, y, report);
+	if (rc == 0)
 		(void)write(hid->fd, report, sizeof(report));
 }
 

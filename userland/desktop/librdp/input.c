@@ -37,16 +37,13 @@ rdp_input_encode_key(
 	error = rdp_buf_append_u8(out, (uint8_t)(1U << 2));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 4U);
 	if (error != RDP_OK)
 		return error;
-
 	hdr_byte = (uint8_t)((fp_flags & 0x1FU) | (RDP_FP_INPUT_SCANCODE << 5));
 	error = rdp_buf_append_u8(out, hdr_byte);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, (uint8_t)(scancode & 0xFFU));
 	if (error != RDP_OK)
 		return error;
@@ -77,16 +74,13 @@ rdp_input_encode_unicode(
 	error = rdp_buf_append_u8(out, (uint8_t)(1U << 2));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 5U);
 	if (error != RDP_OK)
 		return error;
-
 	hdr_byte = (uint8_t)((fp_flags & 0x1FU) | (RDP_FP_INPUT_UNICODE << 5));
 	error = rdp_buf_append_u8(out, hdr_byte);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, codepoint);
 	if (error != RDP_OK)
 		return error;
@@ -112,24 +106,19 @@ rdp_input_encode_mouse(
 	error = rdp_buf_append_u8(out, (uint8_t)(1U << 2));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 9U);
 	if (error != RDP_OK)
 		return error;
-
 	hdr_byte = (uint8_t)(RDP_FP_INPUT_MOUSE << 5);
 	error = rdp_buf_append_u8(out, hdr_byte);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, flags);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, x);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, y);
 	if (error != RDP_OK)
 		return error;
@@ -153,11 +142,9 @@ rdp_input_encode_sync(
 	error = rdp_buf_append_u8(out, (uint8_t)(1U << 2));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 3U);
 	if (error != RDP_OK)
 		return error;
-
 	hdr_byte = (uint8_t)(((uint8_t)(toggle_flags & 0x1FU)) |
 			     (RDP_FP_INPUT_SYNC << 5));
 	error = rdp_buf_append_u8(out, hdr_byte);
@@ -199,37 +186,30 @@ rdp_input_decode_events(
 		error = rdp_read_u8(&r, &ev_hdr);
 		if (error != RDP_OK)
 			return error;
-
 		ev_flags = (uint8_t)(ev_hdr & 0x1FU);
 		ev_code = (uint8_t)((ev_hdr >> 5) & 0x07U);
-
 		if (ev_code == RDP_FP_INPUT_SCANCODE) {
 			error = rdp_read_u8(&r, &scancode);
 			if (error != RDP_OK)
 				return error;
-
 			if (cb->on_input_key != NULL)
 				cb->on_input_key(user, scancode, ev_flags);
 		} else if (ev_code == RDP_FP_INPUT_UNICODE) {
 			error = rdp_read_u16_le(&r, &codepoint);
 			if (error != RDP_OK)
 				return error;
-
 			if (cb->on_input_unicode != NULL)
 				cb->on_input_unicode(user, codepoint, ev_flags);
 		} else if (ev_code == RDP_FP_INPUT_MOUSE) {
 			error = rdp_read_u16_le(&r, &ptr_flags);
 			if (error != RDP_OK)
 				return error;
-
 			error = rdp_read_u16_le(&r, &x);
 			if (error != RDP_OK)
 				return error;
-
 			error = rdp_read_u16_le(&r, &y);
 			if (error != RDP_OK)
 				return error;
-
 			if (cb->on_input_mouse != NULL)
 				cb->on_input_mouse(user, ptr_flags, x, y);
 		} else if (ev_code == RDP_FP_INPUT_SYNC) {

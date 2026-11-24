@@ -38,30 +38,38 @@ rdp_parse_args(
 	const char *slash;
 	const char *colon;
 	unsigned long val;
-
+	int m1;
+	int m2;
+	int m3;
+	int m4;
+	int rdp_uri;
+	int prc;
+	const char *rbracket;
 	if (target == NULL)
 		return EINVAL;
-
 	memset(target, 0, sizeof(*target));
 	target->port = RDP_DEFAULT_PORT;
 	target->width = 1280U;
 	target->height = 720U;
 	pos_arg = NULL;
-
 	for (i = 1; i < argc; i++) {
 		arg = argv[i];
-		if (strncmp(arg, "--width=", 8U) == 0) {
+		m1 = strncmp(arg, "--width=", 8U);
+		m2 = strncmp(arg, "--height=", 9U);
+		m3 = strncmp(arg, "--domain=", 9U);
+		m4 = strncmp(arg, "--password=", 11U);
+		if (m1 == 0) {
 			val = strtoul(arg + 8, NULL, 10);
 			if (val >= 320UL && val <= 7680UL)
 				target->width = (uint32_t)val;
-		} else if (strncmp(arg, "--height=", 9U) == 0) {
+		} else if (m2 == 0) {
 			val = strtoul(arg + 9, NULL, 10);
 			if (val >= 200UL && val <= 4320UL)
 				target->height = (uint32_t)val;
-		} else if (strncmp(arg, "--domain=", 9U) == 0) {
+		} else if (m3 == 0) {
 			copy_str_slice(target->domain, sizeof(target->domain),
 				       arg + 9, strlen(arg + 9));
-		} else if (strncmp(arg, "--password=", 11U) == 0) {
+		} else if (m4 == 0) {
 			copy_str_slice(target->password,
 				       sizeof(target->password), arg + 11,
 				       strlen(arg + 11));
@@ -70,12 +78,12 @@ rdp_parse_args(
 		}
 	}
 
+	/* Extracts optional rdp:// prefix and [domain\][user@]host[:port]. */
 	if (pos_arg == NULL || pos_arg[0] == '\0')
 		return EINVAL;
-
-	if (strncmp(pos_arg, "rdp://", 6U) == 0)
+	rdp_uri = strncmp(pos_arg, "rdp://", 6U);
+	if (rdp_uri == 0)
 		pos_arg += 6;
-
 	at = strchr(pos_arg, '@');
 	if (at != NULL) {
 		slash = strchr(pos_arg, '\\');
@@ -89,21 +97,30 @@ rdp_parse_args(
 				       pos_arg, (size_t)(at - pos_arg));
 		}
 
+		/* Advances past the @ separator to the host[:port] part. */
 		pos_arg = at + 1;
 	}
 
+	/* Parses optional :port suffix and copies the hostname. */
 	colon = strrchr(pos_arg, ':');
-	if (colon != NULL && strchr(colon, ']') == NULL) {
-		if (parse_port(colon + 1, &target->port) != 0)
-			return EINVAL;
-
-		copy_str_slice(target->host, sizeof(target->host), pos_arg,
-			       (size_t)(colon - pos_arg));
+	if (colon != NULL) {
+		rbracket = strchr(colon, ']');
+		if (rbracket == NULL) {
+			prc = parse_port(colon + 1, &target->port);
+			if (prc != 0)
+				return EINVAL;
+			copy_str_slice(target->host, sizeof(target->host),
+				       pos_arg, (size_t)(colon - pos_arg));
+		} else {
+			copy_str_slice(target->host, sizeof(target->host),
+				       pos_arg, strlen(pos_arg));
+		}
 	} else {
 		copy_str_slice(target->host, sizeof(target->host), pos_arg,
 			       strlen(pos_arg));
 	}
 
+	/* Ensures a non-empty hostname was provided. */
 	if (target->host[0] == '\0')
 		return EINVAL;
 
@@ -144,13 +161,13 @@ rdp_evdev_to_scancode(
 		{ 127U, 0x5DU, RDP_KBD_FLAG_EXTENDED }
 	};
 	size_t i;
-
 	*flags = 0U;
 	if (evdev_code >= 1U && evdev_code <= 88U) {
 		*scancode = (uint16_t)evdev_code;
 		return 1;
 	}
 
+	/* Searches the extended evdev keycode table. */
 	for (i = 0U; i < sizeof(ext_map) / sizeof(ext_map[0]); i++) {
 		if (ext_map[i].evdev == evdev_code) {
 			*scancode = ext_map[i].scan;
@@ -159,6 +176,7 @@ rdp_evdev_to_scancode(
 		}
 	}
 
+	/* Unmapped evdev keycode. */
 	return 0;
 }
 
@@ -171,14 +189,11 @@ copy_str_slice(
 	size_t len)
 {
 	size_t n;
-
 	if (dst_sz == 0U)
 		return;
-
 	n = len;
 	if (n >= dst_sz)
 		n = dst_sz - 1U;
-
 	memcpy(dst, src, n);
 	dst[n] = '\0';
 }
@@ -191,19 +206,19 @@ parse_port(
 {
 	unsigned long v;
 	size_t i;
-
+	int dig;
 	if (s == NULL || s[0] == '\0')
 		return EINVAL;
-
 	for (i = 0U; s[i] != '\0'; i++) {
-		if (!isdigit((unsigned char)s[i]))
+		dig = isdigit((unsigned char)s[i]);
+		if (dig == 0)
 			return EINVAL;
 	}
 
+	/* Parses and range-checks the port number. */
 	v = strtoul(s, NULL, 10);
 	if (v < 1UL || v > 65535UL)
 		return EINVAL;
-
 	*out = (uint16_t)v;
 	return 0;
 }

@@ -63,7 +63,6 @@ main(
 	assert(rdp_evdev_to_scancode(103U, &scan, &flags) == 1);
 	assert(scan == 0x48U && flags == RDP_KBD_FLAG_EXTENDED);
 	assert(rdp_evdev_to_scancode(999U, &scan, &flags) == 0);
-
 	printf("rdp-client-host-test: all tests passed\n");
 	return 0;
 }

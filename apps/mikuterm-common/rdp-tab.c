@@ -98,21 +98,17 @@ rdp_tab_create(
 {
 	struct rdp_tab *tab;
 	int error;
-
 	if (host == NULL || out == NULL)
 		return EINVAL;
-
 	*out = NULL;
 	tab = (struct rdp_tab *)calloc(1U, sizeof(*tab));
 	if (tab == NULL)
 		return ENOMEM;
-
 	error = kl_mutex_init(&tab->lock);
 	if (error != 0) {
 		free(tab);
 		return error;
 	}
-
 	tab->connection.ops = &rdp_conn_ops;
 	tab->references = 1U;
 	tab->app = app;
@@ -124,7 +120,6 @@ rdp_tab_create(
 	snprintf(tab->title, sizeof(tab->title), "RDP: %.240s", host);
 	snprintf(tab->status_text, sizeof(tab->status_text),
 		 "Connecting to %.220s...", host);
-
 	*out = tab;
 
 	/* Succeeded: RDP tab created. */
@@ -153,14 +148,11 @@ rdp_tab_release(
 	struct rdp_tab *tab)
 {
 	unsigned refs;
-
 	if (tab == NULL)
 		return;
-
 	kl_mutex_lock(&tab->lock);
 	refs = --tab->references;
 	kl_mutex_unlock(&tab->lock);
-
 	if (refs == 0U) {
 		kl_mutex_destroy(&tab->lock);
 		free(tab->pixels);
@@ -182,7 +174,6 @@ rdp_tab_set_status(
 	snprintf(tab->title, sizeof(tab->title), "RDP: %.240s", tab->host);
 	tab->news = 1;
 	kl_mutex_unlock(&tab->lock);
-
 	tab_wake_ui(tab);
 }
 
@@ -198,12 +189,9 @@ rdp_tab_put_frame(
 {
 	size_t count;
 	uint32_t *buf;
-
 	if (tab == NULL || pixels == NULL || width == 0U || height == 0U)
 		return EINVAL;
-
 	count = (size_t)width * (size_t)height;
-
 	kl_mutex_lock(&tab->lock);
 	if (tab->pixels == NULL || tab->fb_width != width ||
 	    tab->fb_height != height) {
@@ -213,17 +201,14 @@ rdp_tab_put_frame(
 			kl_mutex_unlock(&tab->lock);
 			return ENOMEM;
 		}
-
 		tab->pixels = buf;
 		tab->fb_width = width;
 		tab->fb_height = height;
 	}
-
 	memcpy(tab->pixels, pixels, count * sizeof(*tab->pixels));
 	tab->has_frame = 1;
 	tab->news = 1;
 	kl_mutex_unlock(&tab->lock);
-
 	tab_wake_ui(tab);
 
 	/* Succeeded: decoded frame published to the UI tab. */
@@ -243,11 +228,9 @@ rdp_tab_end(
 		snprintf(tab->status_text, sizeof(tab->status_text), "%s",
 			 reason);
 	}
-
 	tab->ended = 1;
 	tab->news = 1;
 	kl_mutex_unlock(&tab->lock);
-
 	tab_wake_ui(tab);
 }
 
@@ -260,7 +243,6 @@ rdp_tab_take_input(
 	struct rdp_tab_input *out)
 {
 	int got;
-
 	kl_mutex_lock(&tab->lock);
 	got = 0;
 	if (tab->input_count > 0U) {
@@ -270,7 +252,6 @@ rdp_tab_take_input(
 			memmove(&tab->inputs[0], &tab->inputs[1],
 				tab->input_count * sizeof(tab->inputs[0]));
 		}
-
 		got = 1;
 	}
 
@@ -288,7 +269,6 @@ rdp_tab_take_resize(
 	uint32_t *height)
 {
 	int got;
-
 	kl_mutex_lock(&tab->lock);
 	got = tab->wanted_resize;
 	if (got != 0) {
@@ -309,7 +289,6 @@ rdp_tab_is_closing(
 	struct rdp_tab *tab)
 {
 	int closing;
-
 	kl_mutex_lock(&tab->lock);
 	closing = tab->closed || tab->refused;
 	kl_mutex_unlock(&tab->lock);
@@ -349,13 +328,11 @@ rdp_tab_evdev_to_scancode(
 		{ 127U, 0x5DU, RDP_KBD_FLAG_EXTENDED }
 	};
 	size_t i;
-
 	*flags = 0U;
 	if (evdev_code >= 1U && evdev_code <= 88U) {
 		*scancode = (uint16_t)evdev_code;
 		return 1;
 	}
-
 	for (i = 0U; i < sizeof(ext_map) / sizeof(ext_map[0]); i++) {
 		if (ext_map[i].evdev == evdev_code) {
 			*scancode = ext_map[i].scan;
@@ -363,7 +340,6 @@ rdp_tab_evdev_to_scancode(
 			return 1;
 		}
 	}
-
 	return 0;
 }
 
@@ -416,7 +392,6 @@ rdp_conn_resize(
 	tab = (struct rdp_tab *)conn;
 	if (w == 0U || h == 0U)
 		return 0;
-
 	kl_mutex_lock(&tab->lock);
 	if (tab->resize_enabled != 0 &&
 	    (w != tab->fb_width || h != tab->fb_height)) {
@@ -449,14 +424,11 @@ rdp_conn_event(
 {
 	struct rdp_tab *tab;
 	unsigned ready;
-
 	tab = (struct rdp_tab *)conn;
 	if (event->kind != KL_APP_POST || event->code != RDP_TAB_POST)
 		return 0U;
-
 	if ((uintptr_t)event->data != (uintptr_t)tab->post_id)
 		return 0U;
-
 	kl_mutex_lock(&tab->lock);
 	tab->posted = 0;
 	ready = 0U;
@@ -464,7 +436,6 @@ rdp_conn_event(
 		ready |= TERMINAL_READY_OUTPUT;
 	if (tab->ended != 0)
 		ready |= TERMINAL_READY_EXIT;
-
 	tab->news = 0;
 	kl_mutex_unlock(&tab->lock);
 	return ready;
@@ -477,7 +448,6 @@ rdp_conn_pending(
 {
 	struct rdp_tab *tab;
 	unsigned ready;
-
 	tab = (struct rdp_tab *)conn;
 	kl_mutex_lock(&tab->lock);
 	ready = 0U;
@@ -496,12 +466,10 @@ rdp_conn_close(
 	struct terminal_connection *conn)
 {
 	struct rdp_tab *tab;
-
 	tab = (struct rdp_tab *)conn;
 	kl_mutex_lock(&tab->lock);
 	tab->closed = 1;
 	kl_mutex_unlock(&tab->lock);
-
 	tab_wake_worker(tab);
 	rdp_tab_release(tab);
 }
@@ -527,7 +495,6 @@ rdp_view_draw(
 	total = (size_t)width * (size_t)height;
 	for (i = 0U; i < total; i++)
 		pixels[i] = RDP_TAB_BG;
-
 	kl_mutex_lock(&tab->lock);
 	if (tab->has_frame != 0 && tab->pixels != NULL) {
 		copy_w = tab->fb_width < width ? tab->fb_width : width;
@@ -551,7 +518,6 @@ rdp_view_title(
 	size_t size)
 {
 	struct rdp_tab *tab;
-
 	tab = (struct rdp_tab *)conn;
 	kl_mutex_lock(&tab->lock);
 	snprintf(title, size, "%s", tab->title);
@@ -576,20 +542,15 @@ rdp_view_input(
 	uint32_t cp;
 	int notches;
 	int i;
-
 	tab = (struct rdp_tab *)conn;
-
 	if (event->kind == TERMINAL_PICTURE_KEY) {
 		if (rdp_tab_evdev_to_scancode(event->code, &scan, &flags) != 0) {
 			if (event->pressed == 0)
 				flags |= RDP_KBD_FLAG_RELEASE;
-
 			tab_queue_input(tab, RDP_TAB_IN_KEY, scan, flags, 0U, 0U);
 		}
-
 		return;
 	}
-
 	if (event->kind == TERMINAL_PICTURE_TEXT) {
 		len = strlen(event->text);
 		pos = 0U;
@@ -604,13 +565,10 @@ rdp_view_input(
 						RDP_KBD_FLAG_RELEASE, 0U, 0U);
 			}
 		}
-
 		return;
 	}
-
 	px = event->x > 0 ? (uint16_t)event->x : 0U;
 	py = event->y > 0 ? (uint16_t)event->y : 0U;
-
 	if (event->kind == TERMINAL_PICTURE_MOTION) {
 		tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U, RDP_PTR_FLAG_MOVE,
 				px, py);
@@ -622,11 +580,9 @@ rdp_view_input(
 			btn_flag = RDP_PTR_FLAG_BUTTON2;
 		else if (event->code == EVDEV_BTN_MIDDLE)
 			btn_flag = RDP_PTR_FLAG_BUTTON3;
-
 		if (btn_flag != 0U) {
 			if (event->pressed != 0)
 				btn_flag |= RDP_PTR_FLAG_DOWN;
-
 			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U, btn_flag,
 					px, py);
 		}
@@ -641,7 +597,6 @@ rdp_view_input(
 			else
 				flags |= (uint16_t)(RDP_PTR_FLAG_WHEEL_NEGATIVE |
 						    ((-120) & 0x00FFU));
-
 			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U, flags, px, py);
 		}
 	}
@@ -725,7 +680,6 @@ rdp_view_paste(
 	size_t pos;
 	size_t step;
 	uint32_t cp;
-
 	tab = (struct rdp_tab *)conn;
 	pos = 0U;
 	while (pos < length) {
@@ -747,7 +701,6 @@ rdp_view_refuse(
 	struct terminal_connection *conn)
 {
 	struct rdp_tab *tab;
-
 	tab = (struct rdp_tab *)conn;
 	kl_mutex_lock(&tab->lock);
 	tab->refused = 1;
@@ -761,7 +714,6 @@ tab_wake_ui(
 	struct rdp_tab *tab)
 {
 	int should_post;
-
 	kl_mutex_lock(&tab->lock);
 	should_post = (tab->app != NULL && tab->posted == 0);
 	if (should_post != 0)
@@ -779,7 +731,6 @@ tab_wake_worker(
 	struct rdp_tab *tab)
 {
 	struct kl_socket_waker *waker;
-
 	kl_mutex_lock(&tab->lock);
 	waker = tab->waker;
 	kl_mutex_unlock(&tab->lock);
@@ -798,7 +749,6 @@ tab_queue_input(
 	uint16_t y)
 {
 	struct rdp_tab_input *in;
-
 	kl_mutex_lock(&tab->lock);
 	if (tab->input_count < RDP_TAB_INPUTS) {
 		in = &tab->inputs[tab->input_count++];
@@ -821,36 +771,30 @@ decode_utf8_one(
 	size_t *step)
 {
 	uint8_t b0;
-
 	if (len == 0U) {
 		*step = 0U;
 		return 0U;
 	}
-
 	b0 = (uint8_t)s[0];
 	if (b0 < 0x80U) {
 		*step = 1U;
 		return b0;
 	}
-
 	if ((b0 & 0xE0U) == 0xC0U && len >= 2U) {
 		*step = 2U;
 		return (((uint32_t)(b0 & 0x1FU)) << 6) |
 		       ((uint32_t)(s[1] & 0x3FU));
 	}
-
 	if ((b0 & 0xF0U) == 0xE0U && len >= 3U) {
 		*step = 3U;
 		return (((uint32_t)(b0 & 0x0FU)) << 12) |
 		       (((uint32_t)(s[1] & 0x3FU)) << 6) |
 		       ((uint32_t)(s[2] & 0x3FU));
 	}
-
 	if ((b0 & 0xF8U) == 0xF0U && len >= 4U) {
 		*step = 4U;
 		return 0xFFFDU;
 	}
-
 	*step = 1U;
 	return 0U;
 }

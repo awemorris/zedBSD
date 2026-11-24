@@ -67,32 +67,26 @@ sslc_srv_hs_message(
 	size_t hlen;
 	struct cryc_ecp ec;
 	int error;
-
 	memset(actions, 0, sizeof(*actions));
 	if (size < 4U) {
 		hs->alert = SSLC_ALERT_DECODE_ERROR;
 		return EINVAL;
 	}
-
 	body = message + 4U;
 	body_len = size - 4U;
-
 	if (hs->state == SSLC_HS_START) {
 		if (type != SSLC_HS_CLIENT_HELLO) {
 			hs->alert = SSLC_ALERT_UNEXPECTED_MESSAGE;
 			return EPROTO;
 		}
-
 		hs->config = config;
 		suite = sslc_tls_suite(0x1301U);
 		if (suite == NULL) {
 			hs->alert = SSLC_ALERT_INTERNAL_ERROR;
 			return EINVAL;
 		}
-
 		hs->version = SSLC_TLS13;
 		hs->suite = suite;
-
 		sid_len = 0U;
 		group = 0U;
 		peer_key = NULL;
@@ -103,7 +97,6 @@ sslc_srv_hs_message(
 			hs->alert = SSLC_ALERT_HANDSHAKE_FAILURE;
 			return error;
 		}
-
 		if (config->random == NULL ||
 		    config->random(config->random_context, srv_rand, 32U) != 0) {
 			hs->alert = SSLC_ALERT_INTERNAL_ERROR;
@@ -119,31 +112,26 @@ sslc_srv_hs_message(
 				hs->alert = SSLC_ALERT_INTERNAL_ERROR;
 				return EIO;
 			}
-
 			if (cryc_x25519(shared, hs->x25519_private,
 					peer_key) != 0) {
 				hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 				return EPROTO;
 			}
-
 			shared_len = CRYC_X25519_SIZE;
 			memcpy(srv_pub, hs->x25519_public, CRYC_X25519_SIZE);
 			srv_pub_len = CRYC_X25519_SIZE;
 		} else {
 			struct cryc_ecp_point pt;
-
 			if (cryc_ecp_init(&ec, CRYC_CURVE_P256) != 0) {
 				hs->alert = SSLC_ALERT_INTERNAL_ERROR;
 				return EINVAL;
 			}
-
 			if (cryc_ecc_keygen(&ec, hs->ec_private, srv_pub,
 					    config->random,
 					    config->random_context) != 0) {
 				hs->alert = SSLC_ALERT_INTERNAL_ERROR;
 				return EIO;
 			}
-
 			srv_pub_len = 1U + 2U * ec.size;
 			if (cryc_ecp_decode(&ec, &pt, peer_key,
 					    peer_key_len) != 0 ||
@@ -152,7 +140,6 @@ sslc_srv_hs_message(
 				hs->alert = SSLC_ALERT_ILLEGAL_PARAMETER;
 				return EPROTO;
 			}
-
 			shared_len = ec.size;
 		}
 
@@ -167,7 +154,6 @@ sslc_srv_hs_message(
 			memcpy(sh + sh_pos, sid, sid_len);
 			sh_pos += sid_len;
 		}
-
 		sh[sh_pos++] = 0x13U;
 		sh[sh_pos++] = 0x01U;
 		sh[sh_pos++] = 0x00U;
@@ -175,7 +161,6 @@ sslc_srv_hs_message(
 		/* Extensions: supported_versions (6B) + key_share (8+pub). */
 		{
 			size_t ext_len;
-
 			ext_len = 6U + 4U + 4U + srv_pub_len;
 			sh[sh_pos++] = (uint8_t)(ext_len >> 8);
 			sh[sh_pos++] = (uint8_t)(ext_len & 0xFFU);
@@ -200,21 +185,17 @@ sslc_srv_hs_message(
 			memcpy(sh + sh_pos, srv_pub, srv_pub_len);
 			sh_pos += srv_pub_len;
 		}
-
 		sslc_transcript_init(&hs->transcript);
 		(void)sslc_transcript_select(&hs->transcript, CRYC_HASH_SHA256);
 		sslc_transcript_update(&hs->transcript, message, size);
-
 		error = srv_send_msg(hs, actions, SSLC_HS_SERVER_HELLO, sh,
 				     sh_pos);
 		if (error != 0)
 			return error;
-
 		error = sslc_hs_queue_action(actions, SSLC_HS_SEND_CCS, 0, NULL,
 					     0U);
 		if (error != 0)
 			return error;
-
 		hlen = sslc_transcript_hash(&hs->transcript, thash);
 		if (hlen == 0U ||
 		    sslc_tls13_start(&hs->schedule, CRYC_HASH_SHA256) != 0 ||
@@ -239,7 +220,6 @@ sslc_srv_hs_message(
 		/* EncryptedExtensions (empty: 2-byte length 0). */
 		{
 			uint8_t ee[2];
-
 			ee[0] = 0x00U;
 			ee[1] = 0x00U;
 			error = srv_send_msg(hs, actions,
@@ -256,18 +236,15 @@ sslc_srv_hs_message(
 			hs->alert = SSLC_ALERT_INTERNAL_ERROR;
 			return EINVAL;
 		}
-
 		cm_pos = 0U;
 		cert_msg[cm_pos++] = 0x00U;
 		{
 			size_t list_len;
-
 			list_len = 3U + config->cert_der_len + 2U;
 			cert_msg[cm_pos++] = (uint8_t)(list_len >> 16);
 			cert_msg[cm_pos++] = (uint8_t)((list_len >> 8) & 0xFFU);
 			cert_msg[cm_pos++] = (uint8_t)(list_len & 0xFFU);
 		}
-
 		cert_msg[cm_pos++] = (uint8_t)(config->cert_der_len >> 16);
 		cert_msg[cm_pos++] = (uint8_t)((config->cert_der_len >> 8) & 0xFFU);
 		cert_msg[cm_pos++] = (uint8_t)(config->cert_der_len & 0xFFU);
@@ -276,7 +253,6 @@ sslc_srv_hs_message(
 		cm_pos += config->cert_der_len;
 		cert_msg[cm_pos++] = 0x00U;
 		cert_msg[cm_pos++] = 0x00U;
-
 		error = srv_send_msg(hs, actions, SSLC_HS_CERTIFICATE,
 				     cert_msg, cm_pos);
 		if (error != 0)
@@ -290,7 +266,6 @@ sslc_srv_hs_message(
 		cv_input[97] = 0x00U;
 		memcpy(cv_input + 98U, thash, 32U);
 		cryc_hash_digest(CRYC_HASH_SHA256, cv_input, 130U, cv_hash);
-
 		sig_len = sizeof(sig_der);
 		if (srv_ecdsa_p256_sign(config->ec_priv, cv_hash,
 					config->random, config->random_context,
@@ -298,7 +273,6 @@ sslc_srv_hs_message(
 			hs->alert = SSLC_ALERT_INTERNAL_ERROR;
 			return EINVAL;
 		}
-
 		cv_pos = 0U;
 		cv_msg[cv_pos++] = 0x04U;
 		cv_msg[cv_pos++] = 0x03U;
@@ -306,7 +280,6 @@ sslc_srv_hs_message(
 		cv_msg[cv_pos++] = (uint8_t)(sig_len & 0xFFU);
 		memcpy(cv_msg + cv_pos, sig_der, sig_len);
 		cv_pos += sig_len;
-
 		error = srv_send_msg(hs, actions, SSLC_HS_CERTIFICATE_VERIFY,
 				     cv_msg, cv_pos);
 		if (error != 0)
@@ -321,7 +294,6 @@ sslc_srv_hs_message(
 				     32U);
 		if (error != 0)
 			return error;
-
 		(void)sslc_transcript_hash(&hs->transcript, thash);
 		(void)sslc_tls13_master(&hs->schedule, thash);
 		(void)sslc_tls13_traffic_keys(CRYC_HASH_SHA256, suite,
@@ -329,17 +301,14 @@ sslc_srv_hs_message(
 					      &keys);
 		(void)sslc_hs_queue_action(actions, SSLC_HS_SET_WRITE_KEYS, 1,
 					   &keys, 0U);
-
 		hs->state = SSLC_HS13_WAIT_FINISHED;
 		return 0;
 	}
-
 	if (hs->state == SSLC_HS13_WAIT_FINISHED) {
 		if (type != SSLC_HS_FINISHED || body_len != 32U) {
 			hs->alert = SSLC_ALERT_UNEXPECTED_MESSAGE;
 			return EPROTO;
 		}
-
 		(void)sslc_transcript_hash(&hs->transcript, thash);
 		(void)sslc_tls13_finished(CRYC_HASH_SHA256,
 					  hs->schedule.client_handshake, thash,
@@ -348,7 +317,6 @@ sslc_srv_hs_message(
 			hs->alert = SSLC_ALERT_DECRYPT_ERROR;
 			return EBADMSG;
 		}
-
 		sslc_transcript_update(&hs->transcript, message, size);
 		(void)sslc_tls13_traffic_keys(CRYC_HASH_SHA256, hs->suite,
 					      hs->schedule.client_application,
@@ -359,7 +327,6 @@ sslc_srv_hs_message(
 		hs->state = SSLC_HS13_CONNECTED;
 		return 0;
 	}
-
 	hs->alert = SSLC_ALERT_UNEXPECTED_MESSAGE;
 	return EPROTO;
 }
@@ -405,21 +372,16 @@ sslc_srv_generate_self_signed(
 	};
 	size_t name_len;
 	size_t tbs_body_len;
-
 	if (cn == NULL || cn[0] == '\0')
 		cn = "zedbsd";
-
 	cn_len = strlen(cn);
 	if (cn_len > 64U)
 		cn_len = 64U;
-
 	if (cryc_ecp_init(&ec, CRYC_CURVE_P256) != 0)
 		return EINVAL;
-
 	priv = (uint8_t *)malloc(32U);
 	if (priv == NULL)
 		return ENOMEM;
-
 	if (cryc_ecc_keygen(&ec, priv, pub, rnd, rnd_ctx) != 0) {
 		free(priv);
 		return EIO;
@@ -485,11 +447,9 @@ sslc_srv_generate_self_signed(
 	pos += sizeof(spki_hdr);
 	memcpy(tbs + pos, pub, 65U);
 	pos += 65U;
-
 	{
 		uint8_t *tbs_ptr;
 		size_t tbs_len;
-
 		tbs_body_len = pos - 4U;
 		if (tbs_body_len < 128U) {
 			tbs_ptr = tbs + 2U;
@@ -510,7 +470,6 @@ sslc_srv_generate_self_signed(
 			tbs_ptr[3] = (uint8_t)(tbs_body_len & 0xFFU);
 			tbs_len = pos;
 		}
-
 		cryc_hash_digest(CRYC_HASH_SHA256, tbs_ptr, tbs_len, hash);
 		sig_len = sizeof(sig);
 		if (srv_ecdsa_p256_sign(priv, hash, rnd, rnd_ctx, sig,
@@ -518,18 +477,17 @@ sslc_srv_generate_self_signed(
 			free(priv);
 			return EINVAL;
 		}
-
 		cert = (uint8_t *)malloc(tbs_len + sizeof(alg_ecdsa_sha256) +
 					 sig_len + 16U);
 		if (cert == NULL) {
 			free(priv);
 			return ENOMEM;
 		}
-
 		cpos = 4U;
 		memcpy(cert + cpos, tbs_ptr, tbs_len);
 		cpos += tbs_len;
 	}
+
 	memcpy(cert + cpos, alg_ecdsa_sha256, sizeof(alg_ecdsa_sha256));
 	cpos += sizeof(alg_ecdsa_sha256);
 	cert[cpos++] = 0x03U;
@@ -537,12 +495,10 @@ sslc_srv_generate_self_signed(
 	cert[cpos++] = 0x00U;
 	memcpy(cert + cpos, sig, sig_len);
 	cpos += sig_len;
-
 	cert[0] = 0x30U;
 	cert[1] = 0x82U;
 	cert[2] = (uint8_t)((cpos - 4U) >> 8);
 	cert[3] = (uint8_t)((cpos - 4U) & 0xFFU);
-
 	*out_cert_der = cert;
 	*out_cert_len = cpos;
 	*out_priv32 = priv;
@@ -566,56 +522,45 @@ srv_parse_ch(
 	size_t ext_end;
 	size_t slen;
 	uint8_t comp_len;
-
 	if (len < 38U)
 		return EINVAL;
-
 	pos = 34U;
 	slen = body[pos++];
 	if (slen > 32U || pos + slen + 2U > len)
 		return EINVAL;
-
 	memcpy(sid, body + pos, slen);
 	*sid_len = slen;
 	pos += slen;
-
 	cs_len = ((size_t)body[pos] << 8) | (size_t)body[pos + 1U];
 	pos += 2U;
 	if (pos + cs_len + 1U > len)
 		return EINVAL;
-
 	pos += cs_len;
 	comp_len = body[pos++];
 	if (pos + comp_len + 2U > len)
 		return EINVAL;
-
 	pos += comp_len;
 	ext_len = ((size_t)body[pos] << 8) | (size_t)body[pos + 1U];
 	pos += 2U;
 	if (pos + ext_len > len)
 		return EINVAL;
-
 	ext_end = pos + ext_len;
 	while (pos + 4U <= ext_end) {
 		uint16_t etype;
 		size_t elen;
-
 		etype = ((uint16_t)body[pos] << 8) | (uint16_t)body[pos + 1U];
 		elen = ((size_t)body[pos + 2U] << 8) | (size_t)body[pos + 3U];
 		pos += 4U;
 		if (pos + elen > ext_end)
 			return EINVAL;
-
 		if (etype == 0x0033U && elen >= 2U) {
 			size_t ks_end;
 			size_t kpos;
-
 			ks_end = pos + elen;
 			kpos = pos + 2U;
 			while (kpos + 4U <= ks_end) {
 				uint16_t grp;
 				size_t klen;
-
 				grp = ((uint16_t)body[kpos] << 8) |
 				      (uint16_t)body[kpos + 1U];
 				klen = ((size_t)body[kpos + 2U] << 8) |
@@ -623,7 +568,6 @@ srv_parse_ch(
 				kpos += 4U;
 				if (kpos + klen > ks_end)
 					return EINVAL;
-
 				if ((grp == 0x001DU && klen == 32U) ||
 				    (grp == 0x0017U && klen == 65U)) {
 					if (*group == 0U || grp == 0x001DU) {
@@ -632,17 +576,13 @@ srv_parse_ch(
 						*peer_key_len = klen;
 					}
 				}
-
 				kpos += klen;
 			}
 		}
-
 		pos += elen;
 	}
-
 	if (*group == 0U)
 		return EPROTO;
-
 	return 0;
 }
 
@@ -674,27 +614,21 @@ srv_ecdsa_p256_sign(
 	uint8_t rx_bytes[32];
 	uint8_t s_bytes[32];
 	int error;
-
 	error = cryc_ecp_init(&ec, CRYC_CURVE_P256);
 	if (error != 0)
 		return error;
-
 	cryc_bn_decode(d, ec.limbs, priv32, 32U);
 	cryc_bn_decode(e, ec.limbs, hash32, 32U);
 	cryc_bn_reduce_once(e, e, &ec.order);
-
 	if (rnd == NULL || rnd(rnd_ctx, k_bytes, 32U) != 0)
 		return EIO;
-
 	k_bytes[0] &= 0x7FU;
 	cryc_bn_decode(k, ec.limbs, k_bytes, 32U);
 	if (cryc_bn_is_zero(k, ec.limbs) != 0)
 		k[0] = 1U;
-
 	cryc_ecp_mul_base(&ec, &pt, k);
 	if (cryc_ecp_affine_x(&ec, &pt, rx_bytes) != 0)
 		return EINVAL;
-
 	cryc_bn_decode(r, ec.limbs, rx_bytes, 32U);
 	cryc_bn_reduce_once(r, r, &ec.order);
 	cryc_bn_encode(r, ec.limbs, rx_bytes, 32U);
@@ -717,7 +651,6 @@ srv_ecdsa_p256_sign(
 		uint32_t base_m[CRYC_ECP_MAX_LIMBS];
 		uint32_t acc_m[CRYC_ECP_MAX_LIMBS];
 		unsigned bit;
-
 		cryc_bn_to_mont(base_m, k, &ec.order);
 		memset(acc_m, 0, sizeof(acc_m));
 		acc_m[0] = 1U;
@@ -727,15 +660,14 @@ srv_ecdsa_p256_sign(
 			if (((n_minus_2[bit / 8U] >> (7U - (bit % 8U))) & 1U) != 0U)
 				cryc_bn_mont_mul(acc_m, acc_m, base_m, &ec.order);
 		}
-
 		cryc_bn_from_mont(k_inv, acc_m, &ec.order);
 	}
+
 	cryc_bn_to_mont(kinv_mont, k_inv, &ec.order);
 	cryc_bn_to_mont(erd, erd, &ec.order);
 	cryc_bn_mont_mul(s_mont, kinv_mont, erd, &ec.order);
 	cryc_bn_from_mont(s, s_mont, &ec.order);
 	cryc_bn_encode(s, ec.limbs, s_bytes, 32U);
-
 	*der_len = der_encode_ecdsa_sig(rx_bytes, s_bytes, der);
 	return 0;
 }
@@ -751,7 +683,6 @@ der_encode_ecdsa_sig(
 	uint8_t sbuf[36];
 	size_t rlen;
 	size_t slen;
-
 	rlen = der_encode_int(r32, rbuf);
 	slen = der_encode_int(s32, sbuf);
 	out[0] = 0x30U;
@@ -770,11 +701,9 @@ der_encode_int(
 	size_t off;
 	size_t len;
 	size_t pos;
-
 	off = 0U;
 	while (off < 31U && val32[off] == 0U)
 		off++;
-
 	len = 32U - off;
 	pos = 0U;
 	out[pos++] = 0x02U;
@@ -784,7 +713,6 @@ der_encode_int(
 	} else {
 		out[pos++] = (uint8_t)len;
 	}
-
 	memcpy(out + pos, val32 + off, len);
 	return pos + len;
 }
@@ -799,16 +727,13 @@ srv_send_msg(
 	size_t body_len)
 {
 	uint8_t msg[4160];
-
 	if (body_len + 4U > sizeof(msg))
 		return ENOBUFS;
-
 	msg[0] = type;
 	msg[1] = (uint8_t)(body_len >> 16);
 	msg[2] = (uint8_t)((body_len >> 8) & 0xFFU);
 	msg[3] = (uint8_t)(body_len & 0xFFU);
 	if (body_len > 0U)
 		memcpy(msg + 4U, body, body_len);
-
 	return sslc_hs_queue_message(hs, actions, msg, body_len + 4U);
 }

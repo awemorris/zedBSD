@@ -53,7 +53,6 @@ main(
 	test_libssl_server_client();
 	test_rdpd_hid();
 	test_wayland_ipc();
-
 	printf("ws393-p005-host-test: all tests passed\n");
 	return 0;
 }
@@ -78,7 +77,7 @@ test_h264sw_enc_roundtrip(
 	uint32_t rgba[64 * 64];
 	int64_t pts;
 	int f;
-
+	int rc;
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.codec = MEDIA_CODEC_H264;
 	cfg.profile = MEDIA_ENCODER_PROFILE_H264_CONSTRAINED_BASELINE;
@@ -92,11 +91,9 @@ test_h264sw_enc_roundtrip(
 	cfg.output = MEDIA_ENCODER_ANNEX_B;
 	cfg.rate_control = MEDIA_ENCODER_RATE_CQP;
 	cfg.qp = 26U;
-
 	enc = NULL;
 	assert(media_encoder_create(&cfg, &enc) == 0);
 	assert(enc != NULL);
-
 	memset(&track, 0, sizeof(track));
 	track.kind = MEDIA_TRACK_VIDEO;
 	track.codec = MEDIA_CODEC_H264;
@@ -105,13 +102,11 @@ test_h264sw_enc_roundtrip(
 	dec = NULL;
 	assert(media_decoder_open(&track, &dec) == 0);
 	assert(dec != NULL);
-
 	scaler = NULL;
 	for (f = 0; f < 3; f++) {
 		memset(y_plane, (uint8_t)(80 + f * 30), sizeof(y_plane));
 		memset(u_plane, 128U, sizeof(u_plane));
 		memset(v_plane, 128U, sizeof(v_plane));
-
 		memset(&pic, 0, sizeof(pic));
 		pic.plane[0] = y_plane;
 		pic.plane[1] = u_plane;
@@ -126,14 +121,14 @@ test_h264sw_enc_roundtrip(
 		assert(pkt.data != NULL && pkt.size > 4U);
 		if (f == 0)
 			assert((pkt.flags & MEDIA_ENCODED_KEY) != 0U);
-
 		memset(&mpkt, 0, sizeof(mpkt));
 		mpkt.data = pkt.data;
 		mpkt.size = pkt.size;
 		mpkt.pts_us = (int64_t)f * 33333;
 		mpkt.keyframe = (pkt.flags & MEDIA_ENCODED_KEY) != 0U;
 		assert(media_decoder_send(dec, &mpkt) == 0);
-		if (media_decoder_receive(dec, &pts) == 1) {
+		rc = media_decoder_receive(dec, &pts);
+		if (rc == 1) {
 			frame = media_decoder_picture(dec);
 			assert(frame != NULL);
 			assert(media_frame_scale(frame, &scaler, rgba, 64U * 4U, 64, 64) == 0);
@@ -144,7 +139,7 @@ test_h264sw_enc_roundtrip(
 	assert(media_decoder_send(dec, NULL) == 0);
 	pts = 0;
 	if (scaler == NULL) {
-		int rc = media_decoder_receive(dec, &pts);
+		rc = media_decoder_receive(dec, &pts);
 		if (rc != 1)
 			fprintf(stderr, "media_decoder_receive rc=%d\n", rc);
 		assert(rc == 1);
@@ -154,6 +149,7 @@ test_h264sw_enc_roundtrip(
 		media_frame_free(&frame);
 	}
 
+	/* Releases decoder, scaler, and encoder resources. */
 	media_scaler_free(scaler);
 	media_decoder_close(dec);
 	media_encoder_close(enc);
@@ -168,7 +164,6 @@ tls_server_thread(
 	SSL *ssl;
 	char buf[32];
 	int n;
-
 	a = (struct tls_srv_arg *)arg;
 	ssl = SSL_new(a->ctx);
 	assert(ssl != NULL);
@@ -177,13 +172,11 @@ tls_server_thread(
 	if (rc != 1)
 		fprintf(stderr, "SSL_accept rc=%d err=%d errno=%d errcode=0x%lx\n", rc, SSL_get_error(ssl, rc), errno, (unsigned long)ERR_get_error());
 	assert(rc == 1);
-
 	memset(buf, 0, sizeof(buf));
 	n = SSL_read(ssl, buf, sizeof(buf));
 	assert(n == 5);
 	assert(memcmp(buf, "hello", 5U) == 0);
 	assert(SSL_write(ssl, "world", 5) == 5);
-
 	(void)SSL_shutdown(ssl);
 	SSL_free(ssl);
 	a->ok = 1;
@@ -205,16 +198,13 @@ test_libssl_server_client(
 	int n;
 
 	assert(socketpair(AF_UNIX, SOCK_STREAM, 0, sv) == 0);
-
 	sctx = SSL_CTX_new(TLS_server_method());
 	assert(sctx != NULL);
 	assert(SSL_CTX_generate_self_signed(sctx, "zedbsd-rdp") == 1);
-
 	sarg.fd = sv[0];
 	sarg.ctx = sctx;
 	sarg.ok = 0;
 	assert(pthread_create(&thr, NULL, tls_server_thread, &sarg) == 0);
-
 	cctx = SSL_CTX_new(TLS_client_method());
 	assert(cctx != NULL);
 	SSL_CTX_set_verify(cctx, SSL_VERIFY_NONE, NULL);
@@ -231,7 +221,6 @@ test_libssl_server_client(
 	n = SSL_read(cssl, buf, sizeof(buf));
 	assert(n == 5);
 	assert(memcmp(buf, "world", 5U) == 0);
-
 	(void)SSL_shutdown(cssl);
 	SSL_free(cssl);
 	SSL_CTX_free(cctx);
@@ -257,14 +246,12 @@ test_rdpd_hid(
 	uint8_t mrep[7];
 	uint16_t sx;
 	uint16_t sy;
-
 	dlen = rdpd_hid_descriptor(desc, sizeof(desc));
 	assert(dlen > 40U && dlen < sizeof(desc));
 	assert(rdpd_hid_descriptor(desc, 10U) == 0U);
 
 	assert(rdpd_ps2_to_hid_usage(0x1EU, 0U) == 0x04U);
 	assert(rdpd_ps2_to_hid_usage(0x48U, RDP_KBD_FLAG_EXTENDED) == 0x52U);
-
 	memset(&hid, 0, sizeof(hid));
 	hid.fd = -1;
 	hid.width = 1280U;
@@ -309,15 +296,12 @@ test_wayland_ipc(
 	uint32_t sz;
 	uint32_t w;
 	uint32_t h;
-
 	kwl_rdp_pack_ctrl(ctrl, KWL_RDP_MSG_RESIZE, 1920U, 1080U);
 	kwl_rdp_unpack_ctrl(ctrl, &type, &a1, &a2);
 	assert(type == KWL_RDP_MSG_RESIZE && a1 == 1920U && a2 == 1080U);
-
 	kwl_rdp_pack_frame_hdr(fhdr, KWL_RDP_FRAME_KEY, 123456789ULL, 4096U);
 	kwl_rdp_unpack_frame_hdr(fhdr, &flags, &pts, &sz);
 	assert(flags == KWL_RDP_FRAME_KEY && pts == 123456789ULL && sz == 4096U);
-
 	w = 101U;
 	h = 9999U;
 	kwl_rdp_clamp_size(&w, &h);

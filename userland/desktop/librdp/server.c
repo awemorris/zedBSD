@@ -76,7 +76,6 @@ rdp_server_create(
 	s = (struct rdp_server *)calloc(1U, sizeof(*s));
 	if (s == NULL)
 		return NULL;
-
 	s->cb = *cb;
 	s->user = user;
 	s->state = RDP_SRV_WAIT_X224_CR;
@@ -103,7 +102,6 @@ rdp_server_destroy(
 	/* Allows NULL pointers safely. */
 	if (server == NULL)
 		return;
-
 	rdp_buf_free(&server->rx);
 	rdp_vc_reasm_reset(&server->vc_reasm);
 	rdp_dynvc_stream_reset(&server->gfx_stream);
@@ -120,10 +118,8 @@ rdp_server_tls_established(
 {
 	if (server == NULL)
 		return RDP_ERR_INVAL;
-
 	if (server->state != RDP_SRV_WAIT_TLS)
 		return RDP_ERR_STATE;
-
 	server->state = RDP_SRV_WAIT_MCS_CONNECT_INIT;
 
 	/* Succeeded: server ready for MCS Connect-Initial. */
@@ -158,10 +154,8 @@ rdp_server_feed(
 		error = rdp_stream_next_packet(&server->rx, &pkt, &consumed);
 		if (error == RDP_ERR_SHORT)
 			break;
-
 		if (error != RDP_OK)
 			return error;
-
 		if (pkt.is_fastpath != 0) {
 			error = rdp_input_decode_events(
 				pkt.payload, pkt.payload_len,
@@ -172,7 +166,6 @@ rdp_server_feed(
 
 			continue;
 		}
-
 		error = handle_tpkt_packet(server, pkt.payload, pkt.payload_len);
 		rdp_buf_consume(&server->rx, consumed);
 		if (error != RDP_OK)
@@ -192,10 +185,8 @@ rdp_server_needs_tls(
 {
 	if (server == NULL)
 		return 0;
-
 	if (server->state == RDP_SRV_WAIT_TLS)
 		return 1;
-
 	return 0;
 }
 
@@ -208,10 +199,8 @@ rdp_server_is_connected(
 {
 	if (server == NULL)
 		return 0;
-
 	if (server->state == RDP_SRV_CONNECTED)
 		return 1;
-
 	return 0;
 }
 
@@ -224,10 +213,8 @@ rdp_server_accept_auth(
 {
 	struct rdp_buf out;
 	int error;
-
 	if (server == NULL)
 		return RDP_ERR_INVAL;
-
 	if (server->state != RDP_SRV_WAIT_AUTH_DECISION)
 		return RDP_ERR_STATE;
 
@@ -244,12 +231,10 @@ rdp_server_accept_auth(
 			&out, RDP_SERVER_SHARE_ID, server->width,
 			server->height, RDP_MCS_IO_CHANNEL);
 	}
-
 	if (error == RDP_OK) {
 		server->state = RDP_SRV_WAIT_CONFIRM_ACTIVE;
 		error = send_io_data(server, &out);
 	}
-
 	rdp_buf_free(&out);
 	if (error != RDP_OK)
 		return error;
@@ -268,20 +253,16 @@ rdp_server_reject_auth(
 {
 	struct rdp_buf out;
 	int error;
-
 	if (server == NULL)
 		return RDP_ERR_INVAL;
-
 	if (server->state != RDP_SRV_WAIT_AUTH_DECISION)
 		return RDP_ERR_STATE;
-
 	rdp_buf_init(&out);
 	error = rdp_sec_encode_share_data_error_info(&out, RDP_SERVER_SHARE_ID,
 						     RDP_MCS_IO_CHANNEL,
 						     error_info);
 	if (error == RDP_OK)
 		send_io_data(server, &out);
-
 	rdp_buf_free(&out);
 	server->state = RDP_SRV_DISCONNECTED;
 	if (server->cb.on_disconnect != NULL)
@@ -301,13 +282,10 @@ rdp_server_disconnect(
 {
 	struct rdp_buf out;
 	int error;
-
 	if (server == NULL)
 		return RDP_ERR_INVAL;
-
 	if (server->state == RDP_SRV_DISCONNECTED)
 		return RDP_OK;
-
 	if (server->state >= RDP_SRV_WAIT_CONFIRM_ACTIVE) {
 		rdp_buf_init(&out);
 		error = rdp_sec_encode_share_data_error_info(
@@ -315,10 +293,8 @@ rdp_server_disconnect(
 			error_info);
 		if (error == RDP_OK)
 			send_io_data(server, &out);
-
 		rdp_buf_free(&out);
 	}
-
 	server->state = RDP_SRV_DISCONNECTED;
 	if (server->cb.on_disconnect != NULL)
 		server->cb.on_disconnect(server->user, error_info);
@@ -341,13 +317,10 @@ rdp_server_send_avc_frame(
 	struct rdp_buf gfx;
 	uint32_t fid;
 	int error;
-
 	if (server == NULL || avc == NULL)
 		return RDP_ERR_INVAL;
-
 	if (server->state != RDP_SRV_CONNECTED || server->gfx_ready == 0)
 		return RDP_ERR_STATE;
-
 	fid = server->next_frame_id++;
 	rdp_buf_init(&gfx);
 
@@ -355,28 +328,22 @@ rdp_server_send_avc_frame(
 	error = rdp_gfx_encode_start_frame(&gfx, timestamp_ms, fid);
 	if (error == RDP_OK)
 		error = send_dynvc_msg(server, RDP_DYNVC_ID_GFX, &gfx);
-
 	rdp_buf_clear(&gfx);
 	if (error == RDP_OK) {
 		error = rdp_gfx_encode_wire_to_surface_avc(
 			&gfx, 0U, codec_id, (uint16_t)server->width,
 			(uint16_t)server->height, avc);
 	}
-
 	if (error == RDP_OK)
 		error = send_dynvc_msg(server, RDP_DYNVC_ID_GFX, &gfx);
-
 	rdp_buf_clear(&gfx);
 	if (error == RDP_OK)
 		error = rdp_gfx_encode_end_frame(&gfx, fid);
-
 	if (error == RDP_OK)
 		error = send_dynvc_msg(server, RDP_DYNVC_ID_GFX, &gfx);
-
 	rdp_buf_free(&gfx);
 	if (error != RDP_OK)
 		return error;
-
 	server->unacked_frames++;
 	if (out_frame_id != NULL)
 		*out_frame_id = fid;
@@ -396,43 +363,34 @@ rdp_server_resize(
 {
 	struct rdp_buf gfx;
 	int error;
-
 	if (server == NULL || width == 0U || height == 0U)
 		return RDP_ERR_INVAL;
-
 	server->width = width;
 	server->height = height;
-
 	if (server->state != RDP_SRV_CONNECTED || server->gfx_ready == 0)
 		return RDP_OK;
-
 	rdp_buf_init(&gfx);
 	error = rdp_gfx_encode_reset_graphics(&gfx, width, height);
 	if (error == RDP_OK)
 		error = send_dynvc_msg(server, RDP_DYNVC_ID_GFX, &gfx);
-
 	rdp_buf_clear(&gfx);
 	if (error == RDP_OK)
 		error = rdp_gfx_encode_delete_surface(&gfx, 0U);
 	if (error == RDP_OK)
 		error = send_dynvc_msg(server, RDP_DYNVC_ID_GFX, &gfx);
-
 	rdp_buf_clear(&gfx);
 	if (error == RDP_OK) {
 		error = rdp_gfx_encode_create_surface(&gfx, 0U,
 						      (uint16_t)width,
 						      (uint16_t)height);
 	}
-
 	if (error == RDP_OK)
 		error = send_dynvc_msg(server, RDP_DYNVC_ID_GFX, &gfx);
-
 	rdp_buf_clear(&gfx);
 	if (error == RDP_OK)
 		error = rdp_gfx_encode_map_surface(&gfx, 0U);
 	if (error == RDP_OK)
 		error = send_dynvc_msg(server, RDP_DYNVC_ID_GFX, &gfx);
-
 	rdp_buf_free(&gfx);
 	if (error != RDP_OK)
 		return error;
@@ -450,7 +408,6 @@ rdp_server_unacked_frames(
 {
 	if (server == NULL)
 		return 0U;
-
 	return server->unacked_frames;
 }
 
@@ -461,11 +418,9 @@ send_raw(
 	const struct rdp_buf *buf)
 {
 	int rc;
-
 	rc = s->cb.send_bytes(s->user, buf->data, buf->len);
 	if (rc < 0)
 		return RDP_ERR_IO;
-
 	return RDP_OK;
 }
 
@@ -477,14 +432,12 @@ send_mcs_dt(
 {
 	struct rdp_buf out;
 	int error;
-
 	rdp_buf_init(&out);
 	error = rdp_x224_encode_dt(&out, mcs->data, mcs->len);
 	if (error != RDP_OK) {
 		rdp_buf_free(&out);
 		return error;
 	}
-
 	error = send_raw(s, &out);
 	rdp_buf_free(&out);
 	return error;
@@ -498,7 +451,6 @@ send_io_data(
 {
 	struct rdp_buf mcs;
 	int error;
-
 	rdp_buf_init(&mcs);
 	error = rdp_mcs_encode_send_data_ind(&mcs, RDP_MCS_IO_CHANNEL,
 					     RDP_MCS_IO_CHANNEL,
@@ -507,7 +459,6 @@ send_io_data(
 		rdp_buf_free(&mcs);
 		return error;
 	}
-
 	error = send_mcs_dt(s, &mcs);
 	rdp_buf_free(&mcs);
 	return error;
@@ -523,7 +474,6 @@ send_dynvc_chunk_cb(
 	struct rdp_server *s;
 	struct rdp_buf mcs;
 	int error;
-
 	s = (struct rdp_server *)ctx;
 	rdp_buf_init(&mcs);
 	error = rdp_mcs_encode_send_data_ind(&mcs, RDP_MCS_IO_CHANNEL,
@@ -533,7 +483,6 @@ send_dynvc_chunk_cb(
 		rdp_buf_free(&mcs);
 		return error;
 	}
-
 	error = send_mcs_dt(s, &mcs);
 	rdp_buf_free(&mcs);
 	return error;
@@ -548,7 +497,6 @@ send_dynvc_msg(
 {
 	struct rdp_buf dyn;
 	int error;
-
 	rdp_buf_init(&dyn);
 	error = rdp_dynvc_encode_data(&dyn, chan_id, payload->data,
 				      payload->len);
@@ -556,7 +504,6 @@ send_dynvc_msg(
 		rdp_buf_free(&dyn);
 		return error;
 	}
-
 	error = rdp_vc_send_chunked(send_dynvc_chunk_cb, s, dyn.data, dyn.len);
 	rdp_buf_free(&dyn);
 	return error;
@@ -574,33 +521,26 @@ handle_tpkt_packet(
 	size_t dt_len;
 	struct rdp_buf out;
 	int error;
-
 	error = rdp_x224_decode(tpdu, len, &neg, &dt_pay, &dt_len);
 	if (error != RDP_OK)
 		return error;
-
 	if (s->state == RDP_SRV_WAIT_X224_CR) {
 		if (neg.tpdu_code != 0xE0U ||
 		    (neg.protocols & RDP_NEG_PROTO_SSL) == 0U)
 			return RDP_ERR_UNSUPPORTED;
-
 		rdp_buf_init(&out);
 		error = rdp_x224_encode_cc(&out, RDP_NEG_PROTO_SSL);
 		if (error == RDP_OK) {
 			s->state = RDP_SRV_WAIT_TLS;
 			error = send_raw(s, &out);
 		}
-
 		rdp_buf_free(&out);
 		if (error == RDP_OK && s->cb.on_tls_required != NULL)
 			s->cb.on_tls_required(s->user);
-
 		return error;
 	}
-
 	if (neg.tpdu_code != 0xF0U)
 		return RDP_ERR_PROTO;
-
 	return handle_mcs_pdu(s, dt_pay, dt_len);
 }
 
@@ -617,18 +557,15 @@ handle_mcs_pdu(
 	const uint8_t *vc_msg;
 	size_t vc_len;
 	int error;
-
 	if (s->state == RDP_SRV_WAIT_MCS_CONNECT_INIT) {
 		error = rdp_mcs_decode_connect_initial(data, len, &ci);
 		if (error != RDP_OK)
 			return error;
-
 		s->has_drdynvc = ci.has_drdynvc;
 		if (ci.width > 0U && ci.height > 0U) {
 			s->width = ci.width;
 			s->height = ci.height;
 		}
-
 		rdp_buf_init(&out);
 		error = rdp_mcs_encode_connect_response(
 			&out, s->has_drdynvc ? RDP_MCS_DRDYNVC_CHANNEL : 0U);
@@ -636,28 +573,22 @@ handle_mcs_pdu(
 			s->state = RDP_SRV_WAIT_ERECT_DOMAIN;
 			error = send_mcs_dt(s, &out);
 		}
-
 		rdp_buf_free(&out);
 		return error;
 	}
-
 	error = rdp_mcs_decode_pdu(data, len, &pdu);
 	if (error != RDP_OK)
 		return error;
-
 	if (pdu.choice == 8U) {
 		s->state = RDP_SRV_DISCONNECTED;
 		if (s->cb.on_disconnect != NULL)
 			s->cb.on_disconnect(s->user, 0U);
-
 		return RDP_OK;
 	}
-
 	if (s->state == RDP_SRV_WAIT_ERECT_DOMAIN && pdu.choice == 1U) {
 		s->state = RDP_SRV_WAIT_ATTACH_USER;
 		return RDP_OK;
 	}
-
 	if (s->state == RDP_SRV_WAIT_ATTACH_USER && pdu.choice == 10U) {
 		rdp_buf_init(&out);
 		error = rdp_mcs_encode_attach_user_confirm(&out, s->user_id);
@@ -665,11 +596,9 @@ handle_mcs_pdu(
 			s->state = RDP_SRV_WAIT_JOIN_CHANNELS;
 			error = send_mcs_dt(s, &out);
 		}
-
 		rdp_buf_free(&out);
 		return error;
 	}
-
 	if (s->state == RDP_SRV_WAIT_JOIN_CHANNELS && pdu.choice == 14U) {
 		if (pdu.channel_id == RDP_MCS_IO_CHANNEL)
 			s->io_joined = 1;
@@ -677,28 +606,22 @@ handle_mcs_pdu(
 			s->user_joined = 1;
 		else if (pdu.channel_id == RDP_MCS_DRDYNVC_CHANNEL)
 			s->dynvc_joined = 1;
-
 		rdp_buf_init(&out);
 		error = rdp_mcs_encode_channel_join_confirm(&out, pdu.user_id,
 							    pdu.channel_id);
 		if (error == RDP_OK)
 			error = send_mcs_dt(s, &out);
-
 		rdp_buf_free(&out);
 		if (s->io_joined != 0 && s->user_joined != 0 &&
 		    (s->has_drdynvc == 0 || s->dynvc_joined != 0)) {
 			s->state = RDP_SRV_WAIT_INFO_PKT;
 		}
-
 		return error;
 	}
-
 	if (pdu.choice != 25U)
 		return RDP_OK;
-
 	if (pdu.channel_id == RDP_MCS_IO_CHANNEL)
 		return handle_io_pdu(s, pdu.payload, pdu.payload_len);
-
 	if (s->has_drdynvc != 0 && pdu.channel_id == RDP_MCS_DRDYNVC_CHANNEL) {
 		vc_msg = NULL;
 		vc_len = 0U;
@@ -706,11 +629,9 @@ handle_mcs_pdu(
 					  pdu.payload_len, &vc_msg, &vc_len);
 		if (error != RDP_OK)
 			return error;
-
 		if (vc_msg != NULL)
 			return handle_dynvc_pdu(s, vc_msg, vc_len);
 	}
-
 	return RDP_OK;
 }
 
@@ -730,33 +651,27 @@ handle_io_pdu(
 	const uint8_t *body;
 	size_t body_len;
 	int error;
-
 	if (s->state == RDP_SRV_WAIT_INFO_PKT) {
 		error = rdp_sec_decode_info_pkt(data, len, &info);
 		if (error != RDP_OK)
 			return error;
-
 		s->state = RDP_SRV_WAIT_AUTH_DECISION;
 		if (s->cb.on_auth_request != NULL) {
 			s->cb.on_auth_request(s->user, info.domain,
 					      info.user_name, info.password);
 			return RDP_OK;
 		}
-
 		return rdp_server_accept_auth(s);
 	}
-
 	if (s->state == RDP_SRV_WAIT_CONFIRM_ACTIVE) {
 		error = rdp_sec_decode_active_pdu(data, len,
 						  RDP_PDUTYPE_CONFIRMACTIVE,
 						  &act);
 		if (error != RDP_OK)
 			return error;
-
 		s->state = RDP_SRV_WAIT_FINALIZE;
 		return RDP_OK;
 	}
-
 	error = rdp_sec_decode_share_hdr(data, len, &pdu_type, &pdu_type2,
 					 &share_id, &body, &body_len);
 	if (error != RDP_OK)
@@ -765,7 +680,6 @@ handle_io_pdu(
 	UNUSED_PARAMETER(share_id);
 	UNUSED_PARAMETER(body);
 	UNUSED_PARAMETER(body_len);
-
 	if (s->state == RDP_SRV_WAIT_FINALIZE &&
 	    pdu_type == RDP_PDUTYPE_DATAPDU &&
 	    pdu_type2 == RDP_PDUTYPE2_FONTLIST) {
@@ -775,7 +689,6 @@ handle_io_pdu(
 						       s->user_id);
 		if (error == RDP_OK)
 			error = send_io_data(s, &out);
-
 		rdp_buf_clear(&out);
 		if (error == RDP_OK)
 			error = rdp_sec_encode_share_data_control(
@@ -783,7 +696,6 @@ handle_io_pdu(
 				RDP_CTRLACTION_COOPERATE, 0U, 0U);
 		if (error == RDP_OK)
 			error = send_io_data(s, &out);
-
 		rdp_buf_clear(&out);
 		if (error == RDP_OK)
 			error = rdp_sec_encode_share_data_control(
@@ -792,14 +704,12 @@ handle_io_pdu(
 				0x03EAU);
 		if (error == RDP_OK)
 			error = send_io_data(s, &out);
-
 		rdp_buf_clear(&out);
 		if (error == RDP_OK)
 			error = rdp_sec_encode_share_data_fontmap(
 				&out, RDP_SERVER_SHARE_ID, RDP_MCS_IO_CHANNEL);
 		if (error == RDP_OK)
 			error = send_io_data(s, &out);
-
 		if (error == RDP_OK && s->has_drdynvc != 0) {
 			rdp_buf_clear(&out);
 			error = rdp_dynvc_encode_caps(&out, 2U);
@@ -808,18 +718,14 @@ handle_io_pdu(
 							    s, out.data,
 							    out.len);
 		}
-
 		rdp_buf_free(&out);
 		if (error != RDP_OK)
 			return error;
-
 		s->state = RDP_SRV_CONNECTED;
 		if (s->cb.on_connected != NULL)
 			s->cb.on_connected(s->user, s->width, s->height);
-
 		return RDP_OK;
 	}
-
 	return RDP_OK;
 }
 
@@ -837,11 +743,9 @@ handle_dynvc_pdu(
 	uint32_t rw;
 	uint32_t rh;
 	int error;
-
 	error = rdp_dynvc_decode(data, len, &msg);
 	if (error != RDP_OK)
 		return error;
-
 	if (msg.cmd == 0x05U) {
 		rdp_buf_init(&out);
 		error = rdp_dynvc_encode_create_req(&out, RDP_DYNVC_ID_GFX,
@@ -849,7 +753,6 @@ handle_dynvc_pdu(
 		if (error == RDP_OK)
 			error = rdp_vc_send_chunked(send_dynvc_chunk_cb, s,
 						    out.data, out.len);
-
 		rdp_buf_clear(&out);
 		if (error == RDP_OK)
 			error = rdp_dynvc_encode_create_req(
@@ -857,15 +760,12 @@ handle_dynvc_pdu(
 		if (error == RDP_OK)
 			error = rdp_vc_send_chunked(send_dynvc_chunk_cb, s,
 						    out.data, out.len);
-
 		rdp_buf_free(&out);
 		return error;
 	}
-
 	if (msg.cmd == 0x01U) {
 		if (msg.creation_status != 0U)
 			return RDP_OK;
-
 		if (msg.channel_id == RDP_DYNVC_ID_GFX) {
 			s->gfx_open = 1;
 		} else if (msg.channel_id == RDP_DYNVC_ID_DISP) {
@@ -874,14 +774,11 @@ handle_dynvc_pdu(
 			error = rdp_disp_encode_caps(&out);
 			if (error == RDP_OK)
 				error = send_dynvc_msg(s, RDP_DYNVC_ID_DISP, &out);
-
 			rdp_buf_free(&out);
 			return error;
 		}
-
 		return RDP_OK;
 	}
-
 	if (msg.cmd == 0x02U || msg.cmd == 0x03U) {
 		if (msg.channel_id == RDP_DYNVC_ID_GFX) {
 			sdata = NULL;
@@ -890,7 +787,6 @@ handle_dynvc_pdu(
 						      &sdata, &slen);
 			if (error != RDP_OK)
 				return error;
-
 			if (sdata != NULL)
 				return handle_gfx_pdu(s, sdata, slen);
 		} else if (msg.channel_id == RDP_DYNVC_ID_DISP) {
@@ -900,19 +796,16 @@ handle_dynvc_pdu(
 						      &sdata, &slen);
 			if (error != RDP_OK)
 				return error;
-
 			if (sdata != NULL) {
 				error = rdp_disp_decode_monitor_layout(
 					sdata, slen, &rw, &rh);
 				if (error != RDP_OK)
 					return error;
-
 				if (s->cb.on_resize != NULL)
 					s->cb.on_resize(s->user, rw, rh);
 			}
 		}
 	}
-
 	return RDP_OK;
 }
 
@@ -932,66 +825,52 @@ handle_gfx_pdu(
 	uint32_t total;
 	struct rdp_buf out;
 	int error;
-
 	error = rdp_gfx_decode_header(data, len, &cmd_id, &body, &body_len);
 	if (error != RDP_OK)
 		return error;
-
 	if (cmd_id == RDPGFX_CMD_CAPS_ADVERTISE) {
 		error = rdp_gfx_decode_caps_advertise(body, body_len, &ver);
 		if (error != RDP_OK)
 			return error;
-
 		rdp_buf_init(&out);
 		error = rdp_gfx_encode_caps_confirm(&out, ver);
 		if (error == RDP_OK)
 			error = send_dynvc_msg(s, RDP_DYNVC_ID_GFX, &out);
-
 		rdp_buf_clear(&out);
 		if (error == RDP_OK)
 			error = rdp_gfx_encode_reset_graphics(&out, s->width,
 							      s->height);
 		if (error == RDP_OK)
 			error = send_dynvc_msg(s, RDP_DYNVC_ID_GFX, &out);
-
 		rdp_buf_clear(&out);
 		if (error == RDP_OK) {
 			error = rdp_gfx_encode_create_surface(
 				&out, 0U, (uint16_t)s->width,
 				(uint16_t)s->height);
 		}
-
 		if (error == RDP_OK)
 			error = send_dynvc_msg(s, RDP_DYNVC_ID_GFX, &out);
-
 		rdp_buf_clear(&out);
 		if (error == RDP_OK)
 			error = rdp_gfx_encode_map_surface(&out, 0U);
 		if (error == RDP_OK)
 			error = send_dynvc_msg(s, RDP_DYNVC_ID_GFX, &out);
-
 		rdp_buf_free(&out);
 		if (error != RDP_OK)
 			return error;
-
 		s->gfx_ready = 1;
 		return RDP_OK;
 	}
-
 	if (cmd_id == RDPGFX_CMD_FRAME_ACKNOWLEDGE) {
 		error = rdp_gfx_decode_frame_ack(body, body_len, &qdepth, &fid,
 						 &total);
 		if (error != RDP_OK)
 			return error;
-
 		if (s->unacked_frames > 0U)
 			s->unacked_frames--;
-
 		if (s->cb.on_frame_ack != NULL)
 			s->cb.on_frame_ack(s->user, fid, qdepth, total);
-
 		return RDP_OK;
 	}
-
 	return RDP_OK;
 }

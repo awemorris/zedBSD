@@ -91,7 +91,6 @@ main(
 
 	/* Tests server authentication rejection path. */
 	test_auth_rejection();
-
 	printf("librdp-host-test: all tests passed\n");
 
 	/* Succeeded: all tests passed. */
@@ -106,11 +105,13 @@ peer_send_bytes(
 	size_t len)
 {
 	struct loopback_peer *p;
+	int err;
 
+	/* Appends outgoing bytes into the peer's transmit buffer. */
 	p = (struct loopback_peer *)user;
-	if (rdp_buf_append(&p->tx, data, len) != RDP_OK)
+	err = rdp_buf_append(&p->tx, data, len);
+	if (err != RDP_OK)
 		return -1;
-
 	return 0;
 }
 
@@ -120,7 +121,6 @@ peer_on_tls(
 	void *user)
 {
 	struct loopback_peer *p;
-
 	p = (struct loopback_peer *)user;
 	p->tls_needed = 1;
 }
@@ -133,7 +133,6 @@ peer_on_connected(
 	uint32_t h)
 {
 	struct loopback_peer *p;
-
 	p = (struct loopback_peer *)user;
 	p->connected = 1;
 	p->width = w;
@@ -150,7 +149,6 @@ peer_on_avc_frame(
 {
 	struct loopback_peer *p;
 	size_t n;
-
 	p = (struct loopback_peer *)user;
 	p->frame_count++;
 	p->last_frame_id = frame_id;
@@ -158,7 +156,9 @@ peer_on_avc_frame(
 	p->last_avc444_mode = avc->avc444_mode;
 	p->last_luma_len = avc->luma.data_len;
 	p->last_chroma_len = avc->chroma.data_len;
-	n = avc->luma.data_len < 8U ? avc->luma.data_len : 8U;
+	n = avc->luma.data_len;
+	if (n > 8U)
+		n = 8U;
 	if (n > 0U && avc->luma.data != NULL)
 		memcpy(p->last_luma_head, avc->luma.data, n);
 }
@@ -188,7 +188,6 @@ peer_on_resize(
 	uint32_t h)
 {
 	struct loopback_peer *p;
-
 	p = (struct loopback_peer *)user;
 	p->resize_called = 1;
 	p->resize_w = w;
@@ -203,7 +202,6 @@ peer_on_input_key(
 	uint16_t flags)
 {
 	struct loopback_peer *p;
-
 	p = (struct loopback_peer *)user;
 	p->key_count++;
 	p->last_scancode = scancode;
@@ -234,7 +232,6 @@ peer_on_input_mouse(
 	uint16_t y)
 {
 	struct loopback_peer *p;
-
 	p = (struct loopback_peer *)user;
 	p->mouse_count++;
 	p->last_mouse_flags = flags;
@@ -249,7 +246,6 @@ peer_on_input_sync(
 	uint32_t toggle_flags)
 {
 	struct loopback_peer *p;
-
 	p = (struct loopback_peer *)user;
 	p->sync_count++;
 	p->last_sync_flags = toggle_flags;
@@ -264,7 +260,6 @@ peer_on_auth(
 	const char *pwd)
 {
 	struct loopback_peer *p;
-
 	p = (struct loopback_peer *)user;
 	p->auth_called = 1;
 	snprintf(p->auth_domain, sizeof(p->auth_domain), "%s", dom);
@@ -283,7 +278,6 @@ peer_on_disconnect(
 	uint32_t err)
 {
 	struct loopback_peer *p;
-
 	p = (struct loopback_peer *)user;
 	p->disconnected = 1;
 	p->disconnect_err = err;
@@ -301,11 +295,9 @@ pump_loopback(
 	int progress;
 	struct rdp_buf tmp;
 	size_t i;
-
 	rdp_buf_init(&tmp);
 	do {
 		progress = 0;
-
 		if (cp->tx.len > 0U) {
 			rdp_buf_clear(&tmp);
 			assert(rdp_buf_append(&tmp, cp->tx.data, cp->tx.len) == RDP_OK);
@@ -317,9 +309,11 @@ pump_loopback(
 				assert(rdp_server_feed(s, tmp.data, tmp.len) == RDP_OK);
 			}
 
+			/* Marks forward progress for this pump pass. */
 			progress = 1;
 		}
 
+		/* Drains server-to-client bytes. */
 		if (sp->tx.len > 0U) {
 			rdp_buf_clear(&tmp);
 			assert(rdp_buf_append(&tmp, sp->tx.data, sp->tx.len) == RDP_OK);
@@ -331,10 +325,10 @@ pump_loopback(
 				assert(rdp_client_feed(c, tmp.data, tmp.len) == RDP_OK);
 			}
 
+			/* Marks forward progress for this pump pass. */
 			progress = 1;
 		}
 	} while (progress != 0);
-
 	rdp_buf_free(&tmp);
 }
 
@@ -355,7 +349,6 @@ test_wire_codecs(
 	uint32_t gfx_ver;
 	uint32_t disp_w;
 	uint32_t disp_h;
-
 	rdp_buf_init(&buf);
 
 	/* Tests X.224 Connection Request roundtrip. */
@@ -401,7 +394,6 @@ test_wire_codecs(
 					      &disp_h) == RDP_OK);
 	assert(disp_w == 2560U);
 	assert(disp_h == 1440U);
-
 	rdp_buf_free(&buf);
 }
 
@@ -425,12 +417,10 @@ test_loopback_session(
 	struct rdp_avc_stream avc;
 	uint32_t fid;
 	size_t i;
-
 	memset(&cp, 0, sizeof(cp));
 	memset(&sp, 0, sizeof(sp));
 	rdp_buf_init(&cp.tx);
 	rdp_buf_init(&sp.tx);
-
 	memset(&ccb, 0, sizeof(ccb));
 	ccb.send_bytes = peer_send_bytes;
 	ccb.on_tls_required = peer_on_tls;
@@ -438,7 +428,6 @@ test_loopback_session(
 	ccb.on_avc_frame = peer_on_avc_frame;
 	ccb.on_resize = peer_on_resize;
 	ccb.on_disconnect = peer_on_disconnect;
-
 	memset(&scb, 0, sizeof(scb));
 	scb.send_bytes = peer_send_bytes;
 	scb.on_tls_required = peer_on_tls;
@@ -451,16 +440,13 @@ test_loopback_session(
 	scb.on_input_sync = peer_on_input_sync;
 	scb.on_auth_request = peer_on_auth;
 	scb.on_disconnect = peer_on_disconnect;
-
 	scfg.width = 1280U;
 	scfg.height = 720U;
 	s = rdp_server_create(&scb, &sp, &scfg);
 	assert(s != NULL);
 	sp.srv_handle = s;
-
 	c = rdp_client_create(&ccb, &cp);
 	assert(c != NULL);
-
 	memset(&ccfg, 0, sizeof(ccfg));
 	ccfg.width = 1280U;
 	ccfg.height = 720U;
@@ -496,14 +482,12 @@ test_loopback_session(
 	assert(big_luma != NULL);
 	for (i = 0U; i < 4096U; i++)
 		big_luma[i] = (uint8_t)(i & 0xFFU);
-
 	rect.left = 0U;
 	rect.top = 0U;
 	rect.right = 1280U;
 	rect.bottom = 720U;
 	quant.qp = 24U;
 	quant.quality = 90U;
-
 	memset(&avc, 0, sizeof(avc));
 	avc.luma.rect_count = 1U;
 	avc.luma.rects = &rect;
@@ -571,7 +555,6 @@ test_loopback_session(
 	       sp.last_mouse_y == 360U);
 	assert(sp.sync_count == 1U &&
 	       sp.last_sync_flags == (RDP_SYNC_CAPS_LOCK | RDP_SYNC_NUM_LOCK));
-
 	free(big_luma);
 	rdp_client_destroy(c);
 	rdp_server_destroy(s);
@@ -591,29 +574,23 @@ test_auth_rejection(
 	struct rdp_client *c;
 	struct rdp_server *s;
 	struct rdp_client_config ccfg;
-
 	memset(&cp, 0, sizeof(cp));
 	memset(&sp, 0, sizeof(sp));
 	sp.reject_auth = 1;
 	rdp_buf_init(&cp.tx);
 	rdp_buf_init(&sp.tx);
-
 	memset(&ccb, 0, sizeof(ccb));
 	ccb.send_bytes = peer_send_bytes;
 	ccb.on_disconnect = peer_on_disconnect;
-
 	memset(&scb, 0, sizeof(scb));
 	scb.send_bytes = peer_send_bytes;
 	scb.on_auth_request = peer_on_auth;
 	scb.on_disconnect = peer_on_disconnect;
-
 	s = rdp_server_create(&scb, &sp, NULL);
 	assert(s != NULL);
 	sp.srv_handle = s;
-
 	c = rdp_client_create(&ccb, &cp);
 	assert(c != NULL);
-
 	memset(&ccfg, 0, sizeof(ccfg));
 	ccfg.user_name = "baduser";
 	ccfg.password = "wrong";
@@ -627,7 +604,6 @@ test_auth_rejection(
 	assert(sp.disconnected == 1);
 	assert(cp.disconnected == 1);
 	assert(cp.disconnect_err == 0x00000005U);
-
 	rdp_client_destroy(c);
 	rdp_server_destroy(s);
 	rdp_buf_free(&cp.tx);

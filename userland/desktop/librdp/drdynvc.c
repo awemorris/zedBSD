@@ -51,7 +51,6 @@ rdp_vc_reasm_feed(
 	error = rdp_read_u32_le(&r, &total_len);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_read_u32_le(&r, &flags);
 	if (error != RDP_OK)
 		return error;
@@ -123,33 +122,26 @@ rdp_vc_send_chunked(
 		piece = msg_len - offset;
 		if (piece > RDP_VC_CHUNK_SIZE)
 			piece = RDP_VC_CHUNK_SIZE;
-
 		flags = 0U;
 		if (offset == 0U)
 			flags |= RDP_CHANNEL_FLAG_FIRST;
 		if (offset + piece == msg_len)
 			flags |= RDP_CHANNEL_FLAG_LAST;
-
 		rdp_buf_clear(&pkt);
 		error = rdp_buf_append_u32_le(&pkt, (uint32_t)msg_len);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append_u32_le(&pkt, flags);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = rdp_buf_append(&pkt, msg + offset, piece);
 		if (error != RDP_OK)
 			goto fail;
-
 		error = send_mcs(ctx, pkt.data, pkt.len);
 		if (error != RDP_OK)
 			goto fail;
-
 		offset += piece;
 	} while (offset < msg_len);
-
 	rdp_buf_free(&pkt);
 
 	/* Succeeded: static virtual channel message sent. */
@@ -174,15 +166,12 @@ rdp_dynvc_encode_caps(
 	error = rdp_buf_append_u8(out, (uint8_t)(DYNVC_CMD_CAPS << 4));
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u8(out, 0U);
 	if (error != RDP_OK)
 		return error;
-
 	error = rdp_buf_append_u16_le(out, version);
 	if (error != RDP_OK)
 		return error;
-
 	return rdp_buf_append_zeros(out, 8U);
 }
 
@@ -205,20 +194,16 @@ rdp_dynvc_encode_create_req(
 	error = append_var_uint(&tmp, channel_id, &cbid);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(out, (uint8_t)((DYNVC_CMD_CREATE << 4) | cbid));
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, tmp.data, tmp.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	nlen = strlen(name) + 1U;
 	error = rdp_buf_append(out, name, nlen);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&tmp);
 
 	/* Succeeded: DYNVC_CREATE_REQ encoded. */
@@ -247,19 +232,15 @@ rdp_dynvc_encode_create_rsp(
 	error = append_var_uint(&tmp, channel_id, &cbid);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(out, (uint8_t)((DYNVC_CMD_CREATE << 4) | cbid));
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, tmp.data, tmp.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u32_le(out, status);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&tmp);
 
 	/* Succeeded: DYNVC_CREATE_RSP encoded. */
@@ -289,19 +270,15 @@ rdp_dynvc_encode_data(
 	error = append_var_uint(&tmp, channel_id, &cbid);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(out, (uint8_t)((DYNVC_CMD_DATA << 4) | cbid));
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, tmp.data, tmp.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, payload, len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&tmp);
 
 	/* Succeeded: DYNVC_DATA encoded. */
@@ -329,15 +306,12 @@ rdp_dynvc_encode_close_req(
 	error = append_var_uint(&tmp, channel_id, &cbid);
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append_u8(out, (uint8_t)((DYNVC_CMD_CLOSE << 4) | cbid));
 	if (error != RDP_OK)
 		goto fail;
-
 	error = rdp_buf_append(out, tmp.data, tmp.len);
 	if (error != RDP_OK)
 		goto fail;
-
 	rdp_buf_free(&tmp);
 
 	/* Succeeded: DYNVC_CLOSE_REQ encoded. */
@@ -369,11 +343,9 @@ rdp_dynvc_decode(
 	/* Clears output and reads the 1-byte DRDYNVC header. */
 	memset(msg, 0, sizeof(*msg));
 	rdp_reader_init(&r, data, len);
-
 	error = rdp_read_u8(&r, &hdr);
 	if (error != RDP_OK)
 		return error;
-
 	msg->cmd = (uint8_t)((hdr >> 4) & 0x0FU);
 	cbid = (uint8_t)(hdr & 0x03U);
 	sp = (uint8_t)((hdr >> 2) & 0x03U);
@@ -387,21 +359,17 @@ rdp_dynvc_decode(
 		UNUSED_PARAMETER(pad);
 		return rdp_read_u16_le(&r, &msg->version);
 	}
-
 	error = read_var_uint(&r, cbid, &msg->channel_id);
 	if (error != RDP_OK)
 		return error;
-
 	if (msg->cmd == DYNVC_CMD_CREATE) {
 		rem = rdp_reader_rem(&r);
 		if (rem == 4U) {
 			return rdp_read_u32_le(&r, &msg->creation_status);
 		}
-
 		copy_len = rem;
 		if (copy_len >= sizeof(msg->channel_name))
 			copy_len = sizeof(msg->channel_name) - 1U;
-
 		memcpy(msg->channel_name, r.data + r.pos, copy_len);
 		msg->channel_name[copy_len] = '\0';
 		return RDP_OK;
@@ -409,7 +377,6 @@ rdp_dynvc_decode(
 		error = read_var_uint(&r, sp, &msg->total_len);
 		if (error != RDP_OK)
 			return error;
-
 		msg->data = r.data + r.pos;
 		msg->data_len = rdp_reader_rem(&r);
 		return RDP_OK;
@@ -420,7 +387,6 @@ rdp_dynvc_decode(
 	} else if (msg->cmd == DYNVC_CMD_CLOSE) {
 		return RDP_OK;
 	}
-
 	return RDP_ERR_PROTO;
 }
 
@@ -451,7 +417,6 @@ rdp_dynvc_stream_feed(
 	if (msg->cmd == DYNVC_CMD_DATA_FIRST) {
 		if (msg->total_len > RDP_MAX_PDU_SIZE)
 			return RDP_ERR_NOMEM;
-
 		rdp_buf_clear(&stream->buf);
 		stream->expected_len = msg->total_len;
 		stream->active = 1;
@@ -461,7 +426,6 @@ rdp_dynvc_stream_feed(
 	error = rdp_buf_append(&stream->buf, msg->data, msg->data_len);
 	if (error != RDP_OK)
 		return error;
-
 	if (stream->buf.len >= stream->expected_len) {
 		stream->active = 0;
 		*out_data = stream->buf.data;
@@ -496,12 +460,10 @@ append_var_uint(
 		*out_cbid = 0U;
 		return rdp_buf_append_u8(buf, (uint8_t)val);
 	}
-
 	if (val <= 0xFFFFU) {
 		*out_cbid = 1U;
 		return rdp_buf_append_u16_le(buf, (uint16_t)val);
 	}
-
 	*out_cbid = 2U;
 	return rdp_buf_append_u32_le(buf, val);
 }
@@ -516,27 +478,21 @@ read_var_uint(
 	uint8_t v8;
 	uint16_t v16;
 	int error;
-
 	if (cbid == 0U) {
 		error = rdp_read_u8(r, &v8);
 		if (error != RDP_OK)
 			return error;
-
 		*out = v8;
 		return RDP_OK;
 	}
-
 	if (cbid == 1U) {
 		error = rdp_read_u16_le(r, &v16);
 		if (error != RDP_OK)
 			return error;
-
 		*out = v16;
 		return RDP_OK;
 	}
-
 	if (cbid == 2U)
 		return rdp_read_u32_le(r, out);
-
 	return RDP_ERR_PROTO;
 }
