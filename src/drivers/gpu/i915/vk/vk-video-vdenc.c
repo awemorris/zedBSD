@@ -558,13 +558,14 @@ vdenc_emit_head(
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_MFX_WAIT | GEN12_VIDEO_MFX_WAIT_SYNC);
 
-	/* MFX_PIPE_MODE_SELECT: Standard AVC (2), Codec Select Encode (1), Post-Deblock + StreamOut. */
+	/* MFX_PIPE_MODE_SELECT: Standard AVC (2), Codec Select Encode (1), Post-Deblock + StreamOut + VDEnc. */
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_MFX_PIPE_MODE_SELECT,
 						      GEN12_VIDEO_MFX_PIPE_MODE_SELECT_DWORDS));
 	drv_i915_batch_emit(batch, GEN12_VIDEO_MODE_STANDARD_AVC |
 				   GEN12_VIDEO_MODE_CODEC_ENCODE |
 				   GEN12_VIDEO_MODE_POST_DEBLOCKING |
-				   GEN12_VIDEO_MODE_STREAM_OUT);
+				   GEN12_VIDEO_MODE_STREAM_OUT |
+				   GEN12_VIDEO_MODE_VDENC);
 	vdenc_emit_zeros(batch, GEN12_VIDEO_MFX_PIPE_MODE_SELECT_DWORDS - 2U);
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_MFX_WAIT | GEN12_VIDEO_MFX_WAIT_SYNC);
@@ -769,6 +770,12 @@ vdenc_emit_vdenc_pipe_mode(
 	const struct i915_video_vdenc_encode *enc)
 {
 	(void)enc;
+
+	drv_i915_batch_emit(batch, GEN12_VIDEO_MFX_WAIT | GEN12_VIDEO_MFX_WAIT_SYNC);
+
+	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_CONTROL_STATE,
+						      GEN12_VIDEO_VDENC_CONTROL_STATE_DWORDS));
+	drv_i915_batch_emit(batch, 1U);
 
 	drv_i915_batch_emit(batch, GEN12_VIDEO_HEADER(GEN12_VIDEO_VDENC_PIPE_MODE_SELECT,
 						      GEN12_VIDEO_VDENC_PIPE_MODE_SELECT_DWORDS));
