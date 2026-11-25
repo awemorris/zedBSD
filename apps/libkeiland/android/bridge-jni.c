@@ -42,6 +42,7 @@ static jmethodID bridge_jni_show_keyboard;
 static jmethodID bridge_jni_set_input_mode;
 static jmethodID bridge_jni_set_cursor_anchor;
 static jmethodID bridge_jni_set_title;
+static jmethodID bridge_jni_set_fullscreen;
 static jmethodID bridge_jni_clipboard_set;
 static jmethodID bridge_jni_popup_menu;
 static jmethodID bridge_jni_open_url;
@@ -132,6 +133,9 @@ JNI_OnLoad(
 	if (error != 0)
 		return JNI_ERR;
 	error = bridge_jni_method(env, &bridge_jni_set_title, "setTitle", "(Ljava/lang/String;)V");
+	if (error != 0)
+		return JNI_ERR;
+	error = bridge_jni_method(env, &bridge_jni_set_fullscreen, "setFullscreen", "(Z)V");
 	if (error != 0)
 		return JNI_ERR;
 	error = bridge_jni_method(env, &bridge_jni_clipboard_set, "clipboardSet", "(Ljava/lang/String;)V");
@@ -275,6 +279,31 @@ keiland_java_set_title(
 		return error;
 
 	/* Succeeded: the title is on its way. */
+	return 0;
+}
+
+/*
+ * Enables or disables immersive fullscreen mode.
+ */
+int
+keiland_java_set_fullscreen(
+	int fullscreen)
+{
+	JNIEnv *env;
+	int error;
+
+	/* Needs M's environment. */
+	env = keiland_android_env();
+	if (env == NULL)
+		return EIO;
+
+	/* Asks Java, which does it on the main thread. */
+	(*env)->CallStaticVoidMethod(env, bridge_jni_class, bridge_jni_set_fullscreen, (jboolean)(fullscreen != 0));
+	error = bridge_jni_call_failed(env);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the request was sent. */
 	return 0;
 }
 

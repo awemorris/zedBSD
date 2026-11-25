@@ -36,6 +36,9 @@ public final class KeilandBridge {
 	/** The application's context, which outlives any Activity (the clipboard is set through it). */
 	private static Context applicationContext;
 
+	/** Whether immersive fullscreen is currently requested. */
+	private static boolean currentFullscreen;
+
 	private KeilandBridge() {
 	}
 
@@ -43,6 +46,9 @@ public final class KeilandBridge {
 	static void attach(KeilandActivity activity) {
 		current = new WeakReference<KeilandActivity>(activity);
 		applicationContext = activity.getApplicationContext();
+		if (currentFullscreen) {
+			activity.setFullscreen(true);
+		}
 	}
 
 	/** Forgets the Activity, if it is still the one remembered. */
@@ -143,6 +149,20 @@ public final class KeilandBridge {
 				KeilandActivity activity = current.get();
 				if (activity != null) {
 					activity.setTitle(title);
+				}
+			}
+		});
+	}
+
+	/** Enables or disables immersive fullscreen mode on the current Activity. */
+	static void setFullscreen(final boolean fullscreen) {
+		post(new Runnable() {
+			@Override
+			public void run() {
+				currentFullscreen = fullscreen;
+				KeilandActivity activity = current.get();
+				if (activity != null) {
+					activity.setFullscreen(fullscreen);
 				}
 			}
 		});

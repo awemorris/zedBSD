@@ -304,6 +304,8 @@ drop_privileges(
 	(void)initgroups(user, gid);
 	(void)setgid(gid);
 	(void)setuid(uid);
+	if (home == NULL || home[0] == '\0' || chdir(home) != 0)
+		(void)chdir("/");
 	(void)setenv("HOME", home, 1);
 	(void)setenv("USER", user, 1);
 	(void)setenv("LOGNAME", user, 1);

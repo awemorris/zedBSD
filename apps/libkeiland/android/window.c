@@ -116,6 +116,8 @@ kl_app_window_create(
 		window_input(window, KL_WINDOW_FOCUS, 1);
 	if (window->title != NULL)
 		(void)keiland_java_set_title(window->title);
+	if (before != NULL && before->fullscreen)
+		(void)keiland_java_set_fullscreen(0);
 
 	/* Succeeded: the window is shown. */
 	return window;
@@ -159,6 +161,7 @@ kl_window_close(
 		window_input(top, KL_WINDOW_RESIZE, 0);
 		if (top->title != NULL)
 			(void)keiland_java_set_title(top->title);
+		(void)keiland_java_set_fullscreen(top->fullscreen);
 	}
 
 	/* The title, the frame kept and the state; a menu popup that was open for it is left to close itself. */
@@ -319,30 +322,40 @@ kl_window_set_title(
 }
 
 /*
- * Makes the window full screen or not: it always is.
+ * Makes the window full screen or not by hiding or showing the system bars.
  */
 void
 kl_window_set_fullscreen(
 	struct kl_window *window,
 	int fullscreen)
 {
-	(void)window;
-	(void)fullscreen;
+	int state;
 
-	/* Nothing to change. */
+	if (window == NULL)
+		return;
+
+	state = fullscreen != 0;
+	if (window->fullscreen == state)
+		return;
+	window->fullscreen = state;
+
+	if (android_window_top(window->app) == window) {
+		(void)keiland_java_set_fullscreen(state);
+		android_window_layout(window->app);
+	}
 }
 
 /*
- * Reports whether the window is full screen: it always is.
+ * Reports whether the window is full screen: 1, or 0.
  */
 int
 kl_window_fullscreen(
 	const struct kl_window *window)
 {
-	(void)window;
+	if (window == NULL)
+		return 0;
 
-	/* Always. */
-	return 1;
+	return window->fullscreen != 0;
 }
 
 /*

@@ -1035,6 +1035,39 @@ thread_launch_rdp_target(
 	}
 	(void)recalled;
 
+	if (target->width == 0U || target->height == 0U) {
+		unsigned sw;
+		unsigned sh;
+
+		kl_mutex_lock(&choice->session->lock);
+		sw = choice->session->width;
+		sh = choice->session->height;
+		kl_mutex_unlock(&choice->session->lock);
+
+		if (target->width == 0U) {
+			if (sw > 0U) {
+				if (sw < 200U)
+					sw = 200U;
+				else if (sw > 8192U)
+					sw = 8192U;
+				target->width = (sw + 1U) & ~1U;
+			} else {
+				target->width = 1280U;
+			}
+		}
+		if (target->height == 0U) {
+			if (sh > 0U) {
+				if (sh < 200U)
+					sh = 200U;
+				else if (sh > 8192U)
+					sh = 8192U;
+				target->height = (sh + 1U) & ~1U;
+			} else {
+				target->height = 720U;
+			}
+		}
+	}
+
 	error = rdp_tab_create(target->host_name, target->width, target->height,
 			       1, choice->session->app,
 			       choice->session->number, &tab);

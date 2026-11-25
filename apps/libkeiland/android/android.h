@@ -94,6 +94,7 @@ struct kl_window {
 	void *resize_data;
 	int text_input;
 	int keyboard_suppressed;
+	int fullscreen;
 };
 
 /* app.c */

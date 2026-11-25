@@ -370,8 +370,34 @@ netdisp_wait_and_receive(
 	memcpy(adv.nonce, nonce, NETDISP_NONCE_LEN);
 	memcpy(adv.pk, pk, NETDISP_KEY_LEN);
 	adv.reply_port = reply_port;
-	adv.pref_width = 1280U;
-	adv.pref_height = 720U;
+	{
+		unsigned sw;
+		unsigned sh;
+
+		kl_mutex_lock(&session->lock);
+		sw = session->width;
+		sh = session->height;
+		kl_mutex_unlock(&session->lock);
+
+		if (sw > 0U) {
+			if (sw < 200U)
+				sw = 200U;
+			else if (sw > 8192U)
+				sw = 8192U;
+			adv.pref_width = (uint16_t)((sw + 1U) & ~1U);
+		} else {
+			adv.pref_width = 1280U;
+		}
+		if (sh > 0U) {
+			if (sh < 200U)
+				sh = 200U;
+			else if (sh > 8192U)
+				sh = 8192U;
+			adv.pref_height = (uint16_t)((sh + 1U) & ~1U);
+		} else {
+			adv.pref_height = 720U;
+		}
+	}
 	adv.pref_scale120 = 120U;
 	snprintf(adv.device_name, sizeof(adv.device_name), "%s", host_buf);
 	if (netdisp_adv_encode(&adv, adv_pkt, sizeof(adv_pkt), &adv_len) != 0) {
@@ -439,8 +465,8 @@ netdisp_wait_and_receive(
 						 "%s", plain.username);
 					snprintf(out_target->password, sizeof(out_target->password),
 						 "%s", plain.password);
-					out_target->width = 1280U;
-					out_target->height = 720U;
+					out_target->width = adv.pref_width;
+					out_target->height = adv.pref_height;
 					OPENSSL_cleanse(&plain, sizeof(plain));
 					rc = 0;
 					break;

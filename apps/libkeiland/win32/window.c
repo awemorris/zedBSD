@@ -509,7 +509,7 @@ kl_window_set_fullscreen(
 
 	/* No border and no title bar, over the whole monitor. */
 	window->restore_style = GetWindowLongPtrW(window->frame, GWL_STYLE);
-	style = (window->restore_style & ~(LONG_PTR)WS_OVERLAPPEDWINDOW) | (LONG_PTR)WS_POPUP;
+	style = (window->restore_style & ~(LONG_PTR)(WS_OVERLAPPEDWINDOW | WS_MAXIMIZE)) | (LONG_PTR)WS_POPUP;
 	window->fullscreen = 1;
 	(void)SetWindowLongPtrW(window->frame, GWL_STYLE, style);
 	(void)SetWindowPos(window->frame, HWND_TOP, monitor.rcMonitor.left, monitor.rcMonitor.top,
@@ -827,7 +827,7 @@ window_frame_message(
 			break;
 		sizes = (NCCALCSIZE_PARAMS *)lparam;
 		zoomed = IsZoomed(handle);
-		if (zoomed) {
+		if (zoomed && !window->fullscreen) {
 			place = MonitorFromRect(&sizes->rgrc[0], MONITOR_DEFAULTTONEAREST);
 			memset(&monitor, 0, sizeof(monitor));
 			monitor.cbSize = sizeof(monitor);

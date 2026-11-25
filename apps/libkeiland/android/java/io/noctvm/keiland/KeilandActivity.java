@@ -24,7 +24,10 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.Window;
 import android.view.WindowInsets;
+import android.view.WindowInsetsController;
+import android.view.WindowManager;
 import android.widget.PopupWindow;
 
 /**
@@ -50,6 +53,11 @@ public class KeilandActivity extends NativeActivity {
 
 	/** Optional debug receiver for pinch/pan test intents when debuggable. */
 	private BroadcastReceiver debugReceiver;
+
+	/** Whether immersive fullscreen mode is active, and the pre-fullscreen legacy flags. */
+	private boolean fullscreen;
+	private boolean hasBaseSystemUiVisibility;
+	private int baseSystemUiVisibility;
 
 	@Override
 	protected void onCreate(Bundle savedInstanceState) {
@@ -147,6 +155,9 @@ public class KeilandActivity extends NativeActivity {
 		/* The clipboard can be read only while the window has the focus. */
 		if (hasFocus) {
 			sendClipboard();
+			if (fullscreen) {
+				applyFullscreen();
+			}
 		}
 	}
 
@@ -171,6 +182,64 @@ public class KeilandActivity extends NativeActivity {
 	/** The view the input method types into. */
 	InputView inputView() {
 		return inputView;
+	}
+
+	/** Enables or disables immersive fullscreen mode, hiding or restoring system bars. */
+	void setFullscreen(boolean fullscreen) {
+		this.fullscreen = fullscreen;
+		applyFullscreen();
+	}
+
+	/** Applies the current fullscreen state to the Activity window. */
+	private void applyFullscreen() {
+		Window window = getWindow();
+		if (window == null) {
+			return;
+		}
+		WindowManager.LayoutParams lp = window.getAttributes();
+		int cutoutMode = fullscreen
+			? WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+			: WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_DEFAULT;
+		if (lp.layoutInDisplayCutoutMode != cutoutMode) {
+			lp.layoutInDisplayCutoutMode = cutoutMode;
+			window.setAttributes(lp);
+		}
+		if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+			WindowInsetsController controller = window.getInsetsController();
+			if (controller != null) {
+				if (fullscreen) {
+					controller.setSystemBarsBehavior(WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE);
+					controller.hide(WindowInsets.Type.systemBars());
+				} else {
+					controller.show(WindowInsets.Type.systemBars());
+				}
+			}
+		} else {
+			applySystemUiVisibilityLegacy(window.getDecorView(), fullscreen);
+		}
+		if (inputView != null) {
+			inputView.requestApplyInsets();
+		}
+	}
+
+	/** Applies or clears legacy sticky immersive flags on Android 10 (API 29). */
+	@SuppressWarnings("deprecation")
+	private void applySystemUiVisibilityLegacy(View decor, boolean fullscreen) {
+		if (!hasBaseSystemUiVisibility) {
+			baseSystemUiVisibility = decor.getSystemUiVisibility();
+			hasBaseSystemUiVisibility = true;
+		}
+		if (fullscreen) {
+			decor.setSystemUiVisibility(baseSystemUiVisibility
+				| View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+				| View.SYSTEM_UI_FLAG_FULLSCREEN
+				| View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+				| View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+				| View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+				| View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
+		} else {
+			decor.setSystemUiVisibility(baseSystemUiVisibility);
+		}
 	}
 
 	/**

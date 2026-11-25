@@ -32,6 +32,9 @@ int keiland_java_set_cursor_anchor(float x, float y, float width, float height);
 /* Sets the task's title (UTF-8). */
 int keiland_java_set_title(const char *title);
 
+/* Enables (1) or disables (0) immersive fullscreen mode. */
+int keiland_java_set_fullscreen(int fullscreen);
+
 /* Puts length bytes of UTF-8 text on the clipboard; NULL or length 0 empties it. */
 int keiland_java_clipboard_set(const char *text, size_t length);
 
