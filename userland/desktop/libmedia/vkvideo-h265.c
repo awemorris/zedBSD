@@ -1047,11 +1047,15 @@ static int
 h265vk_problem(
 	int error)
 {
-	if (error == ENODEV || error == EIO)
-		return MEDIA_PROBLEM_DEVICE;
+	if (error == ENOMEM ||
+	    error == MEDIA_PROBLEM_FORMAT ||
+	    error == MEDIA_PROBLEM_DEVICE ||
+	    error == MEDIA_PROBLEM_PROFILE ||
+	    error == MEDIA_PROBLEM_BUSY)
+		return error;
 	if (error == ENOTSUP)
 		return MEDIA_PROBLEM_PROFILE;
 	if (error == EBUSY)
 		return MEDIA_PROBLEM_BUSY;
-	return error;
+	return MEDIA_PROBLEM_DEVICE;
 }

@@ -836,9 +836,13 @@ static int
 vkvideo_problem(
 	int error)
 {
-	/* Device admission does not imply a decodable native profile. */
-	if (error == ENODEV || error == EIO)
-		return MEDIA_PROBLEM_DEVICE;
+	/* Allocation failures and classified media problems stay as they are. */
+	if (error == ENOMEM ||
+	    error == MEDIA_PROBLEM_FORMAT ||
+	    error == MEDIA_PROBLEM_DEVICE ||
+	    error == MEDIA_PROBLEM_PROFILE ||
+	    error == MEDIA_PROBLEM_BUSY)
+		return error;
 
 	/* Unsupported sequence tools allow application software fallback. */
 	if (error == ENOTSUP)
@@ -848,8 +852,8 @@ vkvideo_problem(
 	if (error == EBUSY)
 		return MEDIA_PROBLEM_BUSY;
 
-	/* Invalid input and allocation failures remain ordinary errors. */
-	return error;
+	/* Any other open or probe failure falls back to the next decoder backend. */
+	return MEDIA_PROBLEM_DEVICE;
 }
 
 /* Reports whether a decoder is vkvideo-h265.c's (its first member names its codec). */
