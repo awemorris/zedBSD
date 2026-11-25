@@ -532,10 +532,12 @@ session_on_avc_frame(
 	struct rdp_app_session *s;
 	struct media_packet pkt;
 	struct media_frame *frame;
+	struct media_frame *last;
 	int64_t pts;
 	size_t need;
 	uint32_t *nb;
 	uint32_t *dst;
+	int rc;
 
 	UNUSED_PARAMETER(codec_id);
 	s = (struct rdp_app_session *)user;
@@ -547,47 +549,80 @@ session_on_avc_frame(
 	pkt.size = avc->luma.data_len;
 	pkt.keyframe = 1;
 	(void)media_decoder_send(s->decoder, &pkt);
+	last = NULL;
 	pts = 0;
-	if (media_decoder_receive(s->decoder, &pts) == 0) {
+	for (;;) {
+		rc = media_decoder_receive(s->decoder, &pts);
+		if (rc <= 0)
+			break;
 		frame = media_decoder_picture(s->decoder);
 		if (frame != NULL) {
-			need = (size_t)s->width * (size_t)s->height;
-			if (need > s->scratch_cap) {
-				nb = (uint32_t *)realloc(
-					s->scratch, need * sizeof(*s->scratch));
-				if (nb != NULL) {
-					s->scratch = nb;
-					s->scratch_cap = need;
-				}
-			}
-			if (s->scratch != NULL &&
-			    media_frame_scale(frame, &s->scaler, s->scratch,
-					      (size_t)s->width * 4U,
-					      (int)s->width,
-					      (int)s->height) == 0) {
-				kl_mutex_lock(&s->lock);
-				if (s->fb == NULL || s->fb_w != s->width ||
-				    s->fb_h != s->height) {
-					dst = (uint32_t *)realloc(
-						s->fb, need * sizeof(*s->fb));
-					if (dst != NULL) {
-						s->fb = dst;
-						s->fb_w = s->width;
-						s->fb_h = s->height;
-					}
-				}
-				if (s->fb != NULL && s->fb_w == s->width &&
-				    s->fb_h == s->height) {
-					memcpy(s->fb, s->scratch,
-					       need * sizeof(*s->fb));
-				}
-
-				kl_mutex_unlock(&s->lock);
-				(void)kl_app_post(s->app, RDP_APP_POST_FRAME,
-						  NULL);
-			}
-			media_frame_free(&frame);
+			if (last != NULL)
+				media_frame_free(&last);
+			last = frame;
 		}
+	}
+	if (last == NULL) {
+		static const uint8_t aud_nal[6] = {
+			0x00U, 0x00U, 0x00U, 0x01U, 0x09U, 0xf0U
+		};
+		struct media_packet aud_pkt;
+
+		memset(&aud_pkt, 0, sizeof(aud_pkt));
+		aud_pkt.data = aud_nal;
+		aud_pkt.size = sizeof(aud_nal);
+		aud_pkt.keyframe = 0;
+		if (media_decoder_send(s->decoder, &aud_pkt) == 0) {
+			for (;;) {
+				rc = media_decoder_receive(s->decoder, &pts);
+				if (rc <= 0)
+					break;
+				frame = media_decoder_picture(s->decoder);
+				if (frame != NULL) {
+					if (last != NULL)
+						media_frame_free(&last);
+					last = frame;
+				}
+			}
+		}
+	}
+	if (last != NULL) {
+		need = (size_t)s->width * (size_t)s->height;
+		if (need > s->scratch_cap) {
+			nb = (uint32_t *)realloc(
+				s->scratch, need * sizeof(*s->scratch));
+			if (nb != NULL) {
+				s->scratch = nb;
+				s->scratch_cap = need;
+			}
+		}
+		if (s->scratch != NULL &&
+		    media_frame_scale(last, &s->scaler, s->scratch,
+				      (size_t)s->width * 4U,
+				      (int)s->width,
+				      (int)s->height) == 0) {
+			kl_mutex_lock(&s->lock);
+			if (s->fb == NULL || s->fb_w != s->width ||
+			    s->fb_h != s->height) {
+				dst = (uint32_t *)realloc(
+					s->fb, need * sizeof(*s->fb));
+				if (dst != NULL) {
+					s->fb = dst;
+					s->fb_w = s->width;
+					s->fb_h = s->height;
+				}
+			}
+			if (s->fb != NULL && s->fb_w == s->width &&
+			    s->fb_h == s->height) {
+				memcpy(s->fb, s->scratch,
+				       need * sizeof(*s->fb));
+			}
+
+			kl_mutex_unlock(&s->lock);
+			(void)kl_app_post(s->app, RDP_APP_POST_FRAME,
+					  NULL);
+		}
+		media_frame_free(&last);
 	}
 	(void)rdp_client_send_frame_ack(s->client, frame_id, 0U);
 }

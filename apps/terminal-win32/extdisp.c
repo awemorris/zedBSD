@@ -700,6 +700,7 @@ extdisp_session_thread(LPVOID param)
 	s->force_key = 1;
 	{
 		int logged_gfx_ready = 0;
+		int logged_first_frame = 0;
 
 	while (s->running && !s->stop && !extdisp.stop) {
 		fd_set rfds;
@@ -845,6 +846,10 @@ extdisp_session_thread(LPVOID param)
 							mikuterm_log("extdisp: send_avc_frame rc=%d", avc_rc);
 							s->running = 0;
 							break;
+						}
+						if (!logged_first_frame) {
+							mikuterm_log("extdisp: first frame sent fid=%u size=%zu", frame_id, pkt.size);
+							logged_first_frame = 1;
 						}
 					}
 				} else {

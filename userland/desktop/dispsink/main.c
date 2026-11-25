@@ -156,6 +156,19 @@ send_adv_packet(
 	bcast.sin_addr.s_addr = htonl(INADDR_BROADCAST);
 	(void)sendto(st->udp_sock, pkt, pkt_len, 0,
 		     (const struct sockaddr *)&bcast, sizeof(bcast));
+	{
+		const char *adv_host = getenv("DISPSINK_ADV_HOST");
+		if (adv_host != NULL && adv_host[0] != '\0') {
+			struct sockaddr_in dst;
+			memset(&dst, 0, sizeof(dst));
+			dst.sin_family = AF_INET;
+			dst.sin_port = htons((uint16_t)NETDISP_DISCOVERY_PORT);
+			if (inet_pton(AF_INET, adv_host, &dst.sin_addr) == 1) {
+				(void)sendto(st->udp_sock, pkt, pkt_len, 0,
+					     (const struct sockaddr *)&dst, sizeof(dst));
+			}
+		}
+	}
 }
 
 static void
@@ -601,6 +614,8 @@ main(
 
 	session = NULL;
 	running = 1;
+	{
+		int logged_first_frame = 0;
 	while (running != 0) {
 		rc = kl_app_dispatch(app, -1);
 		if (rc != 0)
@@ -651,6 +666,7 @@ main(
 
 				if (session != NULL)
 					continue;
+				logged_first_frame = 0;
 				kl_mutex_lock(&adv.lock);
 				target = adv.offer_target;
 				kl_mutex_unlock(&adv.lock);
@@ -668,8 +684,13 @@ main(
 				}
 			} else if (ev.kind == KL_APP_POST &&
 				   ev.code == RDP_APP_POST_FRAME) {
-				if (session != NULL)
+				if (session != NULL) {
+					if (!logged_first_frame) {
+						dispsink_log("ui: first frame presented %ux%u", win_w, win_h);
+						logged_first_frame = 1;
+					}
 					present_rdp_canvas(win, session, canvas, win_w, win_h);
+				}
 			} else if (ev.kind == KL_APP_POST &&
 				   ev.code == RDP_APP_POST_END) {
 				dispsink_log("ui: RDP_APP_POST_END");
@@ -683,6 +704,7 @@ main(
 					running = 0;
 			}
 		}
+	}
 	}
 
 	if (session != NULL)
