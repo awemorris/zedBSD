@@ -134,11 +134,15 @@ cb_on_ntlm_lookup(
 		return -1;
 	if (strstr(user_name, "+extend") != NULL) {
 		struct rdpd_client_ctx *ctx = (struct rdpd_client_ctx *)user;
-		if (rdpd_extend_lookup(user_name, out_nt_hash) != 0)
+		if (rdpd_extend_lookup(user_name, out_nt_hash) != 0) {
+			fprintf(stderr, "RDPD: extend lookup failed user=%s\n",
+				user_name);
 			return -1;
+		}
 		ctx->is_extend = 1;
 		ctx->authed = 1;
 		(void)snprintf(ctx->user, sizeof(ctx->user), "%s", user_name);
+		fprintf(stderr, "RDPD: extend lookup ok user=%s\n", user_name);
 		return 0;
 	}
 	ulen = strlen(user_name);
@@ -211,11 +215,15 @@ cb_on_auth_request(
 			if (diff == 0U) {
 				(void)snprintf(ctx->user, sizeof(ctx->user),
 					       "%s", user_name);
+				ctx->is_extend = 1;
 				ctx->authed = 1;
+				fprintf(stderr, "RDPD: extend auth ok user=%s\n",
+					user_name);
 				(void)rdp_server_accept_auth(ctx->srv);
 				return;
 			}
 		}
+		fprintf(stderr, "RDPD: extend auth failed user=%s\n", user_name);
 		(void)rdp_server_reject_auth(ctx->srv, 0U);
 		ctx->running = 0;
 		return;
@@ -254,9 +262,14 @@ cb_on_connected(
 	if (!ctx->authed)
 		return;
 	if (ctx->is_extend) {
+		int attach_rc;
 		kwl_rdp_clamp_size(&ctx->width, &ctx->height);
-		if (rdpd_extend_attach(ctx->user, ctx->width, ctx->height,
-				       &ctx->sess.rdp_fd) == 0) {
+		attach_rc = rdpd_extend_attach(ctx->user, ctx->width,
+					       ctx->height, &ctx->sess.rdp_fd);
+		fprintf(stderr, "RDPD: extend attach user=%s %ux%u rc=%d fd=%d\n",
+			ctx->user, ctx->width, ctx->height, attach_rc,
+			ctx->sess.rdp_fd);
+		if (attach_rc == 0) {
 			ctx->sess.width = ctx->width;
 			ctx->sess.height = ctx->height;
 			ctx->session_started = 1;

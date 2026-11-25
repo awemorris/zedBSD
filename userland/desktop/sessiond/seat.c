@@ -72,6 +72,7 @@
 #include <sys/un.h>
 #include <unistd.h>
 #include <uapi/gpu.h>
+#include <uapi/input.h>
 #include <uapi/system.h>
 
 /* The display devices sessiond looks for: /dev/gpu0 to /dev/gpu3. */
@@ -165,6 +166,7 @@ static void seat_rdp_listen_open(void);
 static void seat_rdp_accept(void);
 static int seat_event_index(const char *name);
 static int seat_is_rdp_event(int event_index);
+static int seat_is_rdp_virtual_device(int descriptor);
 
 /*
  * Gives the displays and the backlights to a user, for that user only, and
@@ -712,7 +714,14 @@ seat_request(
 	/* The node, opened as root (it stays root's). */
 	descriptor = -1;
 	error = seat_node_open(name, &descriptor);
-	sessiond_log("SESSIOND SEAT open node=%.16s error=%d holder=1", name, error);
+	if (error == 0 && !socket->rdp_only && seat_is_rdp_virtual_device(descriptor)) {
+		(void)close(descriptor);
+		descriptor = -1;
+		error = EPERM;
+		sessiond_log("SESSIOND SEAT open node=%.16s error=%d rdp_virtual=1", name, error);
+	} else {
+		sessiond_log("SESSIOND SEAT open node=%.16s error=%d holder=1", name, error);
+	}
 
 	/* The answer, then sessiond's own copy goes. */
 	seat_answer(socket->descriptor, error, descriptor);
@@ -851,6 +860,31 @@ seat_is_rdp_event(
 	for (index = 0U; index < SESSIOND_SEAT_SOCKETS; index++) {
 		if (seat_sockets[index].live && seat_sockets[index].rdp_only &&
 		    seat_sockets[index].rdp_event_index == event_index)
+			return 1;
+	}
+	return 0;
+}
+
+/* Returns 1 if an open evdev node is an rdpd virtual HID device. */
+static int
+seat_is_rdp_virtual_device(
+	int descriptor)
+{
+	struct input_id id;
+	char dev_name[64];
+
+	if (descriptor < 0)
+		return 0;
+	memset(&id, 0, sizeof(id));
+	if (ioctl(descriptor, EVIOCGID, &id) == 0 &&
+	    id.bustype == BUS_VIRTUAL &&
+	    id.vendor == 0x1D6BU &&
+	    id.product == 0x0001U)
+		return 1;
+	memset(dev_name, 0, sizeof(dev_name));
+	if (ioctl(descriptor, EVIOCGNAME(sizeof(dev_name) - 1U), dev_name) >= 0) {
+		dev_name[sizeof(dev_name) - 1U] = '\0';
+		if (strcmp(dev_name, "zedBSD RDP Virtual Input") == 0)
 			return 1;
 	}
 	return 0;

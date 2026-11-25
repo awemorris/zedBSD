@@ -537,7 +537,13 @@ kwl_netdisp_tick(
 			continue;
 		if (e->state == KWL_NETDISP_CONNECTING &&
 		    now_ms - e->connect_ms > NETDISP_CONNECT_TTL_MS) {
+			printf("KWL NETDISP connect timeout id=%s\n",
+			       e->device_id_hex);
 			e->state = KWL_NETDISP_IDLE;
+			if (netdisp_state.has_pending &&
+			    memcmp(netdisp_state.pending_id, e->device_id,
+				   NETDISP_DEVICE_ID_LEN) == 0)
+				netdisp_state.has_pending = 0;
 			changed = 1;
 		}
 		if (e->state == KWL_NETDISP_IDLE &&
@@ -656,6 +662,8 @@ kwl_netdisp_connect(
 		return ENODEV;
 
 	if (kl_backend_session_extend_prepare(server->backend) != 0) {
+		printf("KWL NETDISP connect id=%s extend_prepare failed\n",
+		       device_id_hex);
 		pthread_mutex_lock(&netdisp_state.lock);
 		netdisp_state.has_pending = 0;
 		for (i = 0U; i < KWL_NETDISP_MAX; i++) {
@@ -667,6 +675,7 @@ kwl_netdisp_connect(
 		pthread_mutex_unlock(&netdisp_state.lock);
 		return EIO;
 	}
+	printf("KWL NETDISP connect id=%s pending\n", device_id_hex);
 	kwl_displays_tell(server);
 	return 0;
 }
@@ -721,6 +730,8 @@ kwl_netdisp_extend_prepared(
 	pthread_mutex_unlock(&netdisp_state.lock);
 
 	if (error != 0 || !found || user == NULL || password == NULL) {
+		printf("KWL NETDISP extend_prepared failed error=%d found=%d\n",
+		       error, found);
 		if (server != NULL)
 			kwl_displays_tell(server);
 		return;
@@ -736,12 +747,33 @@ kwl_netdisp_extend_prepared(
 				  offer_buf, sizeof(offer_buf), &offer_len) == 0 &&
 	    netdisp_state.udp_fd >= 0) {
 		struct sockaddr_in dst;
+		ssize_t sent;
 		memset(&dst, 0, sizeof(dst));
 		dst.sin_family = AF_INET;
 		dst.sin_addr = target.addr;
 		dst.sin_port = htons(target.reply_port);
-		(void)sendto(netdisp_state.udp_fd, offer_buf, offer_len, 0,
-			     (struct sockaddr *)&dst, sizeof(dst));
+		sent = sendto(netdisp_state.udp_fd, offer_buf, offer_len, 0,
+			      (struct sockaddr *)&dst, sizeof(dst));
+		printf("KWL NETDISP offer sent ip=%s port=%u len=%zu sent=%zd errno=%d\n",
+		       target.ip, (unsigned)target.reply_port, offer_len,
+		       sent, sent < 0 ? errno : 0);
+	} else {
+		printf("KWL NETDISP offer encrypt failed ip=%s udp_fd=%d\n",
+		       target.ip, netdisp_state.udp_fd);
+		pthread_mutex_lock(&netdisp_state.lock);
+		netdisp_state.has_pending = 0;
+		for (i = 0U; i < KWL_NETDISP_MAX; i++) {
+			if (netdisp_state.entries[i].active &&
+			    memcmp(netdisp_state.entries[i].device_id,
+				   target.device_id,
+				   NETDISP_DEVICE_ID_LEN) == 0) {
+				netdisp_state.entries[i].state = KWL_NETDISP_IDLE;
+				break;
+			}
+		}
+		pthread_mutex_unlock(&netdisp_state.lock);
+		if (server != NULL)
+			kwl_displays_tell(server);
 	}
 	OPENSSL_cleanse(&plain, sizeof(plain));
 	OPENSSL_cleanse(offer_buf, sizeof(offer_buf));
@@ -975,10 +1007,14 @@ kwl_netdisp_extend_attach(
 	size_t i;
 
 	if (server == NULL || server->compose == NULL || rdp_fd < 0) {
+		printf("KWL NETDISP extend_attach invalid server=%p fd=%d\n",
+		       (void *)server, rdp_fd);
 		if (rdp_fd >= 0)
 			close(rdp_fd);
 		return;
 	}
+	printf("KWL NETDISP extend_attach fd=%d %ux%u\n",
+	       rdp_fd, (unsigned)width, (unsigned)height);
 	compose = server->compose;
 	kwl_rdp_clamp_size(&width, &height);
 	(void)fcntl(rdp_fd, F_SETFD, FD_CLOEXEC);
@@ -997,6 +1033,7 @@ kwl_netdisp_extend_attach(
 		}
 	}
 	if (head == NULL) {
+		printf("KWL NETDISP extend_attach no free head slot\n");
 		kwl_compose_unpark(server);
 		close(rdp_fd);
 		return;
@@ -1004,6 +1041,7 @@ kwl_netdisp_extend_attach(
 
 	ext = rdp_ext_create(compose, rdp_fd, width, height, &img, &img_mem);
 	if (ext == NULL) {
+		printf("KWL NETDISP extend_attach rdp_ext_create failed\n");
 		kwl_compose_unpark(server);
 		close(rdp_fd);
 		return;
@@ -1097,6 +1135,8 @@ kwl_netdisp_extend_attach(
 	kwl_compose_unpark(server);
 	server->dirty = 1U;
 	server->damaged = 1U;
+	printf("KWL NETDISP extend_attach ok slot=%u %ux%u\n",
+	       slot, (unsigned)width, (unsigned)height);
 	kwl_displays_tell(server);
 }
 
