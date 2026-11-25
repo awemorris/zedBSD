@@ -273,6 +273,9 @@ cb_on_connected(
 			ctx->sess.width = ctx->width;
 			ctx->sess.height = ctx->height;
 			ctx->session_started = 1;
+		} else {
+			(void)rdp_server_disconnect(ctx->srv, 0U);
+			ctx->running = 0;
 		}
 		return;
 	}
@@ -540,7 +543,8 @@ handle_client(
 		}
 
 		/* Reads encoded H.264 AU from headless Wayland and sends over RDPEGFX. */
-		if (nfds == 2U && (pfds[1].revents & POLLIN) != 0) {
+		if (nfds == 2U &&
+		    (pfds[1].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
 			rc = read_exact_fd(ctx.sess.rdp_fd, hdr, sizeof(hdr));
 			if (rc != 0) {
 				fprintf(stderr, "RDPD: rdp_fd EOF/err rc=%d\n", rc);

@@ -422,6 +422,11 @@ heads_sync_parked(
 		head = &compose->heads[index];
 		if (!head->open)
 			continue;
+		if (head->virtual_rdp && !head->lost) {
+			head->dirty = 1U;
+			server->dirty = 1;
+			continue;
+		}
 		listed = heads_index(compose, head->display);
 		off = 0;
 		if (listed >= 0)

@@ -70,6 +70,7 @@ struct kwl_rdp_ext {
 	size_t staging_size;
 	uint32_t width;
 	uint32_t height;
+	int is_rgba;
 	uint8_t *cpu_bgra;
 	uint8_t *y_plane;
 	uint8_t *u_plane;
@@ -152,6 +153,7 @@ bgra_to_i420(
 	const uint8_t *bgra,
 	uint32_t width,
 	uint32_t height,
+	int is_rgba,
 	uint8_t *y_out,
 	uint8_t *u_out,
 	uint8_t *v_out)
@@ -159,14 +161,16 @@ bgra_to_i420(
 	uint32_t y;
 	uint32_t x;
 	size_t stride = (size_t)width * 4U;
+	size_t r_off = is_rgba ? 0U : 2U;
+	size_t b_off = is_rgba ? 2U : 0U;
 
 	for (y = 0U; y < height; y++) {
 		const uint8_t *row = bgra + (size_t)y * stride;
 		uint8_t *yp = y_out + (size_t)y * (size_t)width;
 		for (x = 0U; x < width; x++) {
-			int b = row[x * 4U + 0U];
+			int b = row[x * 4U + b_off];
 			int g = row[x * 4U + 1U];
-			int r = row[x * 4U + 2U];
+			int r = row[x * 4U + r_off];
 			int yv = ((66 * r + 129 * g + 25 * b + 128) >> 8) + 16;
 			if (yv < 0)
 				yv = 0;
@@ -183,9 +187,9 @@ bgra_to_i420(
 		for (x = 0U; x < width; x += 2U) {
 			size_t p0 = (size_t)x * 4U;
 			size_t p1 = p0 + 4U;
-			int b = (r0[p0] + r0[p1] + r1[p0] + r1[p1]) >> 2;
+			int b = (r0[p0 + b_off] + r0[p1 + b_off] + r1[p0 + b_off] + r1[p1 + b_off]) >> 2;
 			int g = (r0[p0 + 1U] + r0[p1 + 1U] + r1[p0 + 1U] + r1[p1 + 1U]) >> 2;
-			int r = (r0[p0 + 2U] + r0[p1 + 2U] + r1[p0 + 2U] + r1[p1 + 2U]) >> 2;
+			int r = (r0[p0 + r_off] + r0[p1 + r_off] + r1[p0 + r_off] + r1[p1 + r_off]) >> 2;
 			int uv = ((-38 * r - 74 * g + 112 * b + 128) >> 8) + 128;
 			int vv = ((112 * r - 94 * g - 18 * b + 128) >> 8) + 128;
 			if (uv < 0)
@@ -219,23 +223,29 @@ frame_hash(
 
 static int
 write_all_fd(
-	int fd,
+	struct kwl_rdp_ext *ext,
 	const uint8_t *buf,
 	size_t len)
 {
 	size_t off = 0U;
 
 	while (off < len) {
-		ssize_t n = write(fd, buf + off, len - off);
+		ssize_t n = write(ext->fd, buf + off, len - off);
 		if (n < 0) {
 			if (errno == EINTR)
 				continue;
 			if (errno == EAGAIN || errno == EWOULDBLOCK) {
 				struct pollfd pfd;
-				pfd.fd = fd;
+				int prc;
+				if (__atomic_load_n(&ext->stop, __ATOMIC_ACQUIRE))
+					return -1;
+				pfd.fd = ext->fd;
 				pfd.events = POLLOUT;
 				pfd.revents = 0;
-				if (poll(&pfd, 1, 200) <= 0)
+				prc = poll(&pfd, 1, 200);
+				if (prc < 0 && errno != EINTR)
+					return -1;
+				if (prc > 0 && (pfd.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
 					return -1;
 				continue;
 			}
@@ -283,7 +293,7 @@ netdisp_encode_thread(
 		ext->force_key = 0;
 		pthread_mutex_unlock(&ext->mu);
 
-		bgra_to_i420(local_bgra, ext->width, ext->height,
+		bgra_to_i420(local_bgra, ext->width, ext->height, ext->is_rgba,
 			     ext->y_plane, ext->u_plane, ext->v_plane);
 		hash = frame_hash(ext->y_plane, y_len);
 		if (!key && hash == ext->last_hash)
@@ -315,8 +325,8 @@ netdisp_encode_thread(
 		out_flags = ((pkt.flags & MEDIA_ENCODED_KEY) != 0U) ? KWL_RDP_FRAME_KEY : 0U;
 		kwl_rdp_pack_frame_hdr(hdr, out_flags,
 				       kwl_log_us(), (uint32_t)pkt.size);
-		if (write_all_fd(ext->fd, hdr, sizeof(hdr)) != 0 ||
-		    write_all_fd(ext->fd, (const uint8_t *)pkt.data, pkt.size) != 0) {
+		if (write_all_fd(ext, hdr, sizeof(hdr)) != 0 ||
+		    write_all_fd(ext, (const uint8_t *)pkt.data, pkt.size) != 0) {
 			break;
 		}
 	}
@@ -800,8 +810,11 @@ rdp_ext_create(
 	uint32_t mem_type;
 	VkImage img = VK_NULL_HANDLE;
 	VkDeviceMemory img_mem = VK_NULL_HANDLE;
+	VkFormat img_fmt;
 	VkResult res;
 
+	img_fmt = compose->output.format != VK_FORMAT_UNDEFINED
+		? compose->output.format : VK_FORMAT_B8G8R8A8_UNORM;
 	ext = (struct kwl_rdp_ext *)calloc(1U, sizeof(*ext));
 	if (ext == NULL)
 		return NULL;
@@ -812,6 +825,8 @@ rdp_ext_create(
 	ext->queue_family = compose->family;
 	ext->width = width;
 	ext->height = height;
+	ext->is_rgba = (img_fmt == VK_FORMAT_R8G8B8A8_UNORM ||
+			img_fmt == VK_FORMAT_R8G8B8A8_SRGB);
 	ext->staging_size = (size_t)width * (size_t)height * 4U;
 	pthread_mutex_init(&ext->mu, NULL);
 	pthread_cond_init(&ext->cond, NULL);
@@ -819,7 +834,7 @@ rdp_ext_create(
 	memset(&img_info, 0, sizeof(img_info));
 	img_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 	img_info.imageType = VK_IMAGE_TYPE_2D;
-	img_info.format = VK_FORMAT_B8G8R8A8_UNORM;
+	img_info.format = img_fmt;
 	img_info.extent.width = width;
 	img_info.extent.height = height;
 	img_info.extent.depth = 1U;
@@ -1050,7 +1065,8 @@ kwl_netdisp_extend_attach(
 	memset(head, 0, sizeof(*head));
 	head->virtual_rdp = 1U;
 	head->rdp_ext = ext;
-	head->output.format = VK_FORMAT_B8G8R8A8_UNORM;
+	head->output.format = compose->output.format != VK_FORMAT_UNDEFINED
+		? compose->output.format : VK_FORMAT_B8G8R8A8_UNORM;
 	head->output.width = width;
 	head->output.height = height;
 	head->output.image_count = 1U;
@@ -1060,11 +1076,13 @@ kwl_netdisp_extend_attach(
 	view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	view_info.image = img;
 	view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-	view_info.format = VK_FORMAT_B8G8R8A8_UNORM;
+	view_info.format = head->output.format;
 	view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	view_info.subresourceRange.levelCount = 1U;
 	view_info.subresourceRange.layerCount = 1U;
 	if (vkCreateImageView(compose->device, &view_info, NULL, &head->views[0]) != VK_SUCCESS) {
+		printf("KWL NETDISP extend_attach vkCreateImageView failed fmt=%d\n",
+		       (int)head->output.format);
 		rdp_ext_destroy(ext, img);
 		vkFreeMemory(compose->device, img_mem, NULL);
 		memset(head, 0, sizeof(*head));
@@ -1080,6 +1098,8 @@ kwl_netdisp_extend_attach(
 	fb_info.height = height;
 	fb_info.layers = 1U;
 	if (vkCreateFramebuffer(compose->device, &fb_info, NULL, &head->framebuffers[0]) != VK_SUCCESS) {
+		printf("KWL NETDISP extend_attach vkCreateFramebuffer failed fmt=%d\n",
+		       (int)head->output.format);
 		vkDestroyImageView(compose->device, head->views[0], NULL);
 		rdp_ext_destroy(ext, img);
 		vkFreeMemory(compose->device, img_mem, NULL);
