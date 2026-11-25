@@ -179,11 +179,12 @@ struct system_account_listener {
 	void (*methods)(void *data, struct wl_proxy *proxy, uint32_t methods);
 };
 
-/* The listener of kl_system_sharing_v1's events (ws089-p025), in their order. */
+/* The listener of kl_system_sharing_v1's events, in their order. */
 struct system_sharing_listener {
 	void (*state)(void *data, struct wl_proxy *proxy, uint32_t available, uint32_t enabled, uint32_t running, uint32_t port, uint32_t allowed, const char *fingerprint);
 	void (*done)(void *data, struct wl_proxy *proxy, uint32_t serial);
 	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
+	void (*rdp_state)(void *data, struct wl_proxy *proxy, uint32_t available, uint32_t enabled, uint32_t running, uint32_t port, uint32_t allowed, uint32_t user_registered);
 };
 
 /* The listener of kl_system_notify_v1's events (ws156-p002), in their order. */
@@ -376,6 +377,7 @@ static int system_key_secret_valid(const char *secret);
 static void system_result(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
 static void system_sharing_state(void *data, struct wl_proxy *proxy, uint32_t available, uint32_t enabled, uint32_t running, uint32_t port, uint32_t allowed, const char *fingerprint);
 static void system_sharing_done(void *data, struct wl_proxy *proxy, uint32_t serial);
+static void system_sharing_rdp_state(void *data, struct wl_proxy *proxy, uint32_t available, uint32_t enabled, uint32_t running, uint32_t port, uint32_t allowed, uint32_t user_registered);
 static int system_bind(struct kl_system *system);
 static struct wl_proxy *system_make(struct kl_system *system, uint32_t bit, uint32_t opcode, const struct wl_interface *interface, const void *listener);
 static void system_destroy(struct wl_proxy *proxy, uint32_t opcode);
@@ -442,7 +444,8 @@ static const struct system_account_listener system_account_listener = {
 static const struct system_sharing_listener system_sharing_listener = {
 	system_sharing_state,
 	system_sharing_done,
-	system_result
+	system_result,
+	system_sharing_rdp_state
 };
 
 /* The notify object's callbacks (ws156-p002). */
@@ -3045,6 +3048,79 @@ kl_system_sharing_query(
 }
 
 /*
+ * Copies Remote Desktop's state.
+ */
+void
+kl_system_sharing_get_rdp_state(
+	const struct kl_system *system,
+	struct kl_rdp_state *state)
+{
+	*state = system->view.rdp;
+}
+
+/*
+ * Turns Remote Desktop on or off.
+ */
+int
+kl_system_sharing_set_rdp(
+	struct kl_system *system,
+	unsigned on,
+	uint32_t *request)
+{
+	uint32_t number;
+	uint32_t asked;
+
+	if (system->sharing == NULL || system->lost)
+		return ENOTSUP;
+
+	asked = 0U;
+	if (on != 0U)
+		asked = 1U;
+	number = system_number(system, request);
+	wl_proxy_marshal(system->sharing, KL_SYSTEM_SHARING_SET_RDP, number, asked);
+	return 0;
+}
+
+/*
+ * Reads Remote Desktop's state again.
+ */
+int
+kl_system_sharing_query_rdp(
+	struct kl_system *system,
+	uint32_t *request)
+{
+	uint32_t number;
+
+	if (system->sharing == NULL || system->lost)
+		return ENOTSUP;
+
+	number = system_number(system, request);
+	wl_proxy_marshal(system->sharing, KL_SYSTEM_SHARING_QUERY_RDP, number);
+	return 0;
+}
+
+/*
+ * Verifies password and registers/updates the session user for Remote Desktop.
+ */
+int
+kl_system_sharing_add_rdp_user(
+	struct kl_system *system,
+	const char *password,
+	uint32_t *request)
+{
+	uint32_t number;
+
+	if (password == NULL || password[0] == '\0')
+		return EINVAL;
+	if (system->sharing == NULL || system->lost)
+		return ENOTSUP;
+
+	number = system_number(system, request);
+	wl_proxy_marshal(system->sharing, KL_SYSTEM_SHARING_ADD_RDP_USER, number, password);
+	return 0;
+}
+
+/*
  * Asks for the network's details.
  */
 int
@@ -4595,6 +4671,34 @@ system_sharing_done(
 	/* The state, as one. */
 	system = data;
 	system_view_sharing_done(&system->view);
+}
+
+/* Keeps Remote Desktop's state until its done. */
+static void
+system_sharing_rdp_state(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t available,
+	uint32_t enabled,
+	uint32_t running,
+	uint32_t port,
+	uint32_t allowed,
+	uint32_t user_registered)
+{
+	struct kl_system *system;
+	struct kl_rdp_state state;
+
+	UNUSED_PARAMETER(proxy);
+
+	system = data;
+	memset(&state, 0, sizeof(state));
+	state.available = available;
+	state.enabled = enabled;
+	state.running = running;
+	state.port = port;
+	state.allowed = allowed;
+	state.user_registered = user_registered;
+	system_view_rdp_state(&system->view, &state);
 }
 
 /* Adds a DNS server of the details. */

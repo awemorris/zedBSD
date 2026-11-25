@@ -3354,6 +3354,53 @@ kl_system_sharing_set_ssh(
 }
 
 /* Not on Windows. */
+void
+kl_system_sharing_get_rdp_state(
+	const struct kl_system *system,
+	struct kl_rdp_state *state)
+{
+	(void)system;
+	(void)state;
+}
+
+/* Not on Windows. */
+int
+kl_system_sharing_set_rdp(
+	struct kl_system *system,
+	unsigned on,
+	uint32_t *request)
+{
+	(void)system;
+	(void)on;
+	(void)request;
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
+int
+kl_system_sharing_query_rdp(
+	struct kl_system *system,
+	uint32_t *request)
+{
+	(void)system;
+	(void)request;
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
+int
+kl_system_sharing_add_rdp_user(
+	struct kl_system *system,
+	const char *password,
+	uint32_t *request)
+{
+	(void)system;
+	(void)password;
+	(void)request;
+	return ENOTSUP;
+}
+
+/* Not on Windows. */
 int
 kl_system_take_mail_event(
 	struct kl_system *system,

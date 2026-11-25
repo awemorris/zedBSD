@@ -2773,6 +2773,7 @@ void kwl_audio_object_gone(struct kwl_object *object);
 void kwl_audio_close(struct kwl_server *server);
 void kwl_system_power_changed(struct kwl_server *server);
 void kwl_system_sharing_answer(struct kwl_server *server, int error);
+void kwl_system_sharing_rdp_answer(struct kwl_server *server, int error);
 int kwl_system_pin_answer(struct kwl_server *server, int error);
 void kwl_system_key_info_answer(struct kwl_server *server, int error);
 int kwl_system_key_replug(struct kwl_server *server);

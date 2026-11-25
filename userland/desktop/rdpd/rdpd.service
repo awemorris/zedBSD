@@ -1,0 +1,6 @@
+type=daemon
+command=/sbin/rdpd
+after=syslogd,networking
+restart=on-failure
+required=NO
+late=yes

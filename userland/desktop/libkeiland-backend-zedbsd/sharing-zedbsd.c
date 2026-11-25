@@ -66,12 +66,15 @@ kl_backend_sharing_request(
 	int managed;
 	int error;
 
+	unsigned session_req;
+
 	/* Only a session sessiond started and still listens to. */
 	managed = kl_backend_session_managed(backend);
 	if (!managed)
 		return ENOTSUP;
 
 	/* The request's line. */
+	session_req = KL_BACKEND_SESSION_SERVICE;
 	switch (action) {
 	case KL_BACKEND_SHARING_STATUS:
 		line = "SERVICE sshd status\n";
@@ -82,12 +85,65 @@ kl_backend_sharing_request(
 	case KL_BACKEND_SHARING_OFF:
 		line = "SERVICE sshd off\n";
 		break;
+	case KL_BACKEND_SHARING_RDP_STATUS:
+		line = "SERVICE rdpd status\n";
+		session_req = KL_BACKEND_SESSION_RDP_SERVICE;
+		break;
+	case KL_BACKEND_SHARING_RDP_ON:
+		line = "SERVICE rdpd on\n";
+		session_req = KL_BACKEND_SESSION_RDP_SERVICE;
+		break;
+	case KL_BACKEND_SHARING_RDP_OFF:
+		line = "SERVICE rdpd off\n";
+		session_req = KL_BACKEND_SESSION_RDP_SERVICE;
+		break;
+	case KL_BACKEND_SHARING_RDP_USER_STATUS:
+		line = "RDPUSER status\n";
+		session_req = KL_BACKEND_SESSION_RDP_USER;
+		break;
 	default:
 		return EINVAL;
 	}
 
 	/* Sent; the answer comes through session_answer. */
-	error = kl_backend_session_send(backend, KL_BACKEND_SESSION_SERVICE, line);
+	error = kl_backend_session_send(backend, session_req, line);
+	return error;
+}
+
+/*
+ * Asks sessiond to verify password and add/update the session user for RDP.
+ */
+int
+kl_backend_sharing_rdp_add_user(
+	struct kl_backend *backend,
+	const char *password)
+{
+	char line[280];
+	int managed;
+	int len;
+	int error;
+	volatile char *vp;
+	size_t i;
+
+	if (password == NULL || password[0] == '\0')
+		return EINVAL;
+	managed = kl_backend_session_managed(backend);
+	if (!managed)
+		return ENOTSUP;
+
+	len = snprintf(line, sizeof(line), "%s\n", password);
+	if (len <= 0 || (size_t)len >= sizeof(line)) {
+		memset(line, 0, sizeof(line));
+		return EINVAL;
+	}
+
+	error = kl_backend_session_send(backend, KL_BACKEND_SESSION_RDP_USER, "RDPUSER add\n");
+	if (error == 0)
+		error = kl_backend_session_send(backend, KL_BACKEND_SESSION_NONE, line);
+
+	vp = (volatile char *)line;
+	for (i = 0U; i < sizeof(line); i++)
+		vp[i] = '\0';
 	return error;
 }
 
@@ -138,6 +194,59 @@ kl_backend_sharing_take(
 	backend->sharing.known = 1U;
 
 	/* Succeeded: the state is kept. */
+	return 0;
+}
+
+/*
+ * Copies Remote Desktop's state as last answered, with whether this user may
+ * change the service.
+ */
+void
+kl_backend_sharing_get_rdp(
+	const struct kl_backend *backend,
+	struct kl_backend_rdp *state)
+{
+	memset(state, 0, sizeof(*state));
+	if (backend != NULL)
+		*state = backend->rdp;
+	state->allowed = sharing_allowed();
+}
+
+/*
+ * Takes sessiond's answer to a SERVICE rdpd request.
+ */
+int
+kl_backend_sharing_take_rdp(
+	struct kl_backend *backend,
+	const char *line)
+{
+	if (strcmp(line, "DENIED") == 0)
+		return EPERM;
+	if (strncmp(line, "SERVICE ", 8U) != 0)
+		return EIO;
+	backend->rdp.available = sharing_number(line, "available=");
+	backend->rdp.enabled = sharing_number(line, "enabled=");
+	backend->rdp.running = sharing_number(line, "running=");
+	backend->rdp.port = sharing_number(line, "port=");
+	backend->rdp.known = 1U;
+	return 0;
+}
+
+/*
+ * Takes sessiond's answer to an RDPUSER status/add request.
+ */
+int
+kl_backend_sharing_take_rdp_user(
+	struct kl_backend *backend,
+	const char *line)
+{
+	if (strcmp(line, "DENIED") == 0)
+		return EPERM;
+	if (strncmp(line, "FAIL", 4U) == 0)
+		return EACCES;
+	if (strncmp(line, "RDPUSER ", 8U) != 0)
+		return EIO;
+	backend->rdp.user_registered = sharing_number(line, "registered=");
 	return 0;
 }
 

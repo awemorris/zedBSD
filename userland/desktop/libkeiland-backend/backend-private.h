@@ -110,6 +110,8 @@ struct kl_backend {
 	struct kl_backend_power_outcome power_outcome;
 	/* Remote Login's state as sessiond last answered it (ws089-p025). */
 	struct kl_backend_sharing sharing;
+	/* Remote Desktop's state as sessiond last answered it. */
+	struct kl_backend_rdp rdp;
 	/*
 	 * The bus's notifications (ws156-p006): the operating system's own
 	 * state of serving them, NULL while they are not served.
@@ -175,6 +177,8 @@ int kl_backend_session_wait(const struct kl_backend *backend, uint64_t *due_ms);
  */
 int kl_backend_session_send(struct kl_backend *backend, unsigned request, const char *line);
 int kl_backend_sharing_take(struct kl_backend *backend, const char *line);
+int kl_backend_sharing_take_rdp(struct kl_backend *backend, const char *line);
+int kl_backend_sharing_take_rdp_user(struct kl_backend *backend, const char *line);
 
 /*
  * The seat's part of the event loop's poll (ws131-p006): each operating

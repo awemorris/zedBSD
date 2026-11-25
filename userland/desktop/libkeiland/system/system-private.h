@@ -214,6 +214,9 @@ struct system_view {
 	struct kl_sharing_state sharing;
 	struct kl_sharing_state sharing_pending;
 	unsigned sharing_touched;
+	struct kl_rdp_state rdp;
+	struct kl_rdp_state rdp_pending;
+	unsigned rdp_touched;
 	unsigned changed;
 	struct system_view_result results[SYSTEM_VIEW_RESULTS];
 	unsigned result_head;
@@ -443,6 +446,7 @@ void system_view_audio_state(struct system_view *view, const struct kl_audio_sta
 void system_view_audio_done(struct system_view *view);
 void system_view_power_state(struct system_view *view, const struct kl_power_state *state);
 void system_view_sharing_state(struct system_view *view, const struct kl_sharing_state *state);
+void system_view_rdp_state(struct system_view *view, const struct kl_rdp_state *state);
 void system_view_sharing_done(struct system_view *view);
 void system_view_power_done(struct system_view *view);
 void system_view_device(struct system_view *view, const struct kl_device *device);

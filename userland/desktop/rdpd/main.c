@@ -672,6 +672,149 @@ save_tls_pem(
 	free(key_pem);
 }
 
+static void save_tls_pem(SSL_CTX *ssl_ctx, const char *cert_path, const char *key_path);
+
+/* Validates a username for ntlm.users (non-empty, no colon or control chars). */
+static int
+valid_ntlm_username(
+	const char *username)
+{
+	size_t i;
+
+	if (username == NULL || username[0] == '\0')
+		return 0;
+	for (i = 0U; username[i] != '\0'; i++) {
+		unsigned char c = (unsigned char)username[i];
+		if (c == ':' || c < 0x20U || c == 0x7fU || i >= 63U)
+			return 0;
+	}
+	return 1;
+}
+
+/* Checks whether username is present in RDPD_NTLM_USERS_PATH. */
+static int
+cmd_has_user(
+	const char *username)
+{
+	FILE *fp;
+	char line[512];
+	size_t ulen;
+
+	if (!valid_ntlm_username(username))
+		return 1;
+	ulen = strlen(username);
+	fp = fopen(RDPD_NTLM_USERS_PATH, "r");
+	if (fp == NULL)
+		return 1;
+	while (fgets(line, sizeof(line), fp) != NULL) {
+		size_t len = strlen(line);
+		while (len > 0U && (line[len - 1U] == '\n' || line[len - 1U] == '\r'))
+			line[--len] = '\0';
+		if (line[0] == '\0' || line[0] == '#')
+			continue;
+		if (len > ulen && line[ulen] == ':' && strncmp(line, username, ulen) == 0) {
+			memset(line, 0, sizeof(line));
+			fclose(fp);
+			return 0;
+		}
+	}
+	memset(line, 0, sizeof(line));
+	fclose(fp);
+	return 1;
+}
+
+/* Reads password from stdin, hashes it, and atomically updates RDPD_NTLM_USERS_PATH. */
+static int
+cmd_add_user(
+	const char *username)
+{
+	char password[256];
+	uint8_t nt_hash[16];
+	char hex[33];
+	char tmp_path[256];
+	char line[512];
+	char entry[128];
+	FILE *in_fp;
+	FILE *out_fp;
+	int out_fd;
+	size_t ulen;
+	size_t plen;
+	size_t i;
+	int elen;
+	int write_ok;
+	volatile char *vp;
+	static const char hex_digits[] = "0123456789abcdef";
+
+	if (!valid_ntlm_username(username))
+		return 1;
+	if (fgets(password, (int)sizeof(password), stdin) == NULL)
+		return 1;
+	plen = strlen(password);
+	while (plen > 0U && (password[plen - 1U] == '\n' || password[plen - 1U] == '\r'))
+		password[--plen] = '\0';
+
+	rdp_ntlm_nt_hash(password, nt_hash);
+	vp = (volatile char *)password;
+	for (i = 0U; i < sizeof(password); i++)
+		vp[i] = '\0';
+
+	for (i = 0U; i < 16U; i++) {
+		hex[i * 2U] = hex_digits[(nt_hash[i] >> 4) & 0x0fU];
+		hex[i * 2U + 1U] = hex_digits[nt_hash[i] & 0x0fU];
+	}
+	hex[32] = '\0';
+	memset(nt_hash, 0, sizeof(nt_hash));
+
+	ensure_parent_dir(RDPD_NTLM_USERS_PATH, 0700);
+	(void)snprintf(tmp_path, sizeof(tmp_path), "%s.tmp", RDPD_NTLM_USERS_PATH);
+	out_fd = open(tmp_path, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	if (out_fd < 0) {
+		memset(hex, 0, sizeof(hex));
+		return 1;
+	}
+	(void)fchmod(out_fd, 0600);
+	out_fp = fdopen(out_fd, "w");
+	if (out_fp == NULL) {
+		close(out_fd);
+		(void)unlink(tmp_path);
+		memset(hex, 0, sizeof(hex));
+		return 1;
+	}
+
+	write_ok = 1;
+	ulen = strlen(username);
+	in_fp = fopen(RDPD_NTLM_USERS_PATH, "r");
+	if (in_fp != NULL) {
+		while (fgets(line, sizeof(line), in_fp) != NULL) {
+			size_t len = strlen(line);
+			if (len > ulen && line[ulen] == ':' && strncmp(line, username, ulen) == 0)
+				continue;
+			if (fputs(line, out_fp) == EOF) {
+				write_ok = 0;
+				break;
+			}
+		}
+		memset(line, 0, sizeof(line));
+		fclose(in_fp);
+	}
+
+	elen = snprintf(entry, sizeof(entry), "%s:ntlm:%s\n", username, hex);
+	memset(hex, 0, sizeof(hex));
+	if (elen <= 0 || (size_t)elen >= sizeof(entry) || fputs(entry, out_fp) == EOF)
+		write_ok = 0;
+	memset(entry, 0, sizeof(entry));
+
+	if (fflush(out_fp) != 0)
+		write_ok = 0;
+	if (fclose(out_fp) != 0)
+		write_ok = 0;
+	if (!write_ok || rename(tmp_path, RDPD_NTLM_USERS_PATH) != 0) {
+		(void)unlink(tmp_path);
+		return 1;
+	}
+	return 0;
+}
+
 int
 main(
 	int argc,
@@ -696,6 +839,12 @@ main(
 	int client_fd;
 	pid_t pid;
 	pid_t wp;
+
+	if (argc >= 3 && strcmp(argv[1], "--has-user") == 0)
+		return cmd_has_user(argv[2]);
+	if (argc >= 3 && strcmp(argv[1], "--add-user") == 0)
+		return cmd_add_user(argv[2]);
+
 	port = RDPD_DEFAULT_PORT;
 	cert_path = RDPD_CERT_PATH;
 	key_path = RDPD_KEY_PATH;

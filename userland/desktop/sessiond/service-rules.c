@@ -21,7 +21,7 @@
 #include <string.h>
 
 /* The services a session may name. */
-static const char *const rules_services[] = { "sshd" };
+static const char *const rules_services[] = { "sshd", "rdpd" };
 
 /*
  * Decides a SERVICE request's arguments (the line after "SERVICE ") for a

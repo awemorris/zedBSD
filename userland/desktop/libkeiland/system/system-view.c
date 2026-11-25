@@ -408,21 +408,34 @@ system_view_sharing_state(
  * Puts Remote Login's pending state into effect.
  */
 void
+system_view_rdp_state(
+	struct system_view *view,
+	const struct kl_rdp_state *state)
+{
+	view->rdp_pending = *state;
+	view->rdp_touched = 1U;
+}
+
+void
 system_view_sharing_done(
 	struct system_view *view)
 {
 	int differs;
 
-	/* Nothing pending. */
-	if (!view->sharing_touched)
-		return;
-
-	/* The state, told when it changed. */
-	view->sharing_touched = 0U;
-	differs = memcmp(&view->sharing, &view->sharing_pending, sizeof(view->sharing));
-	view->sharing = view->sharing_pending;
-	if (differs != 0)
-		view->changed |= KL_SYSTEM_CHANGED_SHARING;
+	if (view->sharing_touched) {
+		view->sharing_touched = 0U;
+		differs = memcmp(&view->sharing, &view->sharing_pending, sizeof(view->sharing));
+		view->sharing = view->sharing_pending;
+		if (differs != 0)
+			view->changed |= KL_SYSTEM_CHANGED_SHARING;
+	}
+	if (view->rdp_touched) {
+		view->rdp_touched = 0U;
+		differs = memcmp(&view->rdp, &view->rdp_pending, sizeof(view->rdp));
+		view->rdp = view->rdp_pending;
+		if (differs != 0)
+			view->changed |= KL_SYSTEM_CHANGED_RDP;
+	}
 }
 
 /*

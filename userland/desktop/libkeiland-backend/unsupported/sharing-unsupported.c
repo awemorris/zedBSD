@@ -44,3 +44,26 @@ kl_backend_sharing_get(
 	/* Nothing known, nothing available. */
 	memset(state, 0, sizeof(*state));
 }
+
+/* Gives a state that says Remote Desktop is not available. */
+void
+kl_backend_sharing_get_rdp(
+	const struct kl_backend *backend,
+	struct kl_backend_rdp *state)
+{
+	(void)backend;
+
+	memset(state, 0, sizeof(*state));
+}
+
+/* Refuses Remote Desktop user registration where unsupported. */
+int
+kl_backend_sharing_rdp_add_user(
+	struct kl_backend *backend,
+	const char *password)
+{
+	(void)backend;
+	(void)password;
+
+	return ENOTSUP;
+}

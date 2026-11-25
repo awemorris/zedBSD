@@ -107,6 +107,8 @@ se_system_poll(
 		if (!consumed)
 			consumed = se_sharing_result(app, request, error);
 		if (!consumed)
+			consumed = se_remote_desktop_result(app, request, error);
+		if (!consumed)
 			consumed = se_languages_result(app, request, error);
 		if (!consumed)
 			consumed = se_printers_result(app, request, error);
@@ -128,6 +130,7 @@ se_system_close(
 {
 	/* No password typed stays (ws160-p002). */
 	se_users_close(app);
+	se_remote_desktop_close(app);
 
 	/* The monitor before its system (ws089-p013), then the system, once. */
 	if (app->monitor != NULL)

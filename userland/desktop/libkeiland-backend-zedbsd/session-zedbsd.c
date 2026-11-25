@@ -1512,12 +1512,19 @@ session_answered(
 	/* What the answer says: a SERVICE request's is the state, or why not (ws089-p025). */
 	backend->session_reason[0] = '\0';
 	kind = SESSION_ANSWER_SERVICE;
-	if (backend->session_request != KL_BACKEND_SESSION_SERVICE)
+	if (backend->session_request != KL_BACKEND_SESSION_SERVICE &&
+	    backend->session_request != KL_BACKEND_SESSION_RDP_SERVICE &&
+	    backend->session_request != KL_BACKEND_SESSION_RDP_USER)
 		kind = session_kind(line);
 	error = EPROTO;
 	switch (kind) {
 	case SESSION_ANSWER_SERVICE:
-		error = kl_backend_sharing_take(backend, line);
+		if (backend->session_request == KL_BACKEND_SESSION_RDP_SERVICE)
+			error = kl_backend_sharing_take_rdp(backend, line);
+		else if (backend->session_request == KL_BACKEND_SESSION_RDP_USER)
+			error = kl_backend_sharing_take_rdp_user(backend, line);
+		else
+			error = kl_backend_sharing_take(backend, line);
 		break;
 	case SESSION_ANSWER_STYLES:
 		/* The styles a user may use now. */

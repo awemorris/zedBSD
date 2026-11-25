@@ -179,6 +179,7 @@ void sessiond_sleep_forget(int control);
 
 /* A session's SERVICE request (service.c). */
 void sessiond_service(const struct sessiond_account *account, int control, const char *arguments);
+void sessiond_rdp_user(const struct sessiond_account *account, int control, const char *arguments);
 
 /* A session's ADMIN requests: */
 /* One-shot RDP extend credentials and attachment (seat.c). */

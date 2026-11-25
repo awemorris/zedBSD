@@ -131,6 +131,7 @@ struct wl_display;
 #define KL_SYSTEM_CHANGED_BLUETOOTH	0x10000U	/* Bluetooth's state or its devices (KL_VERSION 72) */
 #define KL_SYSTEM_CHANGED_KEYS		0x20000U	/* a security key came or went, or the screen was unlocked (KL_VERSION 77) */
 #define KL_SYSTEM_CHANGED_REPLUG	0x40000U	/* a key's reset waits for the key to be plugged in again (KL_VERSION 77) */
+#define KL_SYSTEM_CHANGED_RDP		0x80000U	/* Remote Desktop's state */
 
 /*
  * The network: whether the daemon is reached, whether the machine is
@@ -392,6 +393,28 @@ int kl_system_sharing_set_ssh(struct kl_system *system, unsigned on, uint32_t *r
 
 /* Reads Remote Login's state again (KL_SYSTEM_CHANGED_SHARING follows).  Returns 0 or ENOTSUP. */
 int kl_system_sharing_query(struct kl_system *system, uint32_t *request);
+
+/* Remote Desktop (rdpd) state and session user registration status. */
+struct kl_rdp_state {
+	unsigned available;
+	unsigned enabled;
+	unsigned running;
+	unsigned port;
+	unsigned allowed;
+	unsigned user_registered;
+};
+
+/* Copies Remote Desktop's state (all zero without KL_SYSTEM_HAS_SHARING). */
+void kl_system_sharing_get_rdp_state(const struct kl_system *system, struct kl_rdp_state *state);
+
+/* Turns Remote Desktop on (on 1) or off (0), now and at every start. */
+int kl_system_sharing_set_rdp(struct kl_system *system, unsigned on, uint32_t *request);
+
+/* Reads Remote Desktop's state again (KL_SYSTEM_CHANGED_RDP follows). */
+int kl_system_sharing_query_rdp(struct kl_system *system, uint32_t *request);
+
+/* Verifies password and registers/updates the session user in rdpd's NTLM user store. */
+int kl_system_sharing_add_rdp_user(struct kl_system *system, const char *password, uint32_t *request);
 
 /*
  * KL_VERSION 49: a notification shown at the bottom of the screen and kept in

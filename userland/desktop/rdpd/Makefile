@@ -14,4 +14,7 @@ RDPD_SOURCES := \
 	userland/desktop/wayland/rdp-headless-proto.c \
 	$(LIBRDP_SOURCES)
 
-$(eval $(call USERLAND_PACKAGE,rdpd,rdpd - Remote Desktop Server Daemon,x86_64,n,basic,$(RDPD_SOURCES),y,desktop,desktop/rdpd,base/libssl-compat base/libcrypto-compat base/passkey desktop/wayland,0755,program,,,sbin))
+RDPD_DATA := \
+	/etc/service.d/rdpd=userland/desktop/rdpd/rdpd.service
+
+$(eval $(call USERLAND_PACKAGE,rdpd,rdpd - Remote Desktop Server Daemon,x86_64,n,basic,$(RDPD_SOURCES),y,desktop,desktop/rdpd,base/libssl-compat base/libcrypto-compat base/passkey desktop/wayland,0755,program,$(RDPD_DATA),,sbin))

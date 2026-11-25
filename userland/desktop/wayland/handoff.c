@@ -220,6 +220,10 @@ handoff_answer_route(
 		kwl_system_sharing_answer(server, error);
 		return;
 	}
+	if (request == KL_BACKEND_SESSION_RDP_SERVICE || request == KL_BACKEND_SESSION_RDP_USER) {
+		kwl_system_sharing_rdp_answer(server, error);
+		return;
+	}
 
 	/* A PIN's change and what the user has enrolled are the system extension's, also while the screen is locked (ws172-p002). */
 	if (request == KL_BACKEND_SESSION_ENROLL) {

@@ -498,6 +498,13 @@ session_request(
 		return 0;
 	}
 
+	/* RDP user registration status or update. */
+	match = strncmp(line, "RDPUSER ", 8);
+	if (match == 0) {
+		sessiond_rdp_user(account, control, line + 8);
+		return 0;
+	}
+
 	/* Power Off or Restart. */
 	match = strncmp(line, "POWER ", 6);
 	if (match == 0) {

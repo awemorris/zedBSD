@@ -1928,6 +1928,8 @@ int kl_backend_account_administer(const char *password, const char *operation, c
 #define KL_BACKEND_SESSION_KEYOP	10U	/* kl_backend_session_key_pin, kl_backend_session_key_reset (ws199-p001) */
 #define KL_BACKEND_SESSION_REPLUG	11U	/* not an answer: the key is to be plugged in again (ws199-p001) */
 #define KL_BACKEND_SESSION_KEYOWNER	12U	/* kl_backend_session_key_owner (ws199-p001) */
+#define KL_BACKEND_SESSION_RDP_SERVICE	13U	/* rdpd service status/on/off */
+#define KL_BACKEND_SESSION_RDP_USER	14U	/* rdp user registration status/add */
 
 /*
  * The ways to log in or unlock (ws172-p002, docs/architecture/security.md
@@ -2394,6 +2396,10 @@ void kl_backend_seat_paused_done(struct kl_backend *backend);
 #define KL_BACKEND_SHARING_STATUS	0U
 #define KL_BACKEND_SHARING_ON		1U
 #define KL_BACKEND_SHARING_OFF		2U
+#define KL_BACKEND_SHARING_RDP_STATUS		3U
+#define KL_BACKEND_SHARING_RDP_ON		4U
+#define KL_BACKEND_SHARING_RDP_OFF		5U
+#define KL_BACKEND_SHARING_RDP_USER_STATUS	6U
 
 /* The longest host key fingerprint ("SHA256:" and 43 characters of base64, and its end). */
 #define KL_BACKEND_SHARING_FINGERPRINT	64U
@@ -2419,6 +2425,23 @@ int kl_backend_sharing_request(struct kl_backend *backend, unsigned action);
 
 /* Copies Remote Login's state as last answered. */
 void kl_backend_sharing_get(const struct kl_backend *backend, struct kl_backend_sharing *state);
+
+/* Remote Desktop (rdpd) state and session user registration status. */
+struct kl_backend_rdp {
+	unsigned available;
+	unsigned enabled;
+	unsigned running;
+	unsigned port;
+	unsigned allowed;
+	unsigned known;
+	unsigned user_registered;
+};
+
+/* Copies Remote Desktop's state as last answered. */
+void kl_backend_sharing_get_rdp(const struct kl_backend *backend, struct kl_backend_rdp *state);
+
+/* Verifies password and adds/updates the session user in rdpd's NTLM user store. */
+int kl_backend_sharing_rdp_add_user(struct kl_backend *backend, const char *password);
 
 /* Requests one-shot RDP extended display credentials from sessiond. */
 int kl_backend_session_extend_prepare(struct kl_backend *backend);

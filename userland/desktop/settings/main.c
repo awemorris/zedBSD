@@ -532,6 +532,7 @@ main_loop(
 		se_look_poll(&main_app, now);
 		se_storage_poll(&main_app, now);
 		se_sharing_poll(&main_app);
+		se_remote_desktop_poll(&main_app);
 		se_printers_poll(&main_app);
 		se_bluetooth_poll(&main_app);
 		se_display_poll(&main_app);

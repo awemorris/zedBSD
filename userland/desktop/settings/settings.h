@@ -257,6 +257,7 @@ enum se_page_id {
 	SE_PAGE_TOUCHPAD,
 	SE_PAGE_PRINTERS,
 	SE_PAGE_SHARING,
+	SE_PAGE_REMOTE_DESKTOP,
 	SE_PAGE_USERS,
 	SE_PAGE_SECURITY_KEYS,
 	SE_PAGE_UPDATES,
@@ -567,6 +568,23 @@ struct se_sharing {
 	uint32_t request;
 	char message[SE_MESSAGE];
 	int message_bad;
+};
+
+/*
+ * The Remote Desktop page (page-remote-desktop.c): rdpd service state,
+ * toggle request, and session user NTLM registration form.
+ */
+struct se_remote_desktop {
+	struct kl_rdp_state state;
+	int asked;
+	uint32_t request;
+	uint32_t user_request;
+	struct kl_field password;
+	int focused;
+	char message[SE_MESSAGE];
+	int message_bad;
+	char user_message[SE_MESSAGE];
+	int user_message_bad;
 };
 
 /*
@@ -1429,6 +1447,7 @@ struct se_app {
 
 	/* The Sharing page's Remote Login (ws089-p025). */
 	struct se_sharing sharing;
+	struct se_remote_desktop remote_desktop;
 	struct se_display display;
 
 	/* The Printers page (ws145-p004). */
@@ -1544,6 +1563,12 @@ int se_languages_key(struct se_app *app, const struct se_event *event);
 int se_languages_result(struct se_app *app, uint32_t request, int error);
 void se_sharing_poll(struct se_app *app);
 int se_sharing_result(struct se_app *app, uint32_t request, int error);
+int se_remote_desktop_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+void se_remote_desktop_press(struct se_app *app, int index);
+int se_remote_desktop_key(struct se_app *app, const struct se_event *event);
+void se_remote_desktop_poll(struct se_app *app);
+int se_remote_desktop_result(struct se_app *app, uint32_t request, int error);
+void se_remote_desktop_close(struct se_app *app);
 int se_printers_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 void se_printers_press(struct se_app *app, int index);
 int se_printers_key(struct se_app *app, const struct se_event *event);

@@ -255,6 +255,7 @@ struct system_state {
 	unsigned devices_count;
 	struct system_devices_wait sharing;
 	unsigned sharing_waiting;
+	unsigned rdp_query_chain;
 	struct system_devices_wait pin;
 	unsigned pin_waiting;
 	unsigned pin_key;
@@ -289,6 +290,7 @@ static struct kwl_timer system_scan_timer;
 static int system_manager_request(struct kwl_object *manager, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int system_sharing_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static void system_sharing_state(struct kwl_object *object);
+static void system_sharing_rdp_state(struct kwl_object *object);
 static int system_network_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int system_audio_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int system_power_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
@@ -985,6 +987,7 @@ system_manager_request(
 	case KWL_SYSTEM_SHARING:
 		/* The state last known, then read again (its answer comes to every object). */
 		system_sharing_state(created);
+		system_sharing_rdp_state(created);
 		system_done(created, KL_SYSTEM_SHARING_EVENT_DONE);
 		(void)kl_backend_sharing_request(manager->client->server->backend, KL_BACKEND_SHARING_STATUS);
 		break;
@@ -1021,6 +1024,41 @@ kwl_system_sharing_answer(
 	system_tell(server, KWL_SYSTEM_SHARING, system_sharing_state, KL_SYSTEM_SHARING_EVENT_DONE);
 
 	/* The result of the request that waited. */
+	if (!system_state.sharing_waiting)
+		return;
+	wait = &system_state.sharing;
+	system_state.sharing_waiting = 0U;
+	for (client = server->clients; client != NULL; client = client->next) {
+		if (client->number != wait->client || client->fatal)
+			continue;
+		object = kwl_find(client, wait->object);
+		if (object == NULL || object->dead || object->kind != KWL_SYSTEM_SHARING)
+			return;
+		system_result(object, KL_SYSTEM_SHARING_EVENT_RESULT, wait->number, system_result_of(error));
+		return;
+	}
+}
+
+/*
+ * Takes sessiond's answer to a Remote Desktop service or user request.
+ */
+void
+kwl_system_sharing_rdp_answer(
+	struct kwl_server *server,
+	int error)
+{
+	struct kwl_client *client;
+	struct kwl_object *object;
+	struct system_devices_wait *wait;
+
+	if (system_state.rdp_query_chain) {
+		system_state.rdp_query_chain = 0U;
+		if (kl_backend_sharing_request(server->backend, KL_BACKEND_SHARING_RDP_USER_STATUS) == 0)
+			return;
+	}
+
+	system_tell(server, KWL_SYSTEM_SHARING, system_sharing_rdp_state, KL_SYSTEM_SHARING_EVENT_DONE);
+
 	if (!system_state.sharing_waiting)
 		return;
 	wait = &system_state.sharing;
@@ -1338,7 +1376,7 @@ kwl_system_enrolled_answer(
 	}
 }
 
-/* Carries out a request of a sharing object (ws089-p025). */
+/* Carries out a request of a sharing object. */
 static int
 system_sharing_request(
 	struct kwl_object *object,
@@ -1349,6 +1387,10 @@ system_sharing_request(
 	uint32_t number;
 	uint32_t on;
 	unsigned action;
+	char *password;
+	size_t next;
+	int is_add_user;
+	int is_rdp_query;
 	int error;
 
 	/* The object goes. */
@@ -1359,7 +1401,10 @@ system_sharing_request(
 		return 0;
 	}
 
-	/* set_ssh(number, on) or query(number). */
+	is_add_user = 0;
+	is_rdp_query = 0;
+	password = NULL;
+	action = 0U;
 	if (opcode == KL_SYSTEM_SHARING_SET_SSH && size == 8U) {
 		on = system_word(bytes, 4U);
 		action = KL_BACKEND_SHARING_OFF;
@@ -1367,6 +1412,18 @@ system_sharing_request(
 			action = KL_BACKEND_SHARING_ON;
 	} else if (opcode == KL_SYSTEM_SHARING_QUERY && size == 4U) {
 		action = KL_BACKEND_SHARING_STATUS;
+	} else if (opcode == KL_SYSTEM_SHARING_SET_RDP && size == 8U) {
+		on = system_word(bytes, 4U);
+		action = KL_BACKEND_SHARING_RDP_OFF;
+		if (on != 0U)
+			action = KL_BACKEND_SHARING_RDP_ON;
+	} else if (opcode == KL_SYSTEM_SHARING_QUERY_RDP && size == 4U) {
+		action = KL_BACKEND_SHARING_RDP_STATUS;
+		is_rdp_query = 1;
+	} else if (opcode == KL_SYSTEM_SHARING_ADD_RDP_USER) {
+		if (size < 8U || system_read_string(bytes, size, 4U, &password, &next) != 0 || next != size)
+			return EPROTO;
+		is_add_user = 1;
 	} else {
 		return EPROTO;
 	}
@@ -1376,13 +1433,23 @@ system_sharing_request(
 
 	/* One at a time: another one waiting is busy. */
 	if (system_state.sharing_waiting) {
+		if (password != NULL) {
+			memset(password, 0, strlen(password));
+			free(password);
+		}
 		system_result(object, KL_SYSTEM_SHARING_EVENT_RESULT, number, KL_SYSTEM_RESULT_BUSY);
 		return 0;
 	}
 
-	/* Asked of sessiond; the answer comes through kwl_system_sharing_answer. */
-	error = kl_backend_sharing_request(object->client->server->backend, action);
-	printf("KWL SYSTEM sharing client=%llu action=%u error=%d\n", (unsigned long long)object->client->number, action, error);
+	/* Asked of sessiond; the answer comes through kwl_system_sharing_answer or kwl_system_sharing_rdp_answer. */
+	if (is_add_user) {
+		error = kl_backend_sharing_rdp_add_user(object->client->server->backend, password);
+		memset(password, 0, strlen(password));
+		free(password);
+	} else {
+		error = kl_backend_sharing_request(object->client->server->backend, action);
+	}
+	printf("KWL SYSTEM sharing client=%llu opcode=%u error=%d\n", (unsigned long long)object->client->number, opcode, error);
 	if (error != 0) {
 		system_result(object, KL_SYSTEM_SHARING_EVENT_RESULT, number, system_result_of(error));
 		return 0;
@@ -1393,6 +1460,7 @@ system_sharing_request(
 	system_state.sharing.object = object->id;
 	system_state.sharing.number = number;
 	system_state.sharing_waiting = 1U;
+	system_state.rdp_query_chain = is_rdp_query ? 1U : 0U;
 
 	/* Succeeded: the result comes with the answer. */
 	return 0;
@@ -1418,6 +1486,26 @@ system_sharing_state(
 	offset = system_put_word(payload, offset, sharing.allowed);
 	offset = system_put_string(payload, offset, sharing.fingerprint);
 	(void)kwl_emit(object->client, object->id, KL_SYSTEM_SHARING_EVENT_STATE, payload, offset);
+}
+
+/* Tells a sharing object Remote Desktop's state (without its done). */
+static void
+system_sharing_rdp_state(
+	struct kwl_object *object)
+{
+	struct kl_backend_rdp rdp;
+	unsigned char payload[SYSTEM_EVENT_MAX];
+	size_t offset;
+
+	kl_backend_sharing_get_rdp(object->client->server->backend, &rdp);
+
+	offset = system_put_word(payload, 0U, rdp.available);
+	offset = system_put_word(payload, offset, rdp.enabled);
+	offset = system_put_word(payload, offset, rdp.running);
+	offset = system_put_word(payload, offset, rdp.port);
+	offset = system_put_word(payload, offset, rdp.allowed);
+	offset = system_put_word(payload, offset, rdp.user_registered);
+	(void)kwl_emit(object->client, object->id, KL_SYSTEM_SHARING_EVENT_RDP_STATE, payload, offset);
 }
 
 /* Carries out a request of a network object. */
