@@ -60,10 +60,38 @@ nd_would_block(
 {
 #ifdef _WIN32
 	int e = WSAGetLastError();
-	return e == WSAEWOULDBLOCK;
+	return e == WSAEWOULDBLOCK || e == WSAECONNRESET ||
+	       e == WSAENETRESET || e == WSAEMSGSIZE;
 #else
 	return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR;
 #endif
+}
+
+static int nd_check_cancel(struct mikuterm_session *session, int *out_closing);
+
+static int
+nd_wait_cancel_after_error(
+	struct mikuterm_session *session,
+	const char *err_msg)
+{
+	struct kl_socket_wait wait;
+	size_t ready = 0U;
+	int closing = 0;
+
+	session_say_line(session, "\033[0m\033[?2004l\033[2J\033[H\033[?25hNetwork Display -- Error");
+	session_say_line(session, err_msg);
+	session_say_line(session, "Press Esc or Ctrl+C to return.");
+	for (;;) {
+		if (nd_check_cancel(session, &closing))
+			return ECANCELED;
+		if (closing)
+			return EPIPE;
+		wait.socket = NULL;
+		wait.waker = session->waker;
+		wait.events = KL_SOCKET_READABLE;
+		wait.ready = 0U;
+		(void)kl_socket_poll(&wait, 1U, 200, &ready);
+	}
 }
 
 static int
@@ -76,7 +104,7 @@ nd_check_cancel(
 	size_t i;
 
 	kl_mutex_lock(&session->lock);
-	closing = session->ended;
+	closing = session->closing || session->ended;
 	for (i = 0U; i < session->input_length; i++) {
 		uint8_t c = session->input[i];
 		if (c == 0x1BU || c == 0x03U || c == 0x04U) {
@@ -199,7 +227,7 @@ netdisp_wait_and_receive(
 	{
 		WSADATA wsa;
 		if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
-			return EIO;
+			return nd_wait_cancel_after_error(session, "WSAStartup failed.");
 	}
 #endif
 
@@ -211,15 +239,24 @@ netdisp_wait_and_receive(
 	if (netdisp_generate_keypair(sk, pk, nonce) != 0 ||
 	    RAND_bytes(device_id, sizeof(device_id)) != 1) {
 		OPENSSL_cleanse(sk, sizeof(sk));
-		return EIO;
+		return nd_wait_cancel_after_error(session, "Failed to generate X25519 keypair.");
 	}
 	netdisp_fingerprint_hex(pk, nonce, fp);
 
 	sock = socket(AF_INET, SOCK_DGRAM, 0);
 	if (sock == ND_INVALID_SOCK) {
 		OPENSSL_cleanse(sk, sizeof(sk));
-		return EIO;
+		return nd_wait_cancel_after_error(session, "Failed to create UDP socket.");
 	}
+#ifdef _WIN32
+	{
+		BOOL connreset = FALSE;
+		DWORD bytes_ret = 0;
+		(void)WSAIoctl(sock, _WSAIOW(IOC_VENDOR, 12),
+			       &connreset, sizeof(connreset),
+			       NULL, 0, &bytes_ret, NULL, NULL);
+	}
+#endif
 	(void)setsockopt(sock, SOL_SOCKET, SO_BROADCAST,
 			 (const char *)&yes, sizeof(yes));
 	(void)nd_set_nonblock(sock);
@@ -231,13 +268,13 @@ netdisp_wait_and_receive(
 	if (bind(sock, (struct sockaddr *)&bind_addr, sizeof(bind_addr)) != 0) {
 		nd_close_sock(sock);
 		OPENSSL_cleanse(sk, sizeof(sk));
-		return EIO;
+		return nd_wait_cancel_after_error(session, "Failed to bind UDP socket.");
 	}
 	bind_len = sizeof(bind_addr);
 	if (getsockname(sock, (struct sockaddr *)&bind_addr, &bind_len) != 0) {
 		nd_close_sock(sock);
 		OPENSSL_cleanse(sk, sizeof(sk));
-		return EIO;
+		return nd_wait_cancel_after_error(session, "Failed to query UDP reply port.");
 	}
 	reply_port = ntohs(bind_addr.sin_port);
 
@@ -260,7 +297,7 @@ netdisp_wait_and_receive(
 		return EINVAL;
 	}
 
-	session_say_line(session, "\033[2J\033[HNetwork Display -- Waiting for connection...");
+	session_say_line(session, "\033[0m\033[?2004l\033[2J\033[H\033[?25hNetwork Display -- Waiting for connection...");
 	snprintf(msg, sizeof(msg), "Device: %s", adv.device_name);
 	session_say_line(session, msg);
 	snprintf(msg, sizeof(msg), "Verification Code: %s", fp);

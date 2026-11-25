@@ -722,8 +722,13 @@ thread_choose(
 				launch_choose(&choice->screen, index);
 				continue;
 			}
-			if (error != 0)
-				break;
+			if (error != 0) {
+				if (error == EPIPE)
+					break;
+				error = 0;
+				launch_choose(&choice->screen, index);
+				continue;
+			}
 			error = rdp_tab_create(target.host_name, target.width,
 					       target.height, 1,
 					       choice->session->app,
