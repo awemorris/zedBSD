@@ -1063,6 +1063,13 @@ kwl_netdisp_extend_attach(
 	}
 
 	memset(head, 0, sizeof(*head));
+	head->output.images = (VkImage *)calloc(1U, sizeof(VkImage));
+	if (head->output.images == NULL) {
+		rdp_ext_destroy(ext, img);
+		vkFreeMemory(compose->device, img_mem, NULL);
+		kwl_compose_unpark(server);
+		return;
+	}
 	head->virtual_rdp = 1U;
 	head->rdp_ext = ext;
 	head->output.format = compose->output.format != VK_FORMAT_UNDEFINED
@@ -1083,6 +1090,7 @@ kwl_netdisp_extend_attach(
 	if (vkCreateImageView(compose->device, &view_info, NULL, &head->views[0]) != VK_SUCCESS) {
 		printf("KWL NETDISP extend_attach vkCreateImageView failed fmt=%d\n",
 		       (int)head->output.format);
+		free(head->output.images);
 		rdp_ext_destroy(ext, img);
 		vkFreeMemory(compose->device, img_mem, NULL);
 		memset(head, 0, sizeof(*head));
@@ -1101,6 +1109,7 @@ kwl_netdisp_extend_attach(
 		printf("KWL NETDISP extend_attach vkCreateFramebuffer failed fmt=%d\n",
 		       (int)head->output.format);
 		vkDestroyImageView(compose->device, head->views[0], NULL);
+		free(head->output.images);
 		rdp_ext_destroy(ext, img);
 		vkFreeMemory(compose->device, img_mem, NULL);
 		memset(head, 0, sizeof(*head));
@@ -1195,7 +1204,8 @@ netdisp_detach_internal(
 	if (head->views[0] != VK_NULL_HANDLE)
 		vkDestroyImageView(compose->device, head->views[0], NULL);
 	ext = head->rdp_ext;
-	img = head->output.images[0];
+	img = head->output.images != NULL ? head->output.images[0] : VK_NULL_HANDLE;
+	free(head->output.images);
 	img_mem = ext != NULL ? ext->image_mem : VK_NULL_HANDLE;
 	memset(head, 0, sizeof(*head));
 
