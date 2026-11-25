@@ -23,6 +23,7 @@
 
 struct kwl_rdp {
 	int fd;
+	int wake_fd;
 	VkDevice device;
 	VkPhysicalDevice physical;
 	VkQueue queue;
@@ -252,6 +253,7 @@ kwl_rdp_open(
 	if (rdp == NULL)
 		return ENOMEM;
 	rdp->fd = server->rdp_fd;
+	rdp->wake_fd = server->wake[1];
 	rdp->device = (VkDevice)device;
 	rdp->physical = (VkPhysicalDevice)physical;
 	rdp->queue = (VkQueue)queue;
@@ -466,6 +468,8 @@ kwl_rdp_encode_and_send(
 		if (poll(&pfd, 1, 0) == 0) {
 			rdp->force_key = 1U;
 			__atomic_store_n(&rdp->pending_frame, 1U, __ATOMIC_RELEASE);
+			if (rdp->wake_fd >= 0)
+				kwl_thread_wake(rdp->wake_fd);
 			return 0;
 		}
 	}
@@ -531,9 +535,6 @@ kwl_rdp_encode_and_send(
 	if (__atomic_exchange_n(&rdp->refine_key, 0U, __ATOMIC_ACQ_REL) != 0U) {
 		send_flags |= MEDIA_ENCODE_FORCE_KEY | MEDIA_ENCODE_HIGH_QUALITY;
 		__atomic_store_n(&rdp->need_refine, 0U, __ATOMIC_RELEASE);
-	} else {
-		__atomic_store_n(&rdp->last_send_ms, kwl_milliseconds(), __ATOMIC_RELEASE);
-		__atomic_store_n(&rdp->need_refine, 1U, __ATOMIC_RELEASE);
 	}
 	err = media_encoder_send(rdp->encoder, &pic, (int64_t)pts_us, send_flags);
 	if (err != 0)
@@ -542,6 +543,16 @@ kwl_rdp_encode_and_send(
 	err = media_encoder_receive(rdp->encoder, 0U, &pkt);
 	if (err != 0 || pkt.data == NULL || pkt.size == 0U)
 		return err;
+	if ((send_flags & MEDIA_ENCODE_HIGH_QUALITY) == 0U) {
+		unsigned was_refine;
+		was_refine = __atomic_load_n(&rdp->need_refine, __ATOMIC_ACQUIRE);
+		if (was_refine == 0U || pkt.size >= 2048U) {
+			__atomic_store_n(&rdp->last_send_ms, kwl_milliseconds(), __ATOMIC_RELEASE);
+			__atomic_store_n(&rdp->need_refine, 1U, __ATOMIC_RELEASE);
+			if (was_refine == 0U && rdp->wake_fd >= 0)
+				kwl_thread_wake(rdp->wake_fd);
+		}
+	}
 	out_flags = 0U;
 	if ((pkt.flags & MEDIA_ENCODED_KEY) != 0U)
 		out_flags = KWL_RDP_FRAME_KEY;

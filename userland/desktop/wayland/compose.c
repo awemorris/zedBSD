@@ -6018,6 +6018,7 @@ compose_op_run(
 						      compose->output.height,
 						      kwl_log_us());
 		}
+		outcome->headless = 1U;
 		outcome->present_result = VK_SUCCESS;
 		outcome->present_cycles = 0U;
 		outcome->presented_us = kwl_log_us();

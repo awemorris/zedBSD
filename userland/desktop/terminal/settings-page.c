@@ -147,11 +147,18 @@
  * only for a program that forwards X11).  Then the most of a block's
  * other lines shown.
  */
-#define PAGE_HOST_FIELDS	10U
+#define PAGE_HOST_FIELDS	12U
 #define PAGE_HOST_NAME		0U
 #define PAGE_HOST_PORT		2U
 #define PAGE_HOST_COMMAND	4U
-#define PAGE_HOST_X11		5U
+#define PAGE_HOST_USE_RDP	5U
+#define PAGE_HOST_RDP_PORT	6U
+#define PAGE_HOST_X11		7U
+#define PAGE_HOST_X11_FORWARD	7U
+#define PAGE_HOST_X11_TRUSTED	8U
+#define PAGE_HOST_X11_TIMEOUT	9U
+#define PAGE_HOST_X11_ROOT	10U
+#define PAGE_HOST_X11_TABIFY	11U
 #define PAGE_OTHER_LINES	40U
 
 /* The longest line of the Hosts pane's words (a host's title, a line shown), with its NUL. */
@@ -348,24 +355,26 @@ static const char *const page_appearance_labels[] = { "Text size", "Size", "Them
 static const char *const page_behavior_labels[] = { "Copy on select" };
 static const char *const page_key_labels[] = { "Name", "Comment", "Passphrase", "Again" };
 static const char *const page_host_labels[] = {
-	"Name", "Host address", "Port", "User", "Command", "Identity file", "Forward", "Listen", "Destination", "New host",
+	"Name", "Host address", "Port", "User", "Command", "Use RDP", "RDP port",
+	"Identity file", "Forward", "Listen", "Destination", "New host",
 	"Forward X11", "Trusted", "Timeout", "Root window", "Window tabs"
 };
 
 /* How many of the Hosts pane's labels a program that does not forward X11 has (the X11 ones are last). */
-#define PAGE_HOST_LABELS	10U
+#define PAGE_HOST_LABELS	12U
 
 /* The keywords of a host's form, its labels and what each field shows empty, in the fields' order. */
 static const char *const page_host_keywords[PAGE_HOST_FIELDS] = {
-	"Host", "HostName", "Port", "User", "RemoteCommand",
+	"Host", "HostName", "Port", "User", "RemoteCommand", "UseRDP", "RDPPort",
 	"ForwardX11", "ForwardX11Trusted", "ForwardX11Timeout", "X11RootWindow", "X11WindowTabify"
 };
 static const char *const page_host_field_labels[PAGE_HOST_FIELDS] = {
-	"Name", "Host address", "Port", "User", "Command",
+	"Name", "Host address", "Port", "User", "Command", "Use RDP", "RDP port",
 	"Forward X11", "Trusted", "Timeout", "Root window", "Window tabs"
 };
 static const char *const page_host_placeholders[PAGE_HOST_FIELDS] = {
 	"myserver (Host)", "myserver.example.com (HostName)", "22 (Port)", "The login name (User)", "Run instead of a shell (RemoteCommand)",
+	"yes or no (UseRDP)", "3389 (RDPPort)",
 	"yes or no (ForwardX11)", "yes or no (ForwardX11Trusted)", "A time, as 20m (ForwardX11Timeout)",
 	"off, or a size: 1280x800 (X11RootWindow)", "yes or no (X11WindowTabify)"
 };
@@ -432,6 +441,8 @@ static int page_label(int top, int left, int width, const char *label, int last)
 static int page_control_width(int left, int width, int x);
 static void page_row_text(int x, int top, int right, const char *text);
 static int page_field_row(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field, const char *placeholder);
+static int page_host_switch_row(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field);
+static int page_host_root_slider_row(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field);
 static int page_note(int top, int left, int width, const char *text, kl_color ink);
 static int page_note_height(int width, const char *text);
 static int page_message_draw(int top, int left, int width, const struct page_message *message);
@@ -1288,7 +1299,10 @@ page_hosts_form(
 
 	/* Each field, and the line of another block that wins over it. */
 	for (index = first; index < PAGE_HOST_X11; index++) {
-		y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], page_host_placeholders[index]);
+		if (index == PAGE_HOST_USE_RDP)
+			y = page_host_switch_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index]);
+		else
+			y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], page_host_placeholders[index]);
 		if (overriding[index] == TERMINAL_HOSTS_NONE)
 			continue;
 		page_hosts_where(overriding[index], where, sizeof(where));
@@ -1545,7 +1559,15 @@ page_hosts_x11(
 
 	/* Each field, and the line of another block that wins over it. */
 	for (index = PAGE_HOST_X11; index < PAGE_HOST_FIELDS; index++) {
-		y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], page_host_placeholders[index]);
+		if (index == PAGE_HOST_X11_FORWARD ||
+		    index == PAGE_HOST_X11_TRUSTED ||
+		    index == PAGE_HOST_X11_TABIFY) {
+			y = page_host_switch_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index]);
+		} else if (index == PAGE_HOST_X11_ROOT) {
+			y = page_host_root_slider_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index]);
+		} else {
+			y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], page_host_placeholders[index]);
+		}
 		if (overriding[index] == TERMINAL_HOSTS_NONE)
 			continue;
 		page_hosts_where(overriding[index], where, sizeof(where));
@@ -2091,14 +2113,14 @@ page_hosts_apply(void)
 			error = 0;
 		} else if (index == PAGE_HOST_COMMAND) {
 			error = terminal_hosts_put_command(field, written, sizeof(written));
-		} else if (index >= PAGE_HOST_X11) {
+		} else if (index == PAGE_HOST_USE_RDP || index >= PAGE_HOST_X11) {
 			error = terminal_hosts_put_x11(page_host_keywords[index], field, written, sizeof(written), &why);
 		} else {
 			error = terminal_hosts_put_word(field, written, sizeof(written));
 		}
 
 		/* A port is a number from 1 to 65535. */
-		if (error == 0 && index == PAGE_HOST_PORT && field[0] != '\0') {
+		if (error == 0 && (index == PAGE_HOST_PORT || index == PAGE_HOST_RDP_PORT) && field[0] != '\0') {
 			port = strtoul(field, &end, 10);
 			if (*end != '\0' || port == 0UL || port > 65535UL || field[0] < '0' || field[0] > '9')
 				error = EINVAL;
@@ -2153,6 +2175,7 @@ page_hosts_why(
 	case PAGE_HOST_NAME:
 		return "a host needs a name: words without quotes, none starting with # or =";
 	case PAGE_HOST_PORT:
+	case PAGE_HOST_RDP_PORT:
 		return "a number from 1 to 65535";
 	case PAGE_HOST_COMMAND:
 		return "a command cannot start with = or hold a control character";
@@ -3896,6 +3919,105 @@ page_field_row(
 	(void)kl_field(page.ui, &page.style, id, &control, field, placeholder);
 
 	/* Reports the edge below the row. */
+	return top + PAGE_ROW;
+}
+
+/* Draws a yes/no toggle switch row backed by a host field; reports the edge below it. */
+static int
+page_host_switch_row(
+	int top,
+	int left,
+	int width,
+	const char *label,
+	uint32_t id,
+	struct kl_field *field)
+{
+	const struct kl_theme *theme;
+	int value_x;
+	int on;
+	int changed;
+
+	theme = page.style.theme;
+	value_x = page_label(top, left, width, label, 1);
+	on = (strcmp(field->text, "yes") == 0);
+	changed = kl_switch(page.ui, &page.style, id, value_x, top + (PAGE_ROW - theme->switch_height) / 2, &on, 0U);
+	page_row_text(value_x + theme->switch_width + PAGE_AFTER_GAP, top, left + width - PAGE_INSET, on ? "Yes" : "No");
+	if (changed)
+		kl_field_set(field, on ? "yes" : "no");
+	return top + PAGE_ROW;
+}
+
+/* Draws an X11RootWindow slider row (leftmost: Off, rightward: larger screen); reports the edge below it. */
+static int
+page_host_root_slider_row(
+	int top,
+	int left,
+	int width,
+	const char *label,
+	uint32_t id,
+	struct kl_field *field)
+{
+	static const char *const presets[] = {
+		"off", "800x600", "1024x768", "1280x720", "1280x800",
+		"1440x900", "1600x900", "1920x1080", "2560x1440", "3840x2160"
+	};
+	static const int preset_widths[] = {
+		0, 800, 1024, 1280, 1280, 1440, 1600, 1920, 2560, 3840
+	};
+	const unsigned count = (unsigned)(sizeof(presets) / sizeof(presets[0]));
+	const struct kl_theme *theme;
+	struct kl_rect slider;
+	const char *shown;
+	double val;
+	unsigned idx;
+	unsigned best;
+	int value_x;
+	int right;
+	int cw;
+	int w;
+	int diff;
+	int best_diff;
+
+	theme = page.style.theme;
+	value_x = page_label(top, left, width, label, 1);
+	cw = page_control_width(left, width, value_x);
+	right = left + width - PAGE_INSET;
+
+	/* Maps the current field text to the nearest preset index (0 = Off). */
+	best = 0U;
+	if (field->text[0] != '\0' && strcmp(field->text, "off") != 0) {
+		w = atoi(field->text);
+		if (w <= 0) {
+			best = 3U;
+		} else {
+			best = 1U;
+			best_diff = abs(w - preset_widths[1]);
+			for (idx = 2U; idx < count; idx++) {
+				diff = abs(w - preset_widths[idx]);
+				if (diff < best_diff) {
+					best_diff = diff;
+					best = idx;
+				}
+			}
+		}
+	}
+
+	val = (double)best;
+	slider.x = value_x;
+	slider.y = top + (PAGE_ROW - theme->switch_height) / 2;
+	slider.width = cw - 96;
+	if (slider.width < 80)
+		slider.width = cw;
+	slider.height = theme->switch_height;
+	if (kl_slider(page.ui, &page.style, id, &slider, 0.0, (double)(count - 1U), 1.0, &val)) {
+		idx = (unsigned)(val + 0.5);
+		if (idx >= count)
+			idx = count - 1U;
+		kl_field_set(field, presets[idx]);
+	}
+
+	shown = (field->text[0] == '\0' || strcmp(field->text, "off") == 0) ? "Off" : field->text;
+	page_row_text(slider.x + slider.width + PAGE_AFTER_GAP, top, right, shown);
 	return top + PAGE_ROW;
 }
 

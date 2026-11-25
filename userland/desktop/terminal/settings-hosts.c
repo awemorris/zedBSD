@@ -824,6 +824,8 @@ terminal_hosts_put_x11(
 		flag = hosts_equal(keyword, keyword_length, "ForwardX11Trusted");
 	if (!flag)
 		flag = hosts_equal(keyword, keyword_length, "X11WindowTabify");
+	if (!flag)
+		flag = hosts_equal(keyword, keyword_length, "UseRDP");
 
 	/* The word without the blanks round it. */
 	word = value;

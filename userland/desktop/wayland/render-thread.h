@@ -212,6 +212,7 @@ struct kwl_render_outcome {
 	uint64_t present_cycles;
 	/* The frame's host-image copies had a command buffer of their own. */
 	unsigned copied;
+	unsigned headless;
 	uint64_t recorded_us;
 	uint64_t queued_us;
 	uint64_t presented_us;

@@ -1594,6 +1594,10 @@ render_presents_give(
 	result = outcome->present_result;
 	if (outcome->result != VK_SUCCESS)
 		result = outcome->result;
+	if (outcome->headless && taken[KWL_RENDER_SHOWN_OUTPUT] != NULL) {
+		shown_spare_put(render->shown, taken[KWL_RENDER_SHOWN_OUTPUT]);
+		taken[KWL_RENDER_SHOWN_OUTPUT] = NULL;
+	}
 	render_present_give(render, job->number, KWL_RENDER_SHOWN_OUTPUT, taken[KWL_RENDER_SHOWN_OUTPUT], result);
 
 	/* Each head's present, made after the output's. */
