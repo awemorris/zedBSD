@@ -85,6 +85,7 @@
 #define PAGE_ID_KEY_PASTE	87U
 #define PAGE_ID_KEY_SAVE	88U
 #define PAGE_ID_KEY_PUBLIC_AREA	89U
+#define PAGE_ID_HOST_RDP_PASS	90U
 #define PAGE_ID_HOST_FIELD	96U
 
 /* The layout: the margin round the panels, the sidebar's width, a pane's padding and the gap between cards, in pixels. */
@@ -289,6 +290,8 @@ struct page_state {
 	unsigned hosts_filled;
 	struct kl_field host_fields[PAGE_HOST_FIELDS];
 	char host_filled[PAGE_HOST_FIELDS][KL_FIELD_MAX];
+	struct kl_field host_rdp_password;
+	char host_rdp_password_filled[KL_FIELD_MAX];
 	struct kl_field host_new;
 	struct kl_field identity_new;
 	struct kl_field forward_listen;
@@ -355,13 +358,13 @@ static const char *const page_appearance_labels[] = { "Text size", "Size", "Them
 static const char *const page_behavior_labels[] = { "Copy on select" };
 static const char *const page_key_labels[] = { "Name", "Comment", "Passphrase", "Again" };
 static const char *const page_host_labels[] = {
-	"Name", "Host address", "Port", "User", "Command", "Use RDP", "RDP port",
+	"Name", "Host address", "Port", "User", "Command", "Use RDP", "RDP port", "RDP password",
 	"Identity file", "Forward", "Listen", "Destination", "New host",
 	"Forward X11", "Trusted", "Timeout", "Root window", "Window tabs"
 };
 
 /* How many of the Hosts pane's labels a program that does not forward X11 has (the X11 ones are last). */
-#define PAGE_HOST_LABELS	12U
+#define PAGE_HOST_LABELS	13U
 
 /* The keywords of a host's form, its labels and what each field shows empty, in the fields' order. */
 static const char *const page_host_keywords[PAGE_HOST_FIELDS] = {
@@ -1274,6 +1277,8 @@ page_hosts_form(
 	if (block->kind != TERMINAL_HOSTS_BLOCK_HOST)
 		first = PAGE_HOST_NAME + 1U;
 	card.height = PAGE_CARD_SUBTITLED + (int)(PAGE_HOST_X11 - first) * PAGE_ROW + PAGE_CARD_FOOT;
+	if (page.program->rdp_password_set != NULL && block->kind == TERMINAL_HOSTS_BLOCK_HOST)
+		card.height += PAGE_ROW;
 	for (index = first; index < PAGE_HOST_X11; index++) {
 		overriding[index] = TERMINAL_HOSTS_NONE;
 		if (index != PAGE_HOST_NAME)
@@ -1308,6 +1313,10 @@ page_hosts_form(
 		page_hosts_where(overriding[index], where, sizeof(where));
 		(void)snprintf(note, sizeof(note), "Overridden by %s", where);
 		y = page_note(y, page_value_x(card.x, card.width), card.width - 40, note, theme->bad);
+	}
+	if (page.program->rdp_password_set != NULL && block->kind == TERMINAL_HOSTS_BLOCK_HOST) {
+		y = page_field_row(y, card.x, card.width, "RDP password", PAGE_ID_HOST_RDP_PASS,
+				   &page.host_rdp_password, "Saved in Windows Credential Manager");
 	}
 
 	/* A wildcard's block: other blocks may give these too. */
@@ -2021,6 +2030,42 @@ page_hosts_select(
 	page_log("hosts-shown", title);
 }
 
+static void
+page_hosts_rdp_target(
+	unsigned block,
+	char *host,
+	size_t host_sz,
+	uint16_t *port,
+	char *user,
+	size_t user_sz)
+{
+	char port_str[32];
+	unsigned line;
+	unsigned long p;
+	char *end;
+
+	host[0] = '\0';
+	user[0] = '\0';
+	*port = 3389U;
+	if (block == TERMINAL_HOSTS_NONE || block >= page.hosts.block_count)
+		return;
+	line = terminal_hosts_find(&page.hosts, block, "HostName", TERMINAL_HOSTS_NONE);
+	if (line != TERMINAL_HOSTS_NONE)
+		(void)terminal_hosts_word(&page.hosts, line, 0U, host, host_sz);
+	if (host[0] == '\0' && page.hosts.blocks[block].kind == TERMINAL_HOSTS_BLOCK_HOST)
+		(void)terminal_hosts_word(&page.hosts, page.hosts.blocks[block].first, 0U, host, host_sz);
+	line = terminal_hosts_find(&page.hosts, block, "User", TERMINAL_HOSTS_NONE);
+	if (line != TERMINAL_HOSTS_NONE)
+		(void)terminal_hosts_word(&page.hosts, line, 0U, user, user_sz);
+	line = terminal_hosts_find(&page.hosts, block, "RDPPort", TERMINAL_HOSTS_NONE);
+	if (line != TERMINAL_HOSTS_NONE &&
+	    terminal_hosts_word(&page.hosts, line, 0U, port_str, sizeof(port_str)) == 0) {
+		p = strtoul(port_str, &end, 10);
+		if (*end == '\0' && p > 0UL && p <= 65535UL)
+			*port = (uint16_t)p;
+	}
+}
+
 /* Fills the form's fields from the block shown: the Host line's names, each keyword's first line (a word without its quotes; RemoteCommand as written). */
 static void
 page_hosts_fill(void)
@@ -2064,6 +2109,27 @@ page_hosts_fill(void)
 
 	/* The fields are the block's. */
 	page.hosts_filled = page.hosts_block;
+	kl_field_set(&page.host_rdp_password, "");
+	page.host_rdp_password_filled[0] = '\0';
+	if (page.program->rdp_password_get != NULL &&
+	    page.hosts_block != TERMINAL_HOSTS_NONE &&
+	    page.hosts.blocks[page.hosts_block].kind == TERMINAL_HOSTS_BLOCK_HOST) {
+		char rdp_host[PAGE_HOST_TEXT];
+		char rdp_user[PAGE_HOST_TEXT];
+		char rdp_pw[KL_FIELD_MAX];
+		uint16_t rdp_port;
+
+		page_hosts_rdp_target(page.hosts_block, rdp_host, sizeof(rdp_host),
+				      &rdp_port, rdp_user, sizeof(rdp_user));
+		rdp_pw[0] = '\0';
+		if (rdp_host[0] != '\0' &&
+		    page.program->rdp_password_get(page.program->data, rdp_host, rdp_port,
+						   rdp_user, rdp_pw, sizeof(rdp_pw)) == 0) {
+			kl_field_set(&page.host_rdp_password, rdp_pw);
+			(void)snprintf(page.host_rdp_password_filled,
+				       sizeof(page.host_rdp_password_filled), "%s", rdp_pw);
+		}
+	}
 }
 
 /*
@@ -2247,6 +2313,17 @@ page_hosts_remove_host(void)
 	if (block == TERMINAL_HOSTS_NONE)
 		return;
 	page_hosts_title(block, title, sizeof(title));
+	if (page.program->rdp_password_del != NULL &&
+	    page.hosts.blocks[block].kind == TERMINAL_HOSTS_BLOCK_HOST) {
+		char rdp_host[PAGE_HOST_TEXT];
+		char rdp_user[PAGE_HOST_TEXT];
+		uint16_t rdp_port;
+
+		page_hosts_rdp_target(block, rdp_host, sizeof(rdp_host),
+				      &rdp_port, rdp_user, sizeof(rdp_user));
+		if (rdp_host[0] != '\0')
+			page.program->rdp_password_del(page.program->data, rdp_host, rdp_port, rdp_user);
+	}
 
 	/* The text without it; its form's changes go with it. */
 	error = terminal_hosts_remove_host(&page.hosts, block, &out, &size, &removed);
@@ -2414,10 +2491,38 @@ page_hosts_save(void)
 	error = page_hosts_apply();
 	if (error != 0)
 		return;
-	same = page_hosts_saved();
-	if (same) {
-		page_say(&page.hosts_message, 0, "Nothing changed.");
-		return;
+	{
+		int pw_changed = 0;
+		if (page.program->rdp_password_set != NULL &&
+		    page.hosts_block != TERMINAL_HOSTS_NONE &&
+		    page.hosts.blocks[page.hosts_block].kind == TERMINAL_HOSTS_BLOCK_HOST &&
+		    strcmp(page.host_rdp_password.text, page.host_rdp_password_filled) != 0) {
+			char rdp_host[PAGE_HOST_TEXT];
+			char rdp_user[PAGE_HOST_TEXT];
+			uint16_t rdp_port;
+
+			page_hosts_rdp_target(page.hosts_block, rdp_host, sizeof(rdp_host),
+					      &rdp_port, rdp_user, sizeof(rdp_user));
+			if (rdp_host[0] != '\0') {
+				if (page.host_rdp_password.text[0] != '\0') {
+					(void)page.program->rdp_password_set(page.program->data, rdp_host, rdp_port,
+									     rdp_user, page.host_rdp_password.text);
+				} else if (page.program->rdp_password_del != NULL) {
+					page.program->rdp_password_del(page.program->data, rdp_host, rdp_port, rdp_user);
+				}
+				(void)snprintf(page.host_rdp_password_filled,
+					       sizeof(page.host_rdp_password_filled), "%s", page.host_rdp_password.text);
+				pw_changed = 1;
+			}
+		}
+		same = page_hosts_saved();
+		if (same) {
+			if (pw_changed)
+				page_say(&page.hosts_message, 0, "RDP password saved.");
+			else
+				page_say(&page.hosts_message, 0, "Nothing changed.");
+			return;
+		}
 	}
 
 	/* No problem the file did not have already. */
@@ -2578,6 +2683,8 @@ page_hosts_saved(void)
 	if (page.hosts_size > 0U)
 		differs = memcmp(page.hosts_text, page.hosts_original, page.hosts_size);
 	if (differs != 0)
+		return 0;
+	if (strcmp(page.host_rdp_password.text, page.host_rdp_password_filled) != 0)
 		return 0;
 
 	/* Saved. */

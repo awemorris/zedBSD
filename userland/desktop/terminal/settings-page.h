@@ -120,6 +120,9 @@ struct terminal_page_program {
 	void *data;
 	int key_paste;
 	int has_vi;
+	int (*rdp_password_get)(void *data, const char *host, uint16_t port, const char *user, char *password, size_t size);
+	int (*rdp_password_set)(void *data, const char *host, uint16_t port, const char *user, const char *password);
+	void (*rdp_password_del)(void *data, const char *host, uint16_t port, const char *user);
 };
 
 /*

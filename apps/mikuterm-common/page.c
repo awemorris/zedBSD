@@ -119,6 +119,42 @@ static const struct terminal_page_item page_items[] = {
 
 typedef char page_items_fit[1 - 2 * !(sizeof(page_items) / sizeof(page_items[0]) <= TERMINAL_ITEMS_MAX)];
 
+static int
+page_rdp_password_get(
+	void *data,
+	const char *host,
+	uint16_t port,
+	const char *user,
+	char *password,
+	size_t size)
+{
+	(void)data;
+	return mikuterm_rdp_password_recall(host, port, user, password, size);
+}
+
+static int
+page_rdp_password_set(
+	void *data,
+	const char *host,
+	uint16_t port,
+	const char *user,
+	const char *password)
+{
+	(void)data;
+	return mikuterm_rdp_password_keep(host, port, user, password);
+}
+
+static void
+page_rdp_password_del(
+	void *data,
+	const char *host,
+	uint16_t port,
+	const char *user)
+{
+	(void)data;
+	mikuterm_rdp_password_forget(host, port, user);
+}
+
 static int page_read(void *data, const char *path, size_t limit, char **text, size_t *size);
 static int page_replace(void *data, const char *path, const void *bytes, size_t size);
 static int page_create(void *data, const char *path, const void *bytes, size_t size, int secret);
@@ -198,6 +234,9 @@ mikuterm_page_init(
 #endif
 	page_state.program.items = page_items;
 	page_state.program.item_count = sizeof(page_items) / sizeof(page_items[0]);
+	page_state.program.rdp_password_get = page_rdp_password_get;
+	page_state.program.rdp_password_set = page_rdp_password_set;
+	page_state.program.rdp_password_del = page_rdp_password_del;
 	page_state.program.item_get = page_item_get;
 	page_state.program.item_set = page_item_set;
 	page_state.program.comment = page_state.comment;
