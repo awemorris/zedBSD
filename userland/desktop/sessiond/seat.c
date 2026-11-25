@@ -183,10 +183,10 @@ sessiond_seat_give(
 	char path[32];
 	unsigned index;
 
-	/* Every display. */
+	/* Every display (keep video group access so headless RDP sessions can open it). */
 	for (index = 0U; index < SEAT_GPU_COUNT; index++) {
 		snprintf(path, sizeof(path), "/dev/gpu%u", index);
-		seat_set(path, uid, gid, 0600);
+		seat_set(path, uid, GPU_NODE_GROUP, SEAT_GPU_MODE);
 	}
 
 	/* Every backlight, which the session's compositor sets. */

@@ -15,6 +15,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <grp.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
@@ -300,6 +301,7 @@ drop_privileges(
 	const char *shell,
 	const char *runtime_dir)
 {
+	(void)initgroups(user, gid);
 	(void)setgid(gid);
 	(void)setuid(uid);
 	(void)setenv("HOME", home, 1);
