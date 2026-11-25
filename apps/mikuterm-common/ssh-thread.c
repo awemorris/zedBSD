@@ -219,8 +219,11 @@ struct thread_target {
  */
 struct thread_hosts {
 	char names[THREAD_HOSTS][THREAD_NAME_MAX];
+	char host_names[THREAD_HOSTS][MIKUTERM_HOST_MAX];
 	char users[THREAD_HOSTS][SSH_USER_MAX + 1];
 	uint16_t ports[THREAD_HOSTS];
+	uint16_t rdp_ports[THREAD_HOSTS];
+	int use_rdp[THREAD_HOSTS];
 	int named[THREAD_HOSTS];
 	unsigned count;
 };
@@ -332,6 +335,8 @@ static int thread_user_name(const char *name);
 static int thread_stop(void *data);
 static int thread_host_named(void *data, const char *name, size_t size);
 static int thread_parse_target(const char *text, struct thread_target *target);
+static int thread_ssh_rdp_check(const struct thread_target *target, struct rdp_host_entry *rdp_target);
+static int thread_launch_rdp_target(struct thread_choice *choice, struct rdp_host_entry *target);
 static int thread_attempt(struct thread_link *link);
 static int thread_settings(struct thread_link *link);
 static int thread_dial(struct thread_link *link);
@@ -515,19 +520,31 @@ thread_choose(
 	/* The hosts of ssh\config (none when it is not there), each with its User. */
 	thread_hosts_read(&choice->hosts);
 
-	/* The screen: the hosts by number, WSL and the settings. */
+	/* The screen: the hosts by number, Host, Login Shell, WSL, Codespaces, RDP and Settings. */
 	launch_init(&choice->screen, "Hosts:");
 	for (index = 0U; index < choice->hosts.count; index++) {
+		char rdp_note[LAUNCH_NOTE_MAX];
+		const char *host_note;
+
 		/* user@name when ssh\config gives the user, the name alone when not. */
 		(void)snprintf(key, sizeof(key), "%u", index + 1U);
 		if (choice->hosts.users[index][0] != '\0')
 			(void)snprintf(label, sizeof(label), "%s@%s", choice->hosts.users[index], choice->hosts.names[index]);
 		else
 			(void)snprintf(label, sizeof(label), "%s", choice->hosts.names[index]);
-		(void)launch_add(&choice->screen, key, LAUNCH_HOST, label, NULL);
+		host_note = NULL;
+		if (choice->hosts.use_rdp[index] != 0) {
+			if (choice->hosts.rdp_ports[index] != 3389U)
+				(void)snprintf(rdp_note, sizeof(rdp_note), "(RDP:%u)", (unsigned)choice->hosts.rdp_ports[index]);
+			else
+				(void)snprintf(rdp_note, sizeof(rdp_note), "(RDP)");
+			host_note = rdp_note;
+		}
+		(void)launch_add(&choice->screen, key, LAUNCH_HOST, label, host_note);
 	}
 
-	/* The login shell, WSL (a system with WSL only), GitHub Codespaces and the settings after the hosts; with no host, how to type one. */
+	/* Direct host prompt, login shell, WSL, GitHub Codespaces, RDP and settings. */
+	(void)launch_add(&choice->screen, "h", LAUNCH_CONNECT, "Host", NULL);
 #if MIKUTERM_HAVE_LOGIN_SHELL
 	(void)launch_add(&choice->screen, "l", LAUNCH_SHELL, "Login Shell", NULL);
 #endif
@@ -569,9 +586,19 @@ thread_choose(
 		if (taken == -2)
 			continue;
 		if (taken == -1) {
+			struct rdp_host_entry rdp_target;
+
 			/* A host typed: user@host:port, or a number of the list. */
 			error = thread_parse_target(choice->screen.line, target);
 			if (error == 0) {
+				if (thread_ssh_rdp_check(target, &rdp_target)) {
+					error = thread_launch_rdp_target(choice, &rdp_target);
+					if (error == EPIPE)
+						break;
+					error = 0;
+					memset(target, 0, sizeof(*target));
+					continue;
+				}
 				(void)snprintf(target->title, sizeof(target->title), "%s", target->host);
 				break;
 			}
@@ -585,8 +612,73 @@ thread_choose(
 		/* A host of ssh\config: its name, the user and port its settings give. */
 		index = (unsigned)taken;
 		if (choice->screen.rows[index].kind == LAUNCH_HOST) {
+			struct rdp_host_entry rdp_target;
+
 			length = strlen(choice->hosts.names[index]);
 			memcpy(target->host, choice->hosts.names[index], length + 1U);
+			if (thread_ssh_rdp_check(target, &rdp_target)) {
+				error = thread_launch_rdp_target(choice, &rdp_target);
+				if (error == EPIPE)
+					break;
+				error = 0;
+				memset(target, 0, sizeof(*target));
+				launch_choose(&choice->screen, index);
+				continue;
+			}
+			(void)snprintf(target->title, sizeof(target->title), "%s", target->host);
+			break;
+		}
+
+		/* Host prompt: asks for Host, then User, then connects (SSH or UseRDP). */
+		if (choice->screen.rows[index].kind == LAUNCH_CONNECT) {
+			char host_spec[LAUNCH_LINE_MAX];
+			char user_buf[SSH_USER_MAX + 1];
+			struct rdp_host_entry rdp_target;
+
+			error = thread_ask(choice->session, "\r\nHost: ",
+					   SESSION_ASK_LINE, host_spec, sizeof(host_spec));
+			if (error == EPIPE)
+				break;
+			if (error != 0) {
+				error = 0;
+				launch_choose(&choice->screen, index);
+				continue;
+			}
+
+			error = thread_parse_target(host_spec, target);
+			if (error != 0) {
+				launch_say(&choice->screen, "That is not a host: type a name, or user@host:port.");
+				error = 0;
+				memset(target, 0, sizeof(*target));
+				launch_choose(&choice->screen, index);
+				continue;
+			}
+
+			if (target->user[0] == '\0') {
+				error = thread_ask(choice->session, "User: ",
+						   SESSION_ASK_LINE, user_buf, sizeof(user_buf));
+				if (error == EPIPE)
+					break;
+				if (error != 0) {
+					error = 0;
+					memset(target, 0, sizeof(*target));
+					launch_choose(&choice->screen, index);
+					continue;
+				}
+				if (user_buf[0] != '\0')
+					(void)snprintf(target->user, sizeof(target->user), "%s", user_buf);
+			}
+
+			if (thread_ssh_rdp_check(target, &rdp_target)) {
+				error = thread_launch_rdp_target(choice, &rdp_target);
+				if (error == EPIPE)
+					break;
+				error = 0;
+				memset(target, 0, sizeof(*target));
+				launch_choose(&choice->screen, index);
+				continue;
+			}
+
 			(void)snprintf(target->title, sizeof(target->title), "%s", target->host);
 			break;
 		}
@@ -704,9 +796,12 @@ thread_hosts_read(
 			if (error != 0)
 				continue;
 
-			/* Its User, Port and whether it names its HostName. */
+			/* Its User, Port, HostName and RDP settings. */
+			(void)snprintf(hosts->host_names[index], sizeof(hosts->host_names[index]), "%s", config->host_name);
 			(void)snprintf(hosts->users[index], sizeof(hosts->users[index]), "%s", config->user);
 			hosts->ports[index] = config->port;
+			hosts->use_rdp[index] = config->use_rdp;
+			hosts->rdp_ports[index] = config->rdp_port != 0U ? config->rdp_port : 3389U;
 			if (config->host_name[0] != '\0')
 				hosts->named[index] = 1;
 		}
@@ -807,6 +902,128 @@ thread_launch(
 }
 
 /*
+ * Checks whether target->host has UseRDP enabled in ssh\config and, if so,
+ * populates rdp_target and returns 1.
+ */
+static int
+thread_ssh_rdp_check(
+	const struct thread_target *target,
+	struct rdp_host_entry *rdp_target)
+{
+	struct ssh_config *config;
+	char path[MIKUTERM_PATH_MAX];
+	char error_text[SSH_CONFIG_ERROR_MAX];
+	char *text;
+	size_t size;
+	int found;
+
+	found = 0;
+	text = NULL;
+	size = 0U;
+	if (mikuterm_path(path, sizeof(path), THREAD_SSH_CONFIG) != 0)
+		return 0;
+	if (mikuterm_file_read(path, MIKUTERM_CONF_MAX, &text, &size) != 0)
+		return 0;
+
+	config = malloc(sizeof(*config));
+	if (config != NULL) {
+		ssh_config_init(config);
+		if (ssh_config_parse(config, text, size, target->host, error_text) == 0 &&
+		    config->use_rdp != 0) {
+			memset(rdp_target, 0, sizeof(*rdp_target));
+			(void)snprintf(rdp_target->name, sizeof(rdp_target->name), "%s", target->host);
+			(void)snprintf(rdp_target->host_name, sizeof(rdp_target->host_name), "%s",
+				       config->host_name[0] != '\0' ? config->host_name : target->host);
+			rdp_target->port = target->port != 0U ? target->port
+					   : (config->rdp_port != 0U ? config->rdp_port : 3389U);
+			(void)snprintf(rdp_target->user, sizeof(rdp_target->user), "%s",
+				       target->user[0] != '\0' ? target->user : config->user);
+			found = 1;
+		}
+		free(config);
+	}
+
+	free(text);
+	return found;
+}
+
+/*
+ * Prompts for RDP password if missing, opens an RDP tab, and starts its
+ * worker thread.
+ */
+static int
+thread_launch_rdp_target(
+	struct thread_choice *choice,
+	struct rdp_host_entry *target)
+{
+	struct rdp_tab *tab;
+	int error;
+
+	if (target->password[0] == '\0') {
+		error = thread_ask(choice->session, "Password: ",
+				   SESSION_ASK_SECRET, target->password,
+				   sizeof(target->password));
+		if (error == EPIPE)
+			return EPIPE;
+		if (error != 0)
+			return EAGAIN;
+	}
+
+	error = rdp_tab_create(target->host_name, target->width, target->height,
+			       1, choice->session->app,
+			       choice->session->number, &tab);
+	if (error != 0)
+		return EAGAIN;
+
+#ifdef MIKUTERM_HAVE_LIBMEDIA
+	error = rdp_thread_start(tab, target, &rdp_media_decoder_ops,
+				 choice->session->connect_timeout);
+#else
+	error = rdp_thread_start(tab, target, &rdp_h264sw_decoder_ops,
+				 choice->session->connect_timeout);
+#endif
+	if (error != 0) {
+		rdp_tab_release(tab);
+		return EAGAIN;
+	}
+
+	session_rdp_tab(choice->session, &tab->connection);
+	return 0;
+}
+
+/*
+ * Prompts for Host and (if not already given in user@host) User for an
+ * RDP connection.
+ */
+static int
+thread_rdp_prompt_host(
+	struct thread_choice *choice,
+	struct rdp_host_entry *target)
+{
+	char spec[LAUNCH_LINE_MAX];
+	int error;
+
+	error = thread_ask(choice->session, "\r\nHost: ",
+			   SESSION_ASK_LINE, spec, sizeof(spec));
+	if (error != 0)
+		return error;
+
+	error = rdp_hosts_parse_target(spec, 3389U, target);
+	if (error != 0)
+		return EINVAL;
+
+	if (target->user[0] == '\0') {
+		error = thread_ask(choice->session, "User: ",
+				   SESSION_ASK_LINE, target->user,
+				   sizeof(target->user));
+		if (error != 0)
+			return error;
+	}
+
+	return 0;
+}
+
+/*
  * Shows the RDP Hosts sub-screen, prompts for credentials if needed, and
  * launches an RDP view tab.
  */
@@ -822,15 +1039,28 @@ thread_rdp(
 	char key[LAUNCH_KEY_MAX];
 	char label[LAUNCH_LABEL_MAX];
 	char note[LAUNCH_NOTE_MAX];
-	char spec[LAUNCH_LINE_MAX];
 	unsigned event;
 	int taken;
 	struct rdp_host_entry target;
-	struct rdp_tab *tab;
 	int error;
 
-	/* Reads rdp/hosts if present in mikuterm's folder. */
+	/* Reads rdp/hosts if present in mikuterm's folder, plus ssh/config UseRDP hosts. */
 	memset(&choice->rdp_hosts, 0, sizeof(choice->rdp_hosts));
+	for (index = 0U; index < choice->hosts.count && choice->rdp_hosts.count < RDP_HOSTS_MAX; index++) {
+		struct rdp_host_entry *entry;
+		if (choice->hosts.use_rdp[index] == 0)
+			continue;
+		entry = &choice->rdp_hosts.entries[choice->rdp_hosts.count++];
+		memset(entry, 0, sizeof(*entry));
+		(void)snprintf(entry->name, sizeof(entry->name), "%s", choice->hosts.names[index]);
+		(void)snprintf(entry->host_name, sizeof(entry->host_name), "%s",
+			       choice->hosts.host_names[index][0] != '\0'
+			       ? choice->hosts.host_names[index]
+			       : choice->hosts.names[index]);
+		entry->port = choice->hosts.rdp_ports[index] != 0U
+			      ? choice->hosts.rdp_ports[index] : 3389U;
+		(void)snprintf(entry->user, sizeof(entry->user), "%s", choice->hosts.users[index]);
+	}
 	if (mikuterm_path(path, sizeof(path), "rdp/hosts") == 0) {
 		text = NULL;
 		size = 0U;
@@ -859,11 +1089,11 @@ thread_rdp(
 		(void)launch_add(screen, key, LAUNCH_RDP_HOST, label, note);
 	}
 
-	/* Adds Connect and Back rows; explains how to connect when rdp/hosts is empty. */
-	(void)launch_add(screen, "c", LAUNCH_RDP_CONNECT, "Connect to host (user@host:port)...", NULL);
+	/* Adds Host and Back rows; explains how to connect when no RDP host is listed. */
+	(void)launch_add(screen, "h", LAUNCH_RDP_CONNECT, "Host", NULL);
 	(void)launch_add(screen, "b", LAUNCH_BACK, "Back", NULL);
 	if (choice->rdp_hosts.count == 0U)
-		launch_say(screen, "No hosts in rdp/hosts. Press Enter to connect, or type user@host:port.");
+		launch_say(screen, "No RDP hosts configured. Select Host or type [user@]host[:port].");
 
 	for (;;) {
 		error = thread_launch(choice, screen, &event);
@@ -892,21 +1122,16 @@ thread_rdp(
 				return EAGAIN;
 
 			if (screen->rows[index].kind == LAUNCH_RDP_CONNECT) {
-				/* Prompts for user@host:port when Connect is chosen. */
-				error = thread_ask(choice->session,
-						   "\r\nHost (user@host:port): ",
-						   SESSION_ASK_LINE,
-						   spec, sizeof(spec));
+				/* Prompts for Host, User, then Password. */
+				error = thread_rdp_prompt_host(choice, &target);
 				if (error == EPIPE)
 					return EPIPE;
-				if (error != 0) {
+				if (error == EINVAL) {
+					launch_say(screen, "Type [domain\\][user@]host[:port].");
 					launch_choose(screen, index);
 					continue;
 				}
-
-				error = rdp_hosts_parse_target(spec, 3389U, &target);
 				if (error != 0) {
-					launch_say(screen, "Type [domain\\][user@]host[:port].");
 					launch_choose(screen, index);
 					continue;
 				}
@@ -920,35 +1145,7 @@ thread_rdp(
 		break;
 	}
 
-	/* Asks for password if not already provided. */
-	if (target.password[0] == '\0') {
-		error = thread_ask(choice->session, "RDP password: ",
-				   SESSION_ASK_SECRET, target.password,
-				   sizeof(target.password));
-		if (error != 0)
-			return EAGAIN;
-	}
-
-	error = rdp_tab_create(target.host_name, target.width, target.height,
-			       1, choice->session->app,
-			       choice->session->number, &tab);
-	if (error != 0)
-		return EAGAIN;
-
-#ifdef MIKUTERM_HAVE_LIBMEDIA
-	error = rdp_thread_start(tab, &target, &rdp_media_decoder_ops,
-				 choice->session->connect_timeout);
-#else
-	error = rdp_thread_start(tab, &target, &rdp_h264sw_decoder_ops,
-				 choice->session->connect_timeout);
-#endif
-	if (error != 0) {
-		rdp_tab_release(tab);
-		return EAGAIN;
-	}
-
-	session_rdp_tab(choice->session, &tab->connection);
-	return 0;
+	return thread_launch_rdp_target(choice, &target);
 }
 
 /* Draws a screen in the tab at the grid's size, the settings' problems (the first tab's) over its rows. */

@@ -161,7 +161,9 @@ enum ssh_keyword_id {
 	SSH_KW_REMOTE_FORWARD = 27,
 	SSH_KW_HOST = 28,
 	SSH_KW_IGNORE_UNKNOWN = 29,
-	SSH_KW_NONE = 30
+	SSH_KW_USE_RDP = 30,
+	SSH_KW_RDP_PORT = 31,
+	SSH_KW_NONE = 32
 };
 
 /*
@@ -334,6 +336,8 @@ static const struct config_keyword ssh_keywords[] = {
 	{ "ProxyCommand", CONFIG_KIND_ACTED, SSH_KW_PROXY_COMMAND },
 	{ "X11RootWindow", CONFIG_KIND_ACTED, SSH_KW_X11_ROOT_WINDOW },
 	{ "X11WindowTabify", CONFIG_KIND_ACTED, SSH_KW_X11_WINDOW_TABIFY },
+	{ "UseRDP", CONFIG_KIND_ACTED, SSH_KW_USE_RDP },
+	{ "RDPPort", CONFIG_KIND_ACTED, SSH_KW_RDP_PORT },
 	{ "IgnoreUnknown", CONFIG_KIND_ACTED, SSH_KW_IGNORE_UNKNOWN },
 	{ "LocalForward", CONFIG_KIND_ACTED, SSH_KW_LOCAL_FORWARD },
 	{ "RemoteForward", CONFIG_KIND_ACTED, SSH_KW_REMOTE_FORWARD },
@@ -831,6 +835,12 @@ ssh_config_defaults(
 	/* The remote X windows not in tabs. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_X11_WINDOW_TABIFY)) == 0)
 		config->x11_window_tabify = 0;
+
+	/* RDP is off by default, and its default port is 3389. */
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_USE_RDP)) == 0)
+		config->use_rdp = 0;
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_RDP_PORT)) == 0)
+		config->rdp_port = 3389;
 
 	/* Forwarded ports listen on the loopback, a failed forwarding does not end the connection, and a session is opened. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_GATEWAY_PORTS)) == 0)
@@ -2654,6 +2664,14 @@ ssh_value(
 		return status;
 	case SSH_KW_X11_WINDOW_TABIFY:
 		status = config_value_bool(parsed, &target->x11_window_tabify, what);
+		return status;
+	case SSH_KW_USE_RDP:
+		status = config_value_bool(parsed, &target->use_rdp, what);
+		return status;
+	case SSH_KW_RDP_PORT:
+		status = config_value_number(parsed, 1, 65535, &number, what);
+		if (status == 0)
+			target->rdp_port = (uint16_t)number;
 		return status;
 	default:
 		break;

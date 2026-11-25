@@ -233,6 +233,8 @@ struct ssh_config {
 	unsigned x11_root_width;
 	unsigned x11_root_height;
 	int x11_window_tabify;
+	int use_rdp;
+	uint16_t rdp_port;
 	unsigned forward_count;
 	struct ssh_forward forward[2U * SSH_CONFIG_FORWARDS_MAX];
 	char remote_command[SSH_CONFIG_COMMAND_MAX + 1];
