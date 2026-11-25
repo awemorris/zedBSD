@@ -303,13 +303,15 @@ cb_on_auth_request(
 	struct extdisp_session *s = (struct extdisp_session *)user;
 
 	(void)domain;
-	if (!s->authed && user_name != NULL && password != NULL &&
+	if (user_name != NULL && password != NULL &&
 	    strcmp(user_name, s->username) == 0 &&
 	    strcmp(password, s->password) == 0) {
 		s->authed = 1;
+		mikuterm_log("extdisp: auth accepted user=%s", user_name);
 		(void)rdp_server_accept_auth(s->srv);
 		return;
 	}
+	mikuterm_log("extdisp: auth rejected user=%s", user_name != NULL ? user_name : "(null)");
 	(void)rdp_server_reject_auth(s->srv, 0U);
 	s->running = 0;
 }
@@ -324,6 +326,7 @@ cb_on_connected(
 
 	(void)width;
 	(void)height;
+	mikuterm_log("extdisp: connected %ux%u", width, height);
 	s->connected = 1;
 }
 
@@ -335,6 +338,7 @@ cb_on_disconnect(
 	struct extdisp_session *s = (struct extdisp_session *)user;
 
 	(void)error_info;
+	mikuterm_log("extdisp: on_disconnect err=0x%x", error_info);
 	s->running = 0;
 }
 
