@@ -24,6 +24,7 @@
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <poll.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -62,6 +63,24 @@ struct dispsink_adv_state {
 	int have_offer;
 	struct rdp_app_target offer_target;
 };
+
+static void
+dispsink_log(
+	const char *fmt,
+	...)
+{
+	FILE *f;
+	va_list ap;
+
+	f = fopen("/tmp/dispsink.log", "a");
+	if (f == NULL)
+		return;
+	va_start(ap, fmt);
+	vfprintf(f, fmt, ap);
+	fprintf(f, "\n");
+	va_end(ap);
+	fclose(f);
+}
 
 static void
 load_device_id(
@@ -177,12 +196,18 @@ adv_thread_main(
 			if (n <= 0)
 				break;
 			memset(&plain, 0, sizeof(plain));
-			if (netdisp_offer_decrypt(rx, (size_t)n, st->device_id,
-						  st->sk, st->pk, st->nonce,
-						  &plain) != 0)
-				continue;
+			{
+				int dec_rc = netdisp_offer_decrypt(rx, (size_t)n, st->device_id,
+								   st->sk, st->pk, st->nonce,
+								   &plain);
+				if (dec_rc != 0) {
+					dispsink_log("adv: udp rx len=%zd decrypt_err=%d", n, dec_rc);
+					continue;
+				}
+			}
 			if (inet_ntop(AF_INET, &from.sin_addr, ip_str, sizeof(ip_str)) == NULL)
 				continue;
+			dispsink_log("adv: OFFER ok from %s:%u user=%s", ip_str, (unsigned)plain.rdp_port, plain.username);
 			kl_mutex_lock(&st->lock);
 			if (!st->have_offer) {
 				memset(&st->offer_target, 0, sizeof(st->offer_target));
@@ -630,7 +655,9 @@ main(
 				target = adv.offer_target;
 				kl_mutex_unlock(&adv.lock);
 				adv_stop(&adv);
+				dispsink_log("ui: starting rdp_app_session_start %s:%u", target.host, (unsigned)target.port);
 				start_rc = rdp_app_session_start(app, win, &target, &session);
+				dispsink_log("ui: rdp_app_session_start rc=%d", start_rc);
 				OPENSSL_cleanse(target.password, sizeof(target.password));
 				if (start_rc != 0) {
 					session = NULL;
@@ -645,6 +672,7 @@ main(
 					present_rdp_canvas(win, session, canvas, win_w, win_h);
 			} else if (ev.kind == KL_APP_POST &&
 				   ev.code == RDP_APP_POST_END) {
+				dispsink_log("ui: RDP_APP_POST_END");
 				if (session != NULL) {
 					rdp_app_session_stop(session);
 					session = NULL;

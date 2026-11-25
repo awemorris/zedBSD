@@ -17,6 +17,7 @@
  */
 
 #include "extdisp.h"
+#include "apps/mikuterm-common/mikuterm.h"
 #include "netdisp-proto.h"
 
 #include "drivers/win32/mikuterm-idd/mikuterm_idd_ipc.h"
@@ -604,6 +605,7 @@ extdisp_session_thread(LPVOID param)
 	}
 
 	if (!accepted) {
+		mikuterm_log("extdisp: accept timed out");
 		EnterCriticalSection(&extdisp.lock);
 		(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text),
 		    "Timed out waiting for peer connection.");
@@ -611,6 +613,7 @@ extdisp_session_thread(LPVOID param)
 		LeaveCriticalSection(&extdisp.lock);
 		return 0;
 	}
+	mikuterm_log("extdisp: accepted TCP client");
 
 	s->y_plane = (uint8_t *)malloc((size_t)s->width * s->height);
 	s->u_plane = (uint8_t *)malloc(((size_t)s->width / 2U) * ((size_t)s->height / 2U));
@@ -686,14 +689,21 @@ extdisp_session_thread(LPVOID param)
 
 		if (rdp_server_needs_tls(s->srv) != 0 && !s->tls_active) {
 			s->ssl = SSL_new(s->ssl_ctx);
-			if (s->ssl == NULL)
+			if (s->ssl == NULL) {
+				mikuterm_log("extdisp: SSL_new failed");
 				break;
+			}
 			if (SSL_set_fd(s->ssl, (int)s->client_sock) != 1 ||
-			    SSL_accept(s->ssl) != 1)
+			    SSL_accept(s->ssl) != 1) {
+				mikuterm_log("extdisp: SSL_accept failed");
 				break;
+			}
 			s->tls_active = 1;
-			if (rdp_server_tls_established(s->srv) != 0)
+			mikuterm_log("extdisp: TLS handshake complete");
+			if (rdp_server_tls_established(s->srv) != 0) {
+				mikuterm_log("extdisp: rdp_server_tls_established failed");
 				break;
+			}
 		}
 
 		FD_ZERO(&rfds);
@@ -1044,9 +1054,14 @@ extdisp_op_connect(
 
 	{
 		struct sockaddr_in dest = peer.addr;
+		int sent;
 		dest.sin_port = htons(peer.adv.reply_port);
-		(void)sendto(extdisp.disc_sock, (const char *)pkt, (int)pkt_len, 0,
+		sent = sendto(extdisp.disc_sock, (const char *)pkt, (int)pkt_len, 0,
 		    (const struct sockaddr *)&dest, sizeof(dest));
+		mikuterm_log("extdisp: sent OFFER to %s:%u rdp_port=%u size=%ux%u sent=%d wsa=%d",
+		    inet_ntoa(dest.sin_addr), (unsigned)peer.adv.reply_port,
+		    (unsigned)plain.rdp_port, extdisp.sess.width, extdisp.sess.height,
+		    sent, sent < 0 ? WSAGetLastError() : 0);
 	}
 	return 0;
 }
