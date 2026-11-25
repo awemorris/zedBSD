@@ -120,6 +120,89 @@ nd_check_cancel(
 }
 
 static void
+nd_format_bcast_list(
+	nd_sock_t sock,
+	char *out,
+	size_t cap)
+{
+	size_t off = 0U;
+
+	(void)sock;
+	off = (size_t)snprintf(out, cap, "255.255.255.255");
+#ifdef _WIN32
+	{
+		INTERFACE_INFO ifaces[32];
+		DWORD bytes_ret = 0;
+		if (WSAIoctl(sock, SIO_GET_INTERFACE_LIST, NULL, 0,
+			     ifaces, sizeof(ifaces), &bytes_ret, NULL, NULL) == 0) {
+			DWORD count = bytes_ret / (DWORD)sizeof(INTERFACE_INFO);
+			DWORD i;
+			for (i = 0; i < count; i++) {
+				u_long flags = ifaces[i].iiFlags;
+				uint32_t ip;
+				uint32_t mask;
+				uint32_t dir_bcast;
+				struct in_addr ba;
+				char buf[32];
+				if ((flags & IFF_UP) == 0 || (flags & IFF_LOOPBACK) != 0)
+					continue;
+				if (ifaces[i].iiAddress.Address.sa_family != AF_INET ||
+				    ifaces[i].iiNetmask.Address.sa_family != AF_INET)
+					continue;
+				ip = ifaces[i].iiAddress.AddressIn.sin_addr.s_addr;
+				mask = ifaces[i].iiNetmask.AddressIn.sin_addr.s_addr;
+				dir_bcast = ip | ~mask;
+				if (dir_bcast == htonl(INADDR_BROADCAST) || dir_bcast == 0U)
+					continue;
+				ba.s_addr = dir_bcast;
+				if (inet_ntop(AF_INET, &ba, buf, sizeof(buf)) != NULL &&
+				    off + 2U < cap) {
+					int n = snprintf(out + off, cap - off, ", %s", buf);
+					if (n > 0)
+						off += (size_t)n;
+				}
+			}
+		}
+	}
+#else
+	{
+		struct ifaddrs *ifap = NULL;
+		if (getifaddrs(&ifap) == 0 && ifap != NULL) {
+			struct ifaddrs *ifa;
+			for (ifa = ifap; ifa != NULL; ifa = ifa->ifa_next) {
+				const struct sockaddr_in *sa;
+				const struct sockaddr_in *nm;
+				uint32_t dir_bcast;
+				struct in_addr ba;
+				char buf[32];
+				if (ifa->ifa_addr == NULL || ifa->ifa_netmask == NULL)
+					continue;
+				if ((ifa->ifa_flags & IFF_UP) == 0 ||
+				    (ifa->ifa_flags & IFF_LOOPBACK) != 0)
+					continue;
+				if (ifa->ifa_addr->sa_family != AF_INET ||
+				    ifa->ifa_netmask->sa_family != AF_INET)
+					continue;
+				sa = (const struct sockaddr_in *)ifa->ifa_addr;
+				nm = (const struct sockaddr_in *)ifa->ifa_netmask;
+				dir_bcast = sa->sin_addr.s_addr | ~nm->sin_addr.s_addr;
+				if (dir_bcast == htonl(INADDR_BROADCAST) || dir_bcast == 0U)
+					continue;
+				ba.s_addr = dir_bcast;
+				if (inet_ntop(AF_INET, &ba, buf, sizeof(buf)) != NULL &&
+				    off + 2U < cap) {
+					int n = snprintf(out + off, cap - off, ", %s", buf);
+					if (n > 0)
+						off += (size_t)n;
+				}
+			}
+			freeifaddrs(ifap);
+		}
+	}
+#endif
+}
+
+static void
 nd_send_broadcasts(
 	nd_sock_t sock,
 	const uint8_t *pkt,
@@ -302,6 +385,13 @@ netdisp_wait_and_receive(
 	session_say_line(session, msg);
 	snprintf(msg, sizeof(msg), "Verification Code: %s", fp);
 	session_say_line(session, msg);
+	{
+		char bcast_list[192];
+		nd_format_bcast_list(sock, bcast_list, sizeof(bcast_list));
+		snprintf(msg, sizeof(msg), "Broadcast: %s (UDP %u)",
+			 bcast_list, (unsigned)NETDISP_DISCOVERY_PORT);
+		session_say_line(session, msg);
+	}
 	session_say_line(session, "Select this device in zedBSD Settings -> Display.");
 	session_say_line(session, "Press Esc or Ctrl+C to return.");
 

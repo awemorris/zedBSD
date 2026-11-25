@@ -398,7 +398,7 @@ main(
 		error = kwl_input_threads_start(&server);
 		if (error != 0)
 			printf("KWL FAILED site=input-thread errno=%d\n", error);
-		else if (!server.headless)
+		else if (!server.headless && !server.greeter)
 			kwl_netdisp_start(&server);
 	}
 
