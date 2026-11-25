@@ -11,6 +11,7 @@
  */
 
 #include "rdp-decoder.h"
+#include "mikuterm.h"
 
 #include "userland/desktop/libmedia/media-decoder.h"
 
@@ -58,9 +59,11 @@ media_create(
 	track.codec = MEDIA_CODEC_H264;
 	error = media_decoder_open(&track, &m->dec);
 	if (error != 0) {
+		mikuterm_log("rdp-media: media_decoder_open failed error=%d", error);
 		free(m);
 		return error;
 	}
+	mikuterm_log("rdp-media: opened decoder=%s", media_decoder_name(m->dec));
 
 	/* Requests fast deblocking when a software backend is active. */
 	(void)media_decoder_deblock(m->dec, MEDIA_DEBLOCK_FAST);

@@ -229,5 +229,6 @@ int mikuterm_session_open_sftp(struct terminal_connection *connection, struct te
 void mikuterm_session_detach_sftp(struct mikuterm_session *session, const struct terminal_connection *view_connection);
 struct terminal_connection *mikuterm_session_sftp_view(struct terminal_connection *connection);
 void mikuterm_session_host(const struct terminal_connection *connection, char *host, size_t size);
+void mikuterm_log(const char *format, ...);
 
 #endif

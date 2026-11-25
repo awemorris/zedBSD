@@ -1417,12 +1417,16 @@ session_rdp_tab(
 {
 	kl_mutex_lock(&session->lock);
 	if (session->closing || session->rdp_pending_tab != NULL) {
+		int closing = session->closing;
+		int busy = session->rdp_pending_tab != NULL;
 		kl_mutex_unlock(&session->lock);
+		mikuterm_log("session_rdp_tab: refused closing=%d pending=%d", closing, busy);
 		tab->ops->close(tab);
 		return;
 	}
 
 	session->rdp_pending_tab = tab;
 	kl_mutex_unlock(&session->lock);
+	mikuterm_log("session_rdp_tab: queued tab=%p", (void *)tab);
 	session_post(session);
 }

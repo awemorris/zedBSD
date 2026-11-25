@@ -10,6 +10,7 @@
  */
 
 #include "rdp-tab.h"
+#include "mikuterm.h"
 
 #include "userland/desktop/librdp/rdp.h"
 
@@ -231,6 +232,7 @@ rdp_tab_end(
 	struct rdp_tab *tab,
 	const char *reason)
 {
+	mikuterm_log("rdp_tab_end: tab=%p reason=%s", (void *)tab, reason != NULL ? reason : "(null)");
 	kl_mutex_lock(&tab->lock);
 	if (reason != NULL && reason[0] != '\0') {
 		snprintf(tab->status_text, sizeof(tab->status_text), "%s",
@@ -476,6 +478,7 @@ rdp_conn_close(
 {
 	struct rdp_tab *tab;
 	tab = (struct rdp_tab *)conn;
+	mikuterm_log("rdp_conn_close: tab=%p", (void *)tab);
 	kl_mutex_lock(&tab->lock);
 	tab->closed = 1;
 	kl_mutex_unlock(&tab->lock);

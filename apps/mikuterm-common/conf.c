@@ -33,9 +33,11 @@
 #include "userland/desktop/terminal/terminal.h"
 
 #include <errno.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* The longest line and the longest keyword read. */
 #define CONF_LINE_MAX		1024U
@@ -959,4 +961,52 @@ conf_problem(
 	if (have + length + 1U > sizeof(conf->problems))
 		return;
 	memcpy(conf->problems + have, text, length + 1U);
+}
+
+/* Appends one timestamped diagnostic line to mikuterm.log in the program folder. */
+void
+mikuterm_log(
+	const char *format,
+	...)
+{
+	char path[MIKUTERM_PATH_MAX];
+	char line[1024];
+	char msg[896];
+	va_list ap;
+	time_t now;
+	struct tm tm_buf;
+	struct tm *tm_ptr;
+	int len;
+
+	if (format == NULL)
+		return;
+	if (mikuterm_path(path, sizeof(path), "mikuterm.log") != 0)
+		return;
+	va_start(ap, format);
+	(void)vsnprintf(msg, sizeof(msg), format, ap);
+	va_end(ap);
+
+	now = time(NULL);
+#ifdef _WIN32
+	if (localtime_s(&tm_buf, &now) == 0)
+		tm_ptr = &tm_buf;
+	else
+		tm_ptr = NULL;
+#else
+	tm_ptr = localtime_r(&now, &tm_buf);
+#endif
+	if (tm_ptr != NULL) {
+		len = snprintf(line, sizeof(line),
+			       "[%04d-%02d-%02d %02d:%02d:%02d] %s\n",
+			       tm_ptr->tm_year + 1900, tm_ptr->tm_mon + 1,
+			       tm_ptr->tm_mday, tm_ptr->tm_hour,
+			       tm_ptr->tm_min, tm_ptr->tm_sec, msg);
+	} else {
+		len = snprintf(line, sizeof(line), "[0000-00-00 00:00:00] %s\n", msg);
+	}
+	if (len <= 0)
+		return;
+	if ((size_t)len >= sizeof(line))
+		len = (int)(sizeof(line) - 1U);
+	(void)mikuterm_file_append(path, line, (size_t)len);
 }

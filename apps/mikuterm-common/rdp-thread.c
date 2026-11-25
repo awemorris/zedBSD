@@ -125,23 +125,33 @@ rdp_worker_main(
 	w.decoder_ops = args->decoder_ops;
 	w.width = args->target.width > 0U ? args->target.width : 1280U;
 	w.height = args->target.height > 0U ? args->target.height : 720U;
+	mikuterm_log("rdp_worker_main: start host=%s port=%u user=%s size=%ux%u",
+		     w.target.host_name, (unsigned)w.target.port, w.target.user,
+		     w.width, w.height);
 	if (kl_socket_waker_open(&w.waker) != 0) {
+		mikuterm_log("rdp_worker_main: kl_socket_waker_open failed");
 		rdp_tab_end(w.tab, "Failed to create RDP waker.");
 		rdp_tab_release(w.tab);
 		free(args);
 		return;
 	}
 	rdp_tab_attach_waker(w.tab, w.waker);
-	if (w.decoder_ops->create(&w.decoder_ctx) != 0) {
+	error = w.decoder_ops->create(&w.decoder_ctx);
+	if (error != 0) {
+		mikuterm_log("rdp_worker_main: decoder create failed error=%d", error);
 		rdp_tab_end(w.tab, "Failed to initialize H.264 decoder.");
 		goto cleanup;
 	}
-	if (worker_connect_tcp(&w, args->connect_timeout) != 0) {
+	mikuterm_log("rdp_worker_main: decoder initialized");
+	error = worker_connect_tcp(&w, args->connect_timeout);
+	if (error != 0) {
+		mikuterm_log("rdp_worker_main: worker_connect_tcp failed error=%d", error);
 		snprintf(msg, sizeof(msg), "Could not connect to %s:%u.",
 			 w.target.host_name, (unsigned)w.target.port);
 		rdp_tab_end(w.tab, msg);
 		goto cleanup;
 	}
+	mikuterm_log("rdp_worker_main: TCP connected");
 	{
 		int nodelay = 1;
 		(void)setsockopt((int)kl_socket_native(w.sock), IPPROTO_TCP,
@@ -168,9 +178,11 @@ rdp_worker_main(
 	cfg.password = w.target.password;
 	cfg.client_name = "mikuterm";
 	if (rdp_client_connect(w.client, &cfg) != RDP_OK) {
+		mikuterm_log("rdp_worker_main: rdp_client_connect failed");
 		rdp_tab_end(w.tab, "RDP connection handshake failed.");
 		goto cleanup;
 	}
+	mikuterm_log("rdp_worker_main: rdp_client_connect ok, entering loop");
 
 	/* Event loop polling the TCP socket and the UI tab waker. */
 	while (w.disconnected == 0 && rdp_tab_is_closing(w.tab) == 0) {
@@ -182,8 +194,10 @@ rdp_worker_main(
 		waits[1].events = KL_SOCKET_READABLE;
 		ready = 0U;
 		error = kl_socket_poll(waits, 2U, 200, &ready);
-		if (error != 0 && error != ETIMEDOUT)
+		if (error != 0 && error != ETIMEDOUT) {
+			mikuterm_log("rdp_worker_main: kl_socket_poll error=%d", error);
 			break;
+		}
 		if (waits[0].ready == 0U)
 			continue;
 		for (;;) {
@@ -196,6 +210,7 @@ rdp_worker_main(
 					if (err == SSL_ERROR_WANT_READ ||
 					    err == SSL_ERROR_WANT_WRITE)
 						break;
+					mikuterm_log("rdp_worker_main: SSL_read rc=%d ssl_err=%d", ssl_rc, err);
 					w.disconnected = 1;
 					break;
 				}
@@ -206,16 +221,20 @@ rdp_worker_main(
 				if (error == EAGAIN || error == EWOULDBLOCK)
 					break;
 				if (error != 0 || got == 0U) {
+					mikuterm_log("rdp_worker_main: kl_socket_receive error=%d got=%zu", error, got);
 					w.disconnected = 1;
 					break;
 				}
 			}
 			if (rdp_client_feed(w.client, rxbuf, got) != RDP_OK) {
+				mikuterm_log("rdp_worker_main: rdp_client_feed failed got=%zu", got);
 				w.disconnected = 1;
 				break;
 			}
 		}
 	}
+	mikuterm_log("rdp_worker_main: loop exited disconnected=%d closing=%d",
+		     w.disconnected, rdp_tab_is_closing(w.tab));
 	rdp_tab_end(w.tab, "RDP session closed.");
 
 cleanup:
@@ -250,15 +269,23 @@ worker_connect_tcp(
 	struct kl_socket_wait wait;
 	size_t ready;
 	int error;
-	if (kl_socket_resolve(w->target.host_name, w->target.port,
+	error = kl_socket_resolve(w->target.host_name, w->target.port,
 			      KL_ADDRESS_ANY, KL_SOCKET_STREAM, addrs,
-			      8U, &count) != 0 || count == 0U)
+			      8U, &count);
+	if (error != 0 || count == 0U) {
+		mikuterm_log("worker_connect_tcp: kl_socket_resolve(%s:%u) failed error=%d count=%zu",
+			     w->target.host_name, (unsigned)w->target.port, error, count);
 		return EHOSTUNREACH;
+	}
+	mikuterm_log("worker_connect_tcp: resolved %zu addr(s) for %s:%u",
+		     count, w->target.host_name, (unsigned)w->target.port);
 	for (i = 0U; i < count; i++) {
 		error = kl_socket_open(addrs[i].family, KL_SOCKET_STREAM,
 				       KL_SOCKET_NONBLOCKING, &s);
-		if (error != 0)
+		if (error != 0) {
+			mikuterm_log("worker_connect_tcp: kl_socket_open[%zu] failed error=%d", i, error);
 			continue;
+		}
 		error = kl_socket_connect(s, &addrs[i]);
 		if (error == EINPROGRESS || error == EWOULDBLOCK) {
 			memset(&wait, 0, sizeof(wait));
@@ -276,6 +303,7 @@ worker_connect_tcp(
 			w->sock = s;
 			return 0;
 		}
+		mikuterm_log("worker_connect_tcp: connect[%zu] failed error=%d", i, error);
 		kl_socket_close(s);
 	}
 	return ECONNREFUSED;
@@ -339,14 +367,17 @@ worker_on_tls(
 	struct kl_socket_wait wait;
 	size_t ready;
 	w = (struct rdp_worker *)user;
+	mikuterm_log("worker_on_tls: starting TLS handshake");
 	w->ssl_ctx = SSL_CTX_new(TLS_client_method());
 	if (w->ssl_ctx == NULL) {
+		mikuterm_log("worker_on_tls: SSL_CTX_new failed");
 		w->disconnected = 1;
 		return;
 	}
 	SSL_CTX_set_verify(w->ssl_ctx, SSL_VERIFY_NONE, NULL);
 	w->ssl = SSL_new(w->ssl_ctx);
 	if (w->ssl == NULL) {
+		mikuterm_log("worker_on_tls: SSL_new failed");
 		w->disconnected = 1;
 		return;
 	}
@@ -358,6 +389,7 @@ worker_on_tls(
 			break;
 		err = SSL_get_error(w->ssl, rc);
 		if (err != SSL_ERROR_WANT_READ && err != SSL_ERROR_WANT_WRITE) {
+			mikuterm_log("worker_on_tls: SSL_connect failed rc=%d ssl_err=%d", rc, err);
 			w->disconnected = 1;
 			return;
 		}
@@ -367,13 +399,17 @@ worker_on_tls(
 			      KL_SOCKET_WRITABLE : KL_SOCKET_READABLE;
 		ready = 0U;
 		if (kl_socket_poll(&wait, 1U, 10000, &ready) != 0) {
+			mikuterm_log("worker_on_tls: kl_socket_poll failed during SSL_connect");
 			w->disconnected = 1;
 			return;
 		}
 	}
 	w->tls_active = 1;
-	if (rdp_client_tls_established(w->client) != RDP_OK)
+	mikuterm_log("worker_on_tls: TLS handshake complete");
+	if (rdp_client_tls_established(w->client) != RDP_OK) {
+		mikuterm_log("worker_on_tls: rdp_client_tls_established failed");
 		w->disconnected = 1;
+	}
 }
 
 /* Updates status when the RDP session completes capability negotiation. */
@@ -385,6 +421,7 @@ worker_on_connected(
 {
 	struct rdp_worker *w;
 	w = (struct rdp_worker *)user;
+	mikuterm_log("worker_on_connected: %ux%u", width, height);
 	w->connected = 1;
 	w->width = width;
 	w->height = height;
@@ -452,6 +489,7 @@ worker_on_disconnect(
 	struct rdp_worker *w;
 
 	w = (struct rdp_worker *)user;
+	mikuterm_log("worker_on_disconnect: connected=%d error_info=0x%x", w->connected, error_info);
 	if (w->connected == 0 && error_info != 0U)
 		mikuterm_rdp_password_forget(w->target.host_name, w->target.port, w->target.user);
 	w->disconnected = 1;

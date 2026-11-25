@@ -1071,11 +1071,16 @@ thread_launch_rdp_target(
 		}
 	}
 
+	mikuterm_log("thread_launch_rdp_target: host=%s port=%u user=%s size=%ux%u",
+		     target->host_name, (unsigned)target->port, target->user,
+		     target->width, target->height);
 	error = rdp_tab_create(target->host_name, target->width, target->height,
 			       1, choice->session->app,
 			       choice->session->number, &tab);
-	if (error != 0)
+	if (error != 0) {
+		mikuterm_log("thread_launch_rdp_target: rdp_tab_create failed error=%d", error);
 		return EAGAIN;
+	}
 
 #ifdef MIKUTERM_HAVE_LIBMEDIA
 	error = rdp_thread_start(tab, target, &rdp_media_decoder_ops,
@@ -1088,6 +1093,7 @@ thread_launch_rdp_target(
 				 choice->session->connect_timeout);
 #endif
 	if (error != 0) {
+		mikuterm_log("thread_launch_rdp_target: rdp_thread_start failed error=%d", error);
 		rdp_tab_release(tab);
 		return EAGAIN;
 	}
