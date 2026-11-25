@@ -540,7 +540,7 @@ main(
 	wopts.height = win_h;
 	wopts.fullscreen = fullscreen;
 	wopts.present = KL_PRESENT_SHM;
-	win = kl_window_open(&wopts);
+	win = kl_app_window_create(app, &wopts);
 	if (win == NULL) {
 		fprintf(stderr, "dispsink: kl_window_open failed\n");
 		kl_app_close(app);
