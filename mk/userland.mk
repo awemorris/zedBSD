@@ -169,6 +169,7 @@ $(BUILD)/packages/notes/.stamp:       $(KEILAND_COMMON_DEPS) $(BUILD)/packages/l
 $(BUILD)/packages/photos/.stamp:      $(KEILAND_COMMON_DEPS) $(BUILD)/packages/mediastorage/.stamp $(BUILD)/packages/preview/.stamp $(BUILD)/packages/libz-compat/.stamp
 $(BUILD)/packages/music/.stamp:       $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libz-compat/.stamp $(BUILD)/packages/libpng-compat/.stamp $(BUILD)/packages/libjpeg-compat/.stamp $(BUILD)/packages/libgif-compat/.stamp
 $(BUILD)/packages/videoplayer/.stamp: $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libmedia/.stamp
+$(BUILD)/packages/dispsink/.stamp:    $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libmedia/.stamp $(BUILD)/packages/libssl-compat/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
 $(BUILD)/packages/calendar/.stamp:    $(KEILAND_COMMON_DEPS)
 $(BUILD)/packages/mailer/.stamp:      $(KEILAND_COMMON_DEPS) $(BUILD)/packages/libssl-compat/.stamp $(BUILD)/packages/libcrypto-compat/.stamp
 $(BUILD)/packages/monitor/.stamp:     $(KEILAND_COMMON_DEPS)

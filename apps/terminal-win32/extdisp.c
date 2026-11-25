@@ -1094,7 +1094,7 @@ mikuterm_extdisp_start(void)
 	extdisp.sess.listen_sock = INVALID_SOCKET;
 	extdisp.sess.client_sock = INVALID_SOCKET;
 	InitializeCriticalSection(&extdisp.lock);
-	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text), "Listening for Network Displays...");
+	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text), "Listening for Display Sink Targets...");
 
 	if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0)
 		return -1;

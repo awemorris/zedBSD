@@ -352,7 +352,7 @@ struct page_state {
 static struct page_state page;
 
 /* The panes' names and icons, in their order. */
-static const char *const page_pane_names[TERMINAL_PANES] = { "Hosts", "Appearance", "Behavior", "Keys", "Extended Display" };
+static const char *const page_pane_names[TERMINAL_PANES] = { "Hosts", "Appearance", "Behavior", "Keys", "Display Sink" };
 static const enum kl_icon page_pane_icons[TERMINAL_PANES] = { KL_ICON_COMPUTER, KL_ICON_PALETTE, KL_ICON_KEYBOARD, KL_ICON_LOCK, KL_ICON_COMPUTER };
 
 /* The themes' names and their actions, in the order of TERMINAL_THEME_*. */
@@ -3511,7 +3511,7 @@ page_extended_display(
 	if (ops->status != NULL)
 		(void)ops->status(page.program->extdisp_data, status, sizeof(status), &connected);
 	if (status[0] == '\0')
-		(void)snprintf(status, sizeof(status), "Listening for Network Displays on UDP 33890.");
+		(void)snprintf(status, sizeof(status), "Listening for Display Sink Targets on UDP 33890.");
 
 	/* Status card. */
 	card.x = left;
@@ -3520,7 +3520,7 @@ page_extended_display(
 	card.height = PAGE_CARD_SUBTITLED + page_note_height(width - 40, status) + 8 +
 	    (connected ? theme->control_height + 8 : 0) +
 	    page_note_height(width - 40, page.extdisp_message.text) + PAGE_CARD_FOOT;
-	y = page_card(&card, "Extended Display", "Stream a virtual Windows monitor to a mikuterm Network Display on the LAN.");
+	y = page_card(&card, "Display Sink (Host Mode)", "Stream a virtual Windows monitor to a Display Sink Target on the LAN.");
 	y = page_note(y, card.x + 20, card.width - 40, status, connected ? theme->text : theme->text_secondary);
 	if (connected && ops->disconnect != NULL) {
 		control.x = card.x + 20;
@@ -3537,15 +3537,15 @@ page_extended_display(
 	(void)page_message_draw(y, card.x + 20, card.width - 40, &page.extdisp_message);
 	top = card.y + card.height + PAGE_GAP;
 
-	/* Discovered Network Displays. */
+	/* Discovered Display Sink Targets. */
 	count = (ops->list != NULL) ? ops->list(page.program->extdisp_data, devices, TERMINAL_EXTDISP_DEVICES_MAX) : 0U;
 	if (count == 0U) {
-		const char *empty_note = "No Network Displays found yet. Open the Network Display tab on another mikuterm device on the same LAN.";
+		const char *empty_note = "No Display Sink Targets found yet. Open Display Sink (Target Mode) on another device or /bin/dispsink on zedBSD.";
 		card.x = left;
 		card.y = top;
 		card.width = width;
 		card.height = PAGE_CARD_SUBTITLED + page_note_height(width - 40, empty_note) + PAGE_CARD_FOOT;
-		y = page_card(&card, "Discovered Displays", "Waiting for UDP 33890 advertisements");
+		y = page_card(&card, "Discovered Display Sink Targets", "Waiting for Target Mode advertisements on UDP 33890");
 		(void)page_note(y, card.x + 20, card.width - 40, empty_note, theme->text_secondary);
 		return card.y + card.height;
 	}
@@ -3566,7 +3566,7 @@ page_extended_display(
 		card.width = width;
 		card.height = PAGE_CARD_SUBTITLED + page_note_height(width - 40, detail) + 8 +
 		    theme->control_height + PAGE_CARD_FOOT;
-		y = page_card(&card, devices[i].name[0] != '\0' ? devices[i].name : "Network Display", sub);
+		y = page_card(&card, devices[i].name[0] != '\0' ? devices[i].name : "Display Sink Target", sub);
 		y = page_note(y, card.x + 20, card.width - 40, detail, theme->text_secondary);
 
 		control.x = card.x + 20;

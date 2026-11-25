@@ -559,7 +559,7 @@ thread_choose(
 	(void)launch_add(&choice->screen, "c", LAUNCH_CODESPACES, "GitHub Codespaces", NULL);
 #endif
 	(void)launch_add(&choice->screen, "r", LAUNCH_RDP, "RDP", NULL);
-	(void)launch_add(&choice->screen, "n", LAUNCH_NETWORK_DISPLAY, "Network Display", NULL);
+	(void)launch_add(&choice->screen, "n", LAUNCH_NETWORK_DISPLAY, "Display Sink (Target Mode)", NULL);
 	(void)launch_add(&choice->screen, "x", LAUNCH_SETTINGS, "Settings", NULL);
 	if (choice->hosts.count == 0U) {
 		mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));

@@ -78,7 +78,7 @@ nd_wait_cancel_after_error(
 	size_t ready = 0U;
 	int closing = 0;
 
-	session_say_line(session, "\033[0m\033[?2004l\033[2J\033[H\033[?25hNetwork Display -- Error");
+	session_say_line(session, "\033[0m\033[?2004l\033[2J\033[H\033[?25hDisplay Sink (Target Mode) -- Error");
 	session_say_line(session, err_msg);
 	session_say_line(session, "Press Esc or Ctrl+C to return.");
 	for (;;) {
@@ -406,7 +406,7 @@ netdisp_wait_and_receive(
 		return EINVAL;
 	}
 
-	session_say_line(session, "\033[0m\033[?2004l\033[2J\033[H\033[?25hNetwork Display -- Waiting for connection...");
+	session_say_line(session, "\033[0m\033[?2004l\033[2J\033[H\033[?25hDisplay Sink (Target Mode) -- Waiting for Host...");
 	snprintf(msg, sizeof(msg), "Device: %s", adv.device_name);
 	session_say_line(session, msg);
 	snprintf(msg, sizeof(msg), "Verification Code: %s", fp);

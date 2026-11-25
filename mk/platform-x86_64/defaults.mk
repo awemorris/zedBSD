@@ -263,6 +263,7 @@ CONFIG_USERLAND_PROGRAMS          += \
 	zcat \
 	browser \
 	calendar \
+	dispsink \
 	files \
 	imageview \
 	ime \
