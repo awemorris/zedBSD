@@ -371,7 +371,7 @@ draw_waiting_screen(
 		(void)kl_text_draw_fit(text, &c, tx, ty + 114, line3, 14U, 0, max_w, DISPSINK_MUTED);
 	}
 	kl_canvas_release(&c);
-	(void)kl_window_present(win, canvas, (size_t)w * 4U);
+	(void)kl_window_present(win, canvas, (size_t)w);
 }
 
 static void
@@ -389,7 +389,7 @@ present_rdp_canvas(
 	for (i = 0U; i < total; i++)
 		canvas[i] = 0xFF181C20U;
 	(void)rdp_app_session_copy_frame(session, canvas, w, h);
-	(void)kl_window_present(win, canvas, (size_t)w * 4U);
+	(void)kl_window_present(win, canvas, (size_t)w);
 }
 
 static void
