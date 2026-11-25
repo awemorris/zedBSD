@@ -196,6 +196,26 @@ cb_on_auth_request(
 	(void)domain;
 	ctx = (struct rdpd_client_ctx *)user;
 	if (user_name != NULL && strstr(user_name, "+extend") != NULL) {
+		uint8_t expected_hash[16];
+		uint8_t got_hash[16];
+		uint8_t diff = 0U;
+		size_t i;
+
+		if (password != NULL &&
+		    rdpd_extend_lookup(user_name, expected_hash) == 0) {
+			rdp_ntlm_nt_hash(password, got_hash);
+			for (i = 0U; i < 16U; i++)
+				diff |= (uint8_t)(expected_hash[i] ^ got_hash[i]);
+			memset(expected_hash, 0, sizeof(expected_hash));
+			memset(got_hash, 0, sizeof(got_hash));
+			if (diff == 0U) {
+				(void)snprintf(ctx->user, sizeof(ctx->user),
+					       "%s", user_name);
+				ctx->authed = 1;
+				(void)rdp_server_accept_auth(ctx->srv);
+				return;
+			}
+		}
 		(void)rdp_server_reject_auth(ctx->srv, 0U);
 		ctx->running = 0;
 		return;
