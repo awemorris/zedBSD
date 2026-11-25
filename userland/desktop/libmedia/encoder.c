@@ -218,7 +218,7 @@ media_encoder_send(
 	}
 
 	/* Refuses a flag media_encoder_send does not have. */
-	if ((flags & ~MEDIA_ENCODE_FORCE_KEY) != 0)
+	if ((flags & ~(MEDIA_ENCODE_FORCE_KEY | MEDIA_ENCODE_HIGH_QUALITY)) != 0)
 		return EINVAL;
 
 	/* Refuses a picture whose planes do not hold the configured form. */

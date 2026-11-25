@@ -516,10 +516,9 @@ handle_client(
 		nfds = 1U;
 		conn = rdp_server_is_gfx_ready(ctx.srv);
 		unacked = rdp_server_unacked_frames(ctx.srv);
-		if (ctx.session_started && ctx.sess.rdp_fd >= 0 &&
-		    conn != 0 && unacked < 6U) {
+		if (ctx.session_started && ctx.sess.rdp_fd >= 0) {
 			pfds[1].fd = ctx.sess.rdp_fd;
-			pfds[1].events = POLLIN;
+			pfds[1].events = (conn != 0 && unacked < 6U) ? POLLIN : 0;
 			pfds[1].revents = 0;
 			nfds = 2U;
 		}
@@ -567,6 +566,14 @@ handle_client(
 			}
 			if (!ctx.running)
 				break;
+		}
+
+		/* Detects headless Wayland exit even when frame reading is throttled. */
+		if (nfds == 2U && (pfds[1].revents & (POLLHUP | POLLERR)) != 0 &&
+		    (pfds[1].revents & POLLIN) == 0) {
+			fprintf(stderr, "RDPD: rdp_fd hangup revents=0x%x\n",
+				(unsigned)pfds[1].revents);
+			break;
 		}
 
 		/* Reads encoded H.264 AU from headless Wayland and sends over RDPEGFX. */

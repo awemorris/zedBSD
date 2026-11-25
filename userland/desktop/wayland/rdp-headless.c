@@ -541,6 +541,22 @@ kwl_rdp_encode_and_send(
 	vkCmdCopyImageToBuffer(rdp->cmd_buf, (VkImage)image,
 			       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
 			       rdp->staging, 1U, &region);
+
+	/* Restores PRESENT_SRC_KHR so subsequent partial-damage passes can load it. */
+	memset(&barrier, 0, sizeof(barrier));
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	barrier.newLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	barrier.srcAccessMask = VK_ACCESS_TRANSFER_READ_BIT;
+	barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	barrier.image = (VkImage)image;
+	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier.subresourceRange.levelCount = 1U;
+	barrier.subresourceRange.layerCount = 1U;
+	vkCmdPipelineBarrier(rdp->cmd_buf,
+			     VK_PIPELINE_STAGE_TRANSFER_BIT,
+			     VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+			     0U, 0U, NULL, 0U, NULL, 1U, &barrier);
 	vres = vkEndCommandBuffer(rdp->cmd_buf);
 	if (vres != VK_SUCCESS)
 		return EIO;

@@ -666,33 +666,35 @@ kwl_compose_headless_resize(
 	if (compose == NULL || !compose->headless)
 		return;
 
-	(void)kwl_compose_complete(server);
+	kwl_compose_park(server);
 	kwl_rdp_clamp_size(&width, &height);
 	new_img = VK_NULL_HANDLE;
-	if (kwl_rdp_resize(server, width, height, (void **)&new_img) != 0)
+	if (kwl_rdp_resize(server, width, height, (void **)&new_img) != 0 ||
+	    new_img == VK_NULL_HANDLE) {
+		kwl_compose_unpark(server);
 		return;
-	if (new_img == VK_NULL_HANDLE)
-		return;
-
-	if (compose->framebuffers[0] != VK_NULL_HANDLE) {
-		vkDestroyFramebuffer(compose->device, compose->framebuffers[0], NULL);
-		compose->framebuffers[0] = VK_NULL_HANDLE;
-	}
-	if (compose->views[0] != VK_NULL_HANDLE) {
-		vkDestroyImageView(compose->device, compose->views[0], NULL);
-		compose->views[0] = VK_NULL_HANDLE;
-	}
-	if (compose->rendered[0] != VK_NULL_HANDLE) {
-		vkDestroySemaphore(compose->device, compose->rendered[0], NULL);
-		compose->rendered[0] = VK_NULL_HANDLE;
 	}
 
+	compose_targets_destroy(compose);
 	compose->output.images[0] = new_img;
 	compose->output.width = width;
 	compose->output.height = height;
 	compose->mode_width = width;
 	compose->mode_height = height;
 	(void)compose_targets(compose);
+
+	/* Resets frame history and size-dependent caches for the new offscreen image. */
+	memset(compose->image_frames, 0, sizeof(compose->image_frames));
+	compose->scene.valid = 0U;
+	kwl_scene_close(&compose->scene, compose->device);
+	if (compose->pass_load != VK_NULL_HANDLE) {
+		if (kwl_scene_open(&compose->scene, compose->physical, compose->device,
+				   compose->target_width, compose->target_height) != VK_SUCCESS)
+			printf("KWL SCENE unavailable\n");
+	}
+	kwl_backdrop_destroy(compose);
+	kwl_glass_maps_destroy(compose);
+	kwl_layers_close(compose);
 	kwl_layers_open(server);
 
 	/* Fits glass, windows, arranged layouts, pointer, and notifies clients of the new output size. */
@@ -700,6 +702,8 @@ kwl_compose_headless_resize(
 	kwl_outputs_changed(server);
 	kwl_window_bounds_refresh(server);
 	kwl_input_geometry(server);
+	server->dirty = 1U;
+	kwl_compose_unpark(server);
 }
 
 /*
