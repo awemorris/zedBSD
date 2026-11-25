@@ -235,6 +235,7 @@ h265vk_open(
 		probe.references = 1U;
 		error = media_vkvideo_runtime_open_h265(&probe, 0U, &runtime);
 		if (error != 0) {
+			error = h265vk_problem(error);
 			h265vk_close(decoder);
 			return error;
 		}

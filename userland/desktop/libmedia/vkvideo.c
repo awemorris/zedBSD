@@ -202,6 +202,7 @@ vkvideo_open(
 		probe.max_num_ref_frames = 1U;
 		error = media_vkvideo_runtime_open(&probe, 0U, &runtime);
 		if (error != 0) {
+			error = vkvideo_problem(error);
 			vkvideo_close(decoder);
 			return error;
 		}

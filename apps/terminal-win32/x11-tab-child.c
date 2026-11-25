@@ -708,7 +708,7 @@ tab_child_cursor(
 	/* Only the Windows backend's windows. */
 	tabs = context;
 	shown = (struct tab_surface *)surface;
-	if (shown->inner == NULL)
+	if (shown == NULL || shown->inner == NULL)
 		return;
 	x11_win32_ops.cursor(tabs->inner, shown->inner, image);
 }

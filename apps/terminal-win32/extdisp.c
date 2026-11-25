@@ -1105,6 +1105,8 @@ mikuterm_extdisp_start(void)
 		return -1;
 	(void)setsockopt(extdisp.disc_sock, SOL_SOCKET, SO_REUSEADDR,
 	    (const char *)&reuse, sizeof(reuse));
+	(void)setsockopt(extdisp.disc_sock, SOL_SOCKET, SO_BROADCAST,
+	    (const char *)&reuse, sizeof(reuse));
 	memset(&addr, 0, sizeof(addr));
 	addr.sin_family = AF_INET;
 	addr.sin_addr.s_addr = htonl(INADDR_ANY);
