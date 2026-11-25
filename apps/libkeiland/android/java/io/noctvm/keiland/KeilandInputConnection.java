@@ -123,13 +123,9 @@ final class KeilandInputConnection extends BaseInputConnection {
 		int meta;
 
 		/* The committed text replaces whatever was being composed. */
-		wasComposing = !composing.isEmpty();
+		wasComposing = hasNonAscii(composing);
 		composing = "";
 		committed = text.toString();
-		if (wasComposing && committed.length() > 1
-		    && (committed.endsWith("\n") || committed.endsWith("\r"))) {
-			committed = committed.substring(0, committed.length() - 1);
-		}
 		if (wasComposing) {
 			noteConfirmed();
 		}
@@ -223,7 +219,9 @@ final class KeilandInputConnection extends BaseInputConnection {
 		pending = composing;
 		composing = "";
 		if (!pending.isEmpty()) {
-			noteConfirmed();
+			if (hasNonAscii(pending)) {
+				noteConfirmed();
+			}
 			keepOrClear(pending);
 			updateSelection();
 			KeilandBridge.nativeCommit(pending);
@@ -316,18 +314,35 @@ final class KeilandInputConnection extends BaseInputConnection {
 		}
 	}
 
+	/** Returns whether text contains any non-ASCII code point (e.g. CJK IME composition). */
+	private static boolean hasNonAscii(String text) {
+		int i;
+
+		for (i = 0; i < text.length(); i++) {
+			if (text.charAt(i) > 0x7f) {
+				return true;
+			}
+		}
+		return false;
+	}
+
 	/**
 	 * Consumes an Enter/action triggered while composing or immediately after confirming
 	 * a composition (same batch edit or within CONFIRM_ENTER_SUPPRESS_MS).
 	 */
 	private boolean consumeConfirmEnter() {
 		long now;
+		boolean nonAscii;
 
 		if (!composing.isEmpty()) {
+			nonAscii = hasNonAscii(composing);
 			finishComposingText();
-			confirmedInBatch = false;
-			lastConfirmUptimeMs = 0L;
-			return true;
+			if (nonAscii) {
+				confirmedInBatch = false;
+				lastConfirmUptimeMs = 0L;
+				return true;
+			}
+			return false;
 		}
 		now = SystemClock.uptimeMillis();
 		if (confirmedInBatch || (lastConfirmUptimeMs != 0L && (now - lastConfirmUptimeMs) <= CONFIRM_ENTER_SUPPRESS_MS)) {

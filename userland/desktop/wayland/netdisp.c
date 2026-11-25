@@ -1423,7 +1423,7 @@ kwl_netdisp_poll(
 					kwl_seat_button(server, now_ms, 0x112U, down);
 			} else if (type == KWL_RDP_MSG_KEY) {
 				uint32_t key = ps2_to_evdev(arg1, arg2);
-				uint32_t state = (arg2 & 0x8000U) != 0U ? 0U : 1U;
+				uint32_t state = (arg2 & 0x8001U) != 0U ? 0U : 1U;
 				if (key != 0U)
 					kwl_seat_key(server, now_ms, key, state);
 			}

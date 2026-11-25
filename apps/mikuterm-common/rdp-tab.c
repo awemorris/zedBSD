@@ -365,6 +365,7 @@ rdp_conn_read(
 	tab = (struct rdp_tab *)conn;
 	kl_mutex_lock(&tab->lock);
 	tab->news = 0;
+	tab->posted = 0;
 	kl_mutex_unlock(&tab->lock);
 	return 0U;
 }
@@ -716,8 +717,11 @@ rdp_view_input(
 		else if (event->code == EVDEV_BTN_MIDDLE)
 			btn_flag = RDP_PTR_FLAG_BUTTON3;
 		if (btn_flag != 0U) {
-			if (event->pressed != 0)
+			if (event->pressed != 0) {
+				tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+						RDP_PTR_FLAG_MOVE, px, py);
 				btn_flag |= RDP_PTR_FLAG_DOWN;
+			}
 			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U, btn_flag,
 					px, py);
 		}
@@ -961,7 +965,7 @@ rdp_handle_touch(
 	uint16_t flags;
 	int i;
 
-	id = (int32_t)event->code;
+	id = (int32_t)event->id;
 	if (event->kind == TERMINAL_PICTURE_TOUCH_CANCEL) {
 		if (tab->touch_pressed_left != 0) {
 			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
@@ -1104,6 +1108,8 @@ rdp_handle_touch(
 		tab->touch_last_px = px;
 		tab->touch_last_py = py;
 		if (tab->touch_pressed_left == 0) {
+			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+					RDP_PTR_FLAG_MOVE, px, py);
 			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
 					RDP_PTR_FLAG_BUTTON1 | RDP_PTR_FLAG_DOWN,
 					px, py);
