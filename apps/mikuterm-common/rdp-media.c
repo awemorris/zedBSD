@@ -63,7 +63,8 @@ media_create(
 		free(m);
 		return error;
 	}
-	mikuterm_log("rdp-media: opened decoder=%s", media_decoder_name(m->dec));
+	mikuterm_log("rdp-media: opened decoder=%s backend=%s",
+		     media_decoder_name(m->dec), media_decoder_backend(m->dec));
 
 	/* Requests fast deblocking when a software backend is active. */
 	(void)media_decoder_deblock(m->dec, MEDIA_DEBLOCK_FAST);
@@ -120,8 +121,10 @@ media_decode(
 	pkt.pts_us = 0;
 	pkt.keyframe = 1;
 	rc = media_decoder_send(m->dec, &pkt);
-	if (rc != 0)
+	if (rc != 0) {
+		mikuterm_log("rdp-media: media_decoder_send failed rc=%d len=%zu", rc, len);
 		return rc;
+	}
 	/* Drains any ready picture; if none yet, send an AUD to close the AU. */
 	last = NULL;
 	for (;;) {
@@ -180,6 +183,8 @@ media_decode(
 				       (size_t)out_w * sizeof(uint32_t),
 				       (int)out_w, (int)out_h);
 		if (rc != 0) {
+			mikuterm_log("rdp-media: media_frame_scale failed rc=%d fw=%d fh=%d out=%ux%u",
+				     rc, fw, fh, out_w, out_h);
 			media_frame_free(&last);
 			return rc;
 		}

@@ -456,11 +456,18 @@ worker_on_avc_frame(
 		w->frame_buf = nb;
 		w->frame_cap = need;
 	}
+	static unsigned avc_log_count;
 	dec_w = w->width;
 	dec_h = w->height;
 	error = w->decoder_ops->decode(w->decoder_ctx, avc->luma.data,
 				       avc->luma.data_len, w->frame_buf,
 				       w->width, w->height, &dec_w, &dec_h);
+	if (avc_log_count < 10U || error != 0) {
+		avc_log_count++;
+		mikuterm_log("worker_on_avc_frame: fid=%u len=%u w=%ux%u dec=%ux%u err=%d",
+			     frame_id, avc->luma.data_len, w->width, w->height,
+			     dec_w, dec_h, error);
+	}
 	if (error == 0)
 		(void)rdp_tab_put_frame(w->tab, w->frame_buf, w->width,
 					w->height);
