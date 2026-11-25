@@ -383,7 +383,7 @@ draw_waiting_screen(
 		int tx = (int)cx + 28;
 		int ty = (int)cy + 46;
 		int max_w = (int)cw - 56;
-		const char *title = "Display Sink (Target Mode)";
+		const char *title = "DisplaySink (Display Mode)";
 
 		(void)kl_text_draw_fit(text, &c, tx, ty, title, 22U, 1, max_w, DISPSINK_TEXT);
 		snprintf(line1, sizeof(line1), "Device: %s (%ux%u)",
@@ -391,7 +391,7 @@ draw_waiting_screen(
 		(void)kl_text_draw_fit(text, &c, tx, ty + 38, line1, 15U, 0, max_w, DISPSINK_MUTED);
 		snprintf(line2, sizeof(line2), "Verification code: %s", st->fingerprint);
 		(void)kl_text_draw_fit(text, &c, tx, ty + 74, line2, 18U, 1, max_w, DISPSINK_ACCENT);
-		snprintf(line3, sizeof(line3), "Waiting for Display Sink Host on UDP %u...",
+		snprintf(line3, sizeof(line3), "Waiting for DisplaySink (PC mode) on UDP %u...",
 			 (unsigned)NETDISP_DISCOVERY_PORT);
 		(void)kl_text_draw_fit(text, &c, tx, ty + 114, line3, 14U, 0, max_w, DISPSINK_MUTED);
 	}
@@ -560,7 +560,7 @@ main(
 
 	memset(&wopts, 0, sizeof(wopts));
 	wopts.application = "dispsink";
-	wopts.title = "Display Sink";
+	wopts.title = "DisplaySink (Display Mode)";
 	wopts.width = win_w;
 	wopts.height = win_h;
 	wopts.fullscreen = fullscreen;

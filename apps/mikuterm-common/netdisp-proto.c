@@ -262,7 +262,7 @@ netdisp_sanitize_name(
 			j--;
 	}
 	if (j == 0U) {
-		static const char fallback[] = "Display Sink Target";
+		static const char fallback[] = "DisplaySink (Display Mode)";
 		j = sizeof(fallback) - 1U;
 		memcpy(out, fallback, j);
 	}
