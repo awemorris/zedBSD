@@ -85,13 +85,90 @@ cb_send_bytes(
 			n = SSL_write(ctx->ssl, data + off, (int)(len - off));
 		else
 			n = send(ctx->sock, data + off, len - off, 0);
-		if (n <= 0)
+		if (n <= 0) {
+			if (ctx->tls_active && ctx->ssl != NULL) {
+				fprintf(stderr, "RDPD: SSL_write n=%zd ssl_err=%d errno=%d\n",
+					n, SSL_get_error(ctx->ssl, (int)n), errno);
+			} else {
+				fprintf(stderr, "RDPD: send n=%zd errno=%d\n", n, errno);
+			}
 			return -1;
+		}
 		off += (size_t)n;
 	}
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Looks up an NTLM NT hash from /etc/rdpd/ntlm.users (user:password or user:ntlm:<hex32>). */
+static int
+hex_nibble(char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return 10 + (c - 'a');
+	if (c >= 'A' && c <= 'F')
+		return 10 + (c - 'A');
+	return -1;
+}
+
+static int
+cb_on_ntlm_lookup(
+	void *user,
+	const char *domain,
+	const char *user_name,
+	uint8_t out_nt_hash[16])
+{
+	FILE *fp;
+	char line[512];
+	size_t ulen;
+
+	(void)user;
+	(void)domain;
+	if (user_name == NULL || user_name[0] == '\0')
+		return -1;
+	ulen = strlen(user_name);
+	fp = fopen("/etc/rdpd/ntlm.users", "r");
+	if (fp == NULL)
+		return -1;
+	while (fgets(line, sizeof(line), fp) != NULL) {
+		size_t len = strlen(line);
+		char *sep;
+		while (len > 0U && (line[len - 1U] == '\n' || line[len - 1U] == '\r'))
+			line[--len] = '\0';
+		if (line[0] == '\0' || line[0] == '#')
+			continue;
+		sep = strchr(line, ':');
+		if (sep == NULL)
+			continue;
+		if ((size_t)(sep - line) != ulen ||
+		    strncmp(line, user_name, ulen) != 0)
+			continue;
+		sep++;
+		if (strncmp(sep, "ntlm:", 5U) == 0 && strlen(sep + 5U) == 32U) {
+			size_t i;
+			int ok = 1;
+			for (i = 0U; i < 16U; i++) {
+				int hi = hex_nibble(sep[5U + i * 2U]);
+				int lo = hex_nibble(sep[5U + i * 2U + 1U]);
+				if (hi < 0 || lo < 0) {
+					ok = 0;
+					break;
+				}
+				out_nt_hash[i] = (uint8_t)((hi << 4) | lo);
+			}
+			fclose(fp);
+			return ok ? 0 : -1;
+		}
+		rdp_ntlm_nt_hash(sep, out_nt_hash);
+		memset(line, 0, sizeof(line));
+		fclose(fp);
+		return 0;
+	}
+	fclose(fp);
+	return -1;
 }
 
 /* Authenticates client credentials via passkey and accepts or rejects. */
@@ -135,6 +212,8 @@ cb_on_connected(
 	ctx->height = 720U;
 	if (height != 0U)
 		ctx->height = height;
+	fprintf(stderr, "RDPD: connected %ux%u authed=%d\n",
+		ctx->width, ctx->height, ctx->authed);
 	if (!ctx->authed)
 		return;
 	rc = rdpd_hid_open(&ctx->hid, ctx->width, ctx->height);
@@ -273,6 +352,7 @@ handle_client(
 	memset(&cb, 0, sizeof(cb));
 	cb.send_bytes = cb_send_bytes;
 	cb.on_auth_request = cb_on_auth_request;
+	cb.on_ntlm_lookup = cb_on_ntlm_lookup;
 	cb.on_connected = cb_on_connected;
 	cb.on_resize = cb_on_resize;
 	cb.on_input_key = cb_on_input_key;
@@ -281,6 +361,8 @@ handle_client(
 	memset(&cfg, 0, sizeof(cfg));
 	cfg.width = ctx.width;
 	cfg.height = ctx.height;
+	(void)SSL_CTX_get0_certificate_ASN1(ssl_ctx, &cfg.tls_cert_der,
+					    &cfg.tls_cert_der_len);
 	ctx.srv = rdp_server_create(&cb, &ctx, &cfg);
 	if (ctx.srv == NULL) {
 		close(client_sock);
@@ -305,8 +387,11 @@ handle_client(
 				break;
 			set_ok = SSL_set_fd(ctx.ssl, ctx.sock);
 			acc_ok = SSL_accept(ctx.ssl);
-			if (set_ok != 1 || acc_ok != 1)
+			if (set_ok != 1 || acc_ok != 1) {
+				fprintf(stderr, "RDPD: SSL_accept failed set=%d acc=%d\n",
+					set_ok, acc_ok);
 				break;
+			}
 			ctx.tls_active = 1;
 			rc = rdp_server_tls_established(ctx.srv);
 			if (rc != 0)
@@ -318,10 +403,10 @@ handle_client(
 		pfds[0].events = POLLIN;
 		pfds[0].revents = 0;
 		nfds = 1U;
-		conn = rdp_server_is_connected(ctx.srv);
+		conn = rdp_server_is_gfx_ready(ctx.srv);
 		unacked = rdp_server_unacked_frames(ctx.srv);
 		if (ctx.session_started && ctx.sess.rdp_fd >= 0 &&
-		    (conn == 0 || unacked < 6U)) {
+		    conn != 0 && unacked < 6U) {
 			pfds[1].fd = ctx.sess.rdp_fd;
 			pfds[1].events = POLLIN;
 			pfds[1].revents = 0;
@@ -337,7 +422,7 @@ handle_client(
 		}
 
 		/* Reads and feeds incoming RDP/TLS bytes (draining buffered TLS records). */
-		if ((pfds[0].revents & POLLIN) != 0) {
+		if ((pfds[0].revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
 			for (;;) {
 				if (ctx.tls_active)
 					n = SSL_read(ctx.ssl, io_buf, sizeof(io_buf));
@@ -349,14 +434,20 @@ handle_client(
 						if (ssl_err == SSL_ERROR_WANT_READ ||
 						    ssl_err == SSL_ERROR_WANT_WRITE)
 							break;
+						fprintf(stderr, "RDPD: SSL_read n=%d err=%d\n",
+							n, ssl_err);
 					} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
 						break;
+					} else {
+						fprintf(stderr, "RDPD: recv n=%d errno=%d\n",
+							n, errno);
 					}
 					ctx.running = 0;
 					break;
 				}
 				rc = rdp_server_feed(ctx.srv, io_buf, (size_t)n);
 				if (rc != 0) {
+					fprintf(stderr, "RDPD: rdp_server_feed rc=%d\n", rc);
 					ctx.running = 0;
 					break;
 				}
@@ -370,8 +461,10 @@ handle_client(
 		/* Reads encoded H.264 AU from headless Wayland and sends over RDPEGFX. */
 		if (nfds == 2U && (pfds[1].revents & POLLIN) != 0) {
 			rc = read_exact_fd(ctx.sess.rdp_fd, hdr, sizeof(hdr));
-			if (rc != 0)
+			if (rc != 0) {
+				fprintf(stderr, "RDPD: rdp_fd EOF/err rc=%d\n", rc);
 				break;
+			}
 			kwl_rdp_unpack_frame_hdr(hdr, &flags, &pts_us, &size);
 			if (size == 0U || size > 4194304U)
 				break;
@@ -389,6 +482,7 @@ handle_client(
 				break;
 			conn = rdp_server_is_connected(ctx.srv);
 			if (conn != 0) {
+				uint32_t fid = 0U;
 				rect.left = 0U;
 				rect.top = 0U;
 				rect.right = ctx.width;
@@ -401,9 +495,14 @@ handle_client(
 				avc.luma.quants = &quant;
 				avc.luma.data = au_buf;
 				avc.luma.data_len = size;
-				(void)rdp_server_send_avc_frame(
+				rc = rdp_server_send_avc_frame(
 					ctx.srv, RDP_GFX_CODEC_AVC420, &avc,
-					(uint32_t)(pts_us / 1000U), NULL);
+					(uint32_t)(pts_us / 1000U), &fid);
+				if (rc != 0) {
+					fprintf(stderr, "RDPD: send_avc fid=%u size=%u rc=%d\n",
+						fid, size, rc);
+					break;
+				}
 			}
 		}
 	}

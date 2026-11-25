@@ -46,13 +46,13 @@
 
 /* RDPEGFX command identifiers. */
 #define RDPGFX_CMD_WIRE_TO_SURFACE_1	0x0001U
-#define RDPGFX_CMD_DELETE_SURFACE	0x0004U
 #define RDPGFX_CMD_CREATE_SURFACE	0x0009U
-#define RDPGFX_CMD_RESET_GRAPHICS	0x000BU
-#define RDPGFX_CMD_MAP_SURFACE_OUTPUT	0x000CU
-#define RDPGFX_CMD_START_FRAME		0x000DU
-#define RDPGFX_CMD_END_FRAME		0x000EU
-#define RDPGFX_CMD_FRAME_ACKNOWLEDGE	0x000FU
+#define RDPGFX_CMD_DELETE_SURFACE	0x000AU
+#define RDPGFX_CMD_START_FRAME		0x000BU
+#define RDPGFX_CMD_END_FRAME		0x000CU
+#define RDPGFX_CMD_FRAME_ACKNOWLEDGE	0x000DU
+#define RDPGFX_CMD_RESET_GRAPHICS	0x000EU
+#define RDPGFX_CMD_MAP_SURFACE_OUTPUT	0x000FU
 #define RDPGFX_CMD_CAPS_ADVERTISE	0x0012U
 #define RDPGFX_CMD_CAPS_CONFIRM		0x0013U
 
@@ -140,6 +140,7 @@ struct rdp_mcs_connect_info {
 	uint32_t width;
 	uint32_t height;
 	uint32_t early_caps;
+	uint32_t channel_count;
 	uint16_t io_channel;
 	uint16_t drdynvc_channel;
 	int has_drdynvc;
@@ -234,6 +235,10 @@ enum rdp_client_state {
 enum rdp_server_state {
 	RDP_SRV_WAIT_X224_CR = 0,
 	RDP_SRV_WAIT_TLS,
+	RDP_SRV_WAIT_CREDSSP_NEG,
+	RDP_SRV_WAIT_CREDSSP_AUTH,
+	RDP_SRV_WAIT_CREDSSP_CREDS,
+	RDP_SRV_WAIT_CREDSSP_DECISION,
 	RDP_SRV_WAIT_MCS_CONNECT_INIT,
 	RDP_SRV_WAIT_ERECT_DOMAIN,
 	RDP_SRV_WAIT_ATTACH_USER,
@@ -245,6 +250,45 @@ enum rdp_server_state {
 	RDP_SRV_CONNECTED,
 	RDP_SRV_DISCONNECTED
 };
+
+/* RC4 stream cipher state and CredSSP/NTLM session state (credssp.c). */
+struct rdp_rc4 {
+	uint8_t s[256];
+	uint8_t i;
+	uint8_t j;
+};
+
+struct rdp_credssp {
+	uint32_t version;
+	uint32_t ntlm_flags;
+	int use_spnego;
+	uint8_t server_challenge[8];
+	uint8_t client_nonce[32];
+	int has_client_nonce;
+	uint8_t cli_sign_key[16];
+	uint8_t srv_sign_key[16];
+	struct rdp_rc4 seal_rx;
+	struct rdp_rc4 seal_tx;
+	uint32_t rx_seq;
+	uint32_t tx_seq;
+	int keys_ready;
+};
+
+int rdp_credssp_pdu_len(const uint8_t *data, size_t len, size_t *out_pdu_len);
+int rdp_credssp_extract_pubkey(const uint8_t *cert_der, size_t cert_len,
+			       const uint8_t **out_pk, size_t *out_pk_len);
+int rdp_credssp_handle_pdu(
+	struct rdp_credssp *cs, enum rdp_server_state *state,
+	const uint8_t *pdu, size_t pdu_len,
+	const uint8_t *pubkey, size_t pubkey_len,
+	int (*lookup_cb)(void *, const char *, const char *, uint8_t[16]),
+	void (*auth_cb)(void *, const char *, const char *, const char *),
+	void *app_user,
+	int (*send_raw_cb)(void *, const struct rdp_buf *),
+	void *send_ctx);
+int rdp_credssp_send_error(struct rdp_credssp *cs, uint32_t ntstatus,
+			   int (*send_raw_cb)(void *, const struct rdp_buf *),
+			   void *cb_user);
 
 /* Buffer and wire reader/writer helpers (tpkt.c). */
 void rdp_buf_init(struct rdp_buf *buf);
@@ -286,7 +330,7 @@ int rdp_mcs_encode_connect_initial(struct rdp_buf *out, uint32_t width,
 int rdp_mcs_decode_connect_initial(const uint8_t *data, size_t len,
 				   struct rdp_mcs_connect_info *info);
 int rdp_mcs_encode_connect_response(struct rdp_buf *out,
-				    uint16_t drdynvc_channel);
+				    uint16_t channel_count);
 int rdp_mcs_decode_connect_response(const uint8_t *data, size_t len,
 				    struct rdp_mcs_connect_info *info);
 int rdp_mcs_encode_erect_domain(struct rdp_buf *out);
@@ -355,6 +399,9 @@ int rdp_dynvc_encode_create_rsp(struct rdp_buf *out, uint32_t channel_id,
 				uint32_t status);
 int rdp_dynvc_encode_data(struct rdp_buf *out, uint32_t channel_id,
 			  const uint8_t *payload, size_t len);
+int rdp_dynvc_encode_data_first(struct rdp_buf *out, uint32_t channel_id,
+				uint32_t total_len, const uint8_t *payload,
+				size_t len);
 int rdp_dynvc_encode_close_req(struct rdp_buf *out, uint32_t channel_id);
 int rdp_dynvc_decode(const uint8_t *data, size_t len,
 		     struct rdp_dynvc_msg *msg);
@@ -366,8 +413,10 @@ void rdp_dynvc_stream_reset(struct rdp_dynvc_stream *stream);
 /* MS-RDPEGFX codecs (rdpegfx.c). */
 int rdp_gfx_encode_caps_advertise(struct rdp_buf *out);
 int rdp_gfx_decode_caps_advertise(const uint8_t *data, size_t len,
-				  uint32_t *best_version);
-int rdp_gfx_encode_caps_confirm(struct rdp_buf *out, uint32_t version);
+				  uint32_t *best_version,
+				  uint32_t *best_flags);
+int rdp_gfx_encode_caps_confirm(struct rdp_buf *out, uint32_t version,
+				uint32_t flags);
 int rdp_gfx_decode_caps_confirm(const uint8_t *data, size_t len,
 				uint32_t *version);
 int rdp_gfx_encode_reset_graphics(struct rdp_buf *out, uint32_t width,

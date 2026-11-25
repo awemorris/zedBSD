@@ -27,6 +27,7 @@
 		SSL_CTX_use_certificate_file;
 		SSL_CTX_use_PrivateKey_file;
 		SSL_CTX_generate_self_signed;
+		SSL_CTX_get0_certificate_ASN1;
 		SSL_new;
 		SSL_free;
 		SSL_set_fd;

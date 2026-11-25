@@ -8,4 +8,5 @@ LIBRDP_SOURCES := userland/desktop/librdp/tpkt.c \
 	userland/desktop/librdp/rdpedisp.c \
 	userland/desktop/librdp/input.c \
 	userland/desktop/librdp/client.c \
-	userland/desktop/librdp/server.c
+	userland/desktop/librdp/server.c \
+	userland/desktop/librdp/credssp.c

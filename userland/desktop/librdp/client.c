@@ -918,60 +918,98 @@ handle_gfx_pdu(
 	uint32_t ts;
 	uint32_t fid;
 	struct rdp_avc_stream avc;
+	struct rdp_buf zgfx_unwrapped;
 	int error;
+	rdp_buf_init(&zgfx_unwrapped);
+	if (len >= 2U && data[0] == 0xE0U && (data[1] & 0x20U) == 0U) {
+		data += 2U;
+		len -= 2U;
+	} else if (len >= 7U && data[0] == 0xE1U) {
+		struct rdp_reader zr;
+		uint16_t seg_count;
+		uint32_t uncomp_size;
+		uint16_t si;
+		rdp_reader_init(&zr, data + 1U, len - 1U);
+		if (rdp_read_u16_le(&zr, &seg_count) == RDP_OK &&
+		    rdp_read_u32_le(&zr, &uncomp_size) == RDP_OK) {
+			for (si = 0U; si < seg_count; si++) {
+				uint32_t seg_sz;
+				uint8_t seg_flags;
+				const uint8_t *seg_ptr;
+				if (rdp_read_u32_le(&zr, &seg_sz) != RDP_OK ||
+				    seg_sz < 1U ||
+				    rdp_read_u8(&zr, &seg_flags) != RDP_OK ||
+				    (seg_flags & 0x20U) != 0U ||
+				    rdp_read_bytes(&zr, &seg_ptr,
+						   (size_t)(seg_sz - 1U)) != RDP_OK ||
+				    rdp_buf_append(&zgfx_unwrapped, seg_ptr,
+						   (size_t)(seg_sz - 1U)) != RDP_OK) {
+					rdp_buf_free(&zgfx_unwrapped);
+					return RDP_ERR_PROTO;
+				}
+			}
+			data = zgfx_unwrapped.data;
+			len = zgfx_unwrapped.len;
+		}
+	}
 	error = rdp_gfx_decode_header(data, len, &cmd_id, &body, &body_len);
-	if (error != RDP_OK)
+	if (error != RDP_OK) {
+		rdp_buf_free(&zgfx_unwrapped);
 		return error;
+	}
 	if (cmd_id == RDPGFX_CMD_CAPS_CONFIRM) {
-		return rdp_gfx_decode_caps_confirm(body, body_len, &ver);
+		error = rdp_gfx_decode_caps_confirm(body, body_len, &ver);
+		goto out;
 	} else if (cmd_id == RDPGFX_CMD_RESET_GRAPHICS) {
 		rdp_reader_init(&r, body, body_len);
 		error = rdp_read_u32_le(&r, &w);
 		if (error != RDP_OK)
-			return error;
+			goto out;
 		error = rdp_read_u32_le(&r, &h);
 		if (error != RDP_OK)
-			return error;
+			goto out;
 		if (w != c->cfg.width || h != c->cfg.height) {
 			c->cfg.width = w;
 			c->cfg.height = h;
 			if (c->cb.on_resize != NULL)
 				c->cb.on_resize(c->user, w, h);
 		}
-		return RDP_OK;
+		error = RDP_OK;
+		goto out;
 	} else if (cmd_id == RDPGFX_CMD_START_FRAME) {
 		rdp_reader_init(&r, body, body_len);
 		error = rdp_read_u32_le(&r, &ts);
 		if (error != RDP_OK)
-			return error;
+			goto out;
 
 		UNUSED_PARAMETER(ts);
 		error = rdp_read_u32_le(&r, &c->cur_frame_id);
 		if (error != RDP_OK)
-			return error;
+			goto out;
 		c->has_pending_frame = 0;
-		return RDP_OK;
+		error = RDP_OK;
+		goto out;
 	} else if (cmd_id == RDPGFX_CMD_WIRE_TO_SURFACE_1) {
 		error = rdp_gfx_decode_avc_pdu(
 			body, body_len, &c->cur_codec_id, &avc,
 			c->luma_rects, c->luma_quants,
 			c->chroma_rects, c->chroma_quants, RDP_MAX_AVC_RECTS);
 		if (error != RDP_OK)
-			return error;
+			goto out;
 		rdp_buf_clear(&c->frame_copy);
 		c->chroma_off = 0U;
 		if (avc.luma.data != NULL && avc.luma.data_len > 0U) {
 			error = rdp_buf_append(&c->frame_copy, avc.luma.data,
 					       avc.luma.data_len);
 			if (error != RDP_OK)
-				return error;
+				goto out;
 		}
 		c->chroma_off = c->frame_copy.len;
 		if (avc.chroma.data != NULL && avc.chroma.data_len > 0U) {
 			error = rdp_buf_append(&c->frame_copy, avc.chroma.data,
 					       avc.chroma.data_len);
 			if (error != RDP_OK)
-				return error;
+				goto out;
 		}
 		c->cur_avc = avc;
 		if (avc.luma.data_len > 0U)
@@ -979,18 +1017,23 @@ handle_gfx_pdu(
 		if (avc.chroma.data_len > 0U)
 			c->cur_avc.chroma.data = c->frame_copy.data + c->chroma_off;
 		c->has_pending_frame = 1;
-		return RDP_OK;
+		error = RDP_OK;
+		goto out;
 	} else if (cmd_id == RDPGFX_CMD_END_FRAME) {
 		rdp_reader_init(&r, body, body_len);
 		error = rdp_read_u32_le(&r, &fid);
 		if (error != RDP_OK)
-			return error;
+			goto out;
 		if (c->has_pending_frame != 0 && c->cb.on_avc_frame != NULL) {
 			c->cb.on_avc_frame(c->user, fid, c->cur_codec_id,
 					   &c->cur_avc);
 		}
 		c->has_pending_frame = 0;
-		return RDP_OK;
+		error = RDP_OK;
+		goto out;
 	}
-	return RDP_OK;
+	error = RDP_OK;
+out:
+	rdp_buf_free(&zgfx_unwrapped);
+	return error;
 }

@@ -992,6 +992,25 @@ SSL_CTX_generate_self_signed(
 }
 
 /*
+ * Returns the DER-encoded leaf certificate configured on the context.
+ */
+int
+SSL_CTX_get0_certificate_ASN1(
+	SSL_CTX *ctx,
+	const uint8_t **der,
+	size_t *len)
+{
+	if (ctx == NULL || der == NULL || len == NULL)
+		return 0;
+
+	cryc_os_mutex_lock(&ctx->lock);
+	*der = ctx->cert_der;
+	*len = ctx->cert_der_len;
+	cryc_os_mutex_unlock(&ctx->lock);
+	return (*der != NULL && *len > 0U) ? 1 : 0;
+}
+
+/*
  * Reads up to length bytes of application data (running the handshake
  * first when it is not done).  A length of 0 or less returns -1 with
  * SSL_R_BAD_LENGTH queued (SSL_ERROR_SSL).  Returns the count (> 0), or 0

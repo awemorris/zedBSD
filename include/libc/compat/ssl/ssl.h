@@ -224,6 +224,7 @@ int SSL_CTX_use_PrivateKey_ASN1(int pk, SSL_CTX *ctx, const unsigned char *d, lo
 int SSL_CTX_use_certificate_file(SSL_CTX *ctx, const char *file, int type);
 int SSL_CTX_use_PrivateKey_file(SSL_CTX *ctx, const char *file, int type);
 int SSL_CTX_generate_self_signed(SSL_CTX *ctx, const char *common_name);
+int SSL_CTX_get0_certificate_ASN1(SSL_CTX *ctx, const uint8_t **der, size_t *len);
 
 /*
  * Reads up to length bytes of application data (running the handshake

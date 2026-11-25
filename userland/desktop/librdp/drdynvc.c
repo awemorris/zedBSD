@@ -290,6 +290,55 @@ fail:
 }
 
 /*
+ * Encodes a DYNVC_DATA_FIRST PDU carrying the first fragment of a message.
+ */
+int
+rdp_dynvc_encode_data_first(
+	struct rdp_buf *out,
+	uint32_t channel_id,
+	uint32_t total_len,
+	const uint8_t *payload,
+	size_t len)
+{
+	struct rdp_buf ch_buf;
+	struct rdp_buf len_buf;
+	uint8_t cbid;
+	uint8_t len_cbid;
+	int error;
+
+	rdp_buf_init(&ch_buf);
+	rdp_buf_init(&len_buf);
+	error = append_var_uint(&ch_buf, channel_id, &cbid);
+	if (error != RDP_OK)
+		goto fail;
+	error = append_var_uint(&len_buf, total_len, &len_cbid);
+	if (error != RDP_OK)
+		goto fail;
+	error = rdp_buf_append_u8(out,
+		(uint8_t)((DYNVC_CMD_DATA_FIRST << 4) |
+			  ((len_cbid & 0x03U) << 2) | (cbid & 0x03U)));
+	if (error != RDP_OK)
+		goto fail;
+	error = rdp_buf_append(out, ch_buf.data, ch_buf.len);
+	if (error != RDP_OK)
+		goto fail;
+	error = rdp_buf_append(out, len_buf.data, len_buf.len);
+	if (error != RDP_OK)
+		goto fail;
+	error = rdp_buf_append(out, payload, len);
+	if (error != RDP_OK)
+		goto fail;
+	rdp_buf_free(&ch_buf);
+	rdp_buf_free(&len_buf);
+	return RDP_OK;
+
+fail:
+	rdp_buf_free(&ch_buf);
+	rdp_buf_free(&len_buf);
+	return error;
+}
+
+/*
  * Encodes a DYNVC_CLOSE_REQ PDU closing channel_id.
  */
 int

@@ -270,7 +270,7 @@ rdp_mcs_decode_connect_initial(
 int
 rdp_mcs_encode_connect_response(
 	struct rdp_buf *out,
-	uint16_t drdynvc_channel)
+	uint16_t channel_count)
 {
 	struct rdp_buf udata;
 	struct rdp_buf gcc;
@@ -311,26 +311,35 @@ rdp_mcs_encode_connect_response(
 	if (error != RDP_OK)
 		goto fail;
 
-	/* Appends SC_NET (0x0C03) announcing the drdynvc static channel ID. */
-	if (drdynvc_channel != 0U) {
+	/* Appends SC_NET (0x0C03) announcing static channel IDs matching CS_NET. */
+	if (channel_count > 0U) {
+		uint16_t pad = (channel_count & 1U) ? 2U : 0U;
+		uint16_t sc_len = (uint16_t)(8U + channel_count * 2U + pad);
+		uint16_t ci;
+
 		error = rdp_buf_append_u16_le(&udata, UDATA_SC_NET);
 		if (error != RDP_OK)
 			goto fail;
-		error = rdp_buf_append_u16_le(&udata, 12U);
+		error = rdp_buf_append_u16_le(&udata, sc_len);
 		if (error != RDP_OK)
 			goto fail;
 		error = rdp_buf_append_u16_le(&udata, RDP_MCS_IO_CHANNEL);
 		if (error != RDP_OK)
 			goto fail;
-		error = rdp_buf_append_u16_le(&udata, 1U);
+		error = rdp_buf_append_u16_le(&udata, channel_count);
 		if (error != RDP_OK)
 			goto fail;
-		error = rdp_buf_append_u16_le(&udata, drdynvc_channel);
-		if (error != RDP_OK)
-			goto fail;
-		error = rdp_buf_append_u16_le(&udata, 0U);
-		if (error != RDP_OK)
-			goto fail;
+		for (ci = 0U; ci < channel_count; ci++) {
+			error = rdp_buf_append_u16_le(&udata,
+			    (uint16_t)(RDP_MCS_DRDYNVC_CHANNEL + ci));
+			if (error != RDP_OK)
+				goto fail;
+		}
+		if (pad != 0U) {
+			error = rdp_buf_append_u16_le(&udata, 0U);
+			if (error != RDP_OK)
+				goto fail;
+		}
 	} else {
 		error = rdp_buf_append_u16_le(&udata, UDATA_SC_NET);
 		if (error != RDP_OK)
@@ -348,14 +357,27 @@ rdp_mcs_encode_connect_response(
 
 	/* Wraps server user data in GCC Conference Create Response. */
 	{
-		static const uint8_t gcc_rsp_hdr[14] = {
-			0x00U, 0x05U, 0x00U, 0x14U, 0x7CU, 0x00U, 0x01U,
-			0x2AU, 0x14U, 0x76U, 0x0AU, 0x01U, 0x01U, 0x00U
+		static const uint8_t gcc_rsp_prefix[7] = {
+			0x00U, 0x05U, 0x00U, 0x14U, 0x7CU, 0x00U, 0x01U
 		};
-		static const uint8_t gcc_rsp_key[6] = {
-			0x01U, 0xC0U, 0x4DU, 0x63U, 0x44U, 0x6EU
+		static const uint8_t gcc_rsp_mid[6] = {
+			0x14U, 0x76U, 0x0AU, 0x01U, 0x01U, 0x00U
 		};
-		error = rdp_buf_append(&gcc, gcc_rsp_hdr, sizeof(gcc_rsp_hdr));
+		static const uint8_t gcc_rsp_key[7] = {
+			0x01U, 0xC0U, 0x00U, 0x4DU, 0x63U, 0x44U, 0x6EU
+		};
+		size_t udata_len_bytes = (udata.len < 0x80U) ? 1U : 2U;
+
+		error = rdp_buf_append(&gcc, gcc_rsp_prefix,
+		    sizeof(gcc_rsp_prefix));
+		if (error != RDP_OK)
+			goto fail;
+		error = per_append_len(&gcc,
+		    sizeof(gcc_rsp_mid) + sizeof(gcc_rsp_key) +
+		    udata_len_bytes + udata.len);
+		if (error != RDP_OK)
+			goto fail;
+		error = rdp_buf_append(&gcc, gcc_rsp_mid, sizeof(gcc_rsp_mid));
 		if (error != RDP_OK)
 			goto fail;
 		error = rdp_buf_append(&gcc, gcc_rsp_key, sizeof(gcc_rsp_key));
@@ -479,9 +501,15 @@ rdp_mcs_decode_connect_response(
 	if (error != RDP_OK)
 		return error;
 
-	/* Skips the 20-byte GCC Conference Create Response header. */
+	/* Skips the GCC Conference Create Response header (OID + connectPDU len + body + McDn key). */
 	rdp_reader_init(&r, gcc_data, gcc_len);
-	error = rdp_skip_bytes(&r, 20U);
+	error = rdp_skip_bytes(&r, 7U);
+	if (error != RDP_OK)
+		return error;
+	error = per_read_len(&r, &slice_len);
+	if (error != RDP_OK)
+		return error;
+	error = rdp_skip_bytes(&r, 13U);
 	if (error != RDP_OK)
 		return error;
 	error = per_read_len(&r, &slice_len);
@@ -1273,6 +1301,9 @@ parse_user_data_blocks(
 			error = rdp_read_u32_le(&br, &ch_count);
 			if (error != RDP_OK)
 				return error;
+			if (ch_count > 31U)
+				ch_count = 31U;
+			info->channel_count = 0U;
 			for (i = 0; i < ch_count && rdp_reader_rem(&br) >= 12U; i++) {
 				error = rdp_read_bytes(&br, &cname, 8U);
 				if (error != RDP_OK)
@@ -1280,8 +1311,12 @@ parse_user_data_blocks(
 				error = rdp_skip_bytes(&br, 4U);
 				if (error != RDP_OK)
 					return error;
-				if (memcmp(cname, "drdynvc", 7U) == 0)
+				info->channel_count = i + 1U;
+				if (memcmp(cname, "drdynvc", 7U) == 0) {
 					info->has_drdynvc = 1;
+					info->drdynvc_channel = (uint16_t)(
+					    RDP_MCS_DRDYNVC_CHANNEL + i);
+				}
 			}
 		} else if (btype == UDATA_SC_NET && blen >= 8U) {
 			error = rdp_read_u16_le(&br, &io_ch);

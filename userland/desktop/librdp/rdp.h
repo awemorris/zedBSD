@@ -27,6 +27,7 @@
 #define RDP_ERR_SHORT			(-5)
 #define RDP_ERR_UNSUPPORTED		(-6)
 #define RDP_ERR_IO			(-7)
+#define RDP_ERR_AUTH			(-8)
 
 /* Negotiation protocol flags from MS-RDPBCGR. */
 #define RDP_NEG_PROTO_RDP		0x00000000U
@@ -130,6 +131,8 @@ struct rdp_callbacks {
 	void (*on_input_sync)(void *user, uint32_t toggle_flags);
 	void (*on_auth_request)(void *user, const char *domain,
 				const char *user_name, const char *password);
+	int (*on_ntlm_lookup)(void *user, const char *domain,
+			      const char *user_name, uint8_t out_nt_hash[16]);
 	void (*on_disconnect)(void *user, uint32_t error_info);
 };
 
@@ -151,6 +154,8 @@ struct rdp_client_config {
 struct rdp_server_config {
 	uint32_t width;
 	uint32_t height;
+	const uint8_t *tls_cert_der;
+	size_t tls_cert_der_len;
 };
 
 struct rdp_client;
@@ -192,6 +197,7 @@ int rdp_server_feed(struct rdp_server *server, const uint8_t *data,
 		    size_t len);
 int rdp_server_needs_tls(const struct rdp_server *server);
 int rdp_server_is_connected(const struct rdp_server *server);
+int rdp_server_is_gfx_ready(const struct rdp_server *server);
 int rdp_server_accept_auth(struct rdp_server *server);
 int rdp_server_reject_auth(struct rdp_server *server, uint32_t error_info);
 int rdp_server_disconnect(struct rdp_server *server, uint32_t error_info);
@@ -203,5 +209,8 @@ int rdp_server_send_avc_frame(struct rdp_server *server, uint16_t codec_id,
 int rdp_server_resize(struct rdp_server *server, uint32_t width,
 		      uint32_t height);
 uint32_t rdp_server_unacked_frames(const struct rdp_server *server);
+
+/* Computes the 16-byte NTLM NT hash = MD4(UTF16LE(password)). */
+void rdp_ntlm_nt_hash(const char *password, uint8_t out[16]);
 
 #endif

@@ -75,19 +75,23 @@ int
 rdp_gfx_decode_caps_advertise(
 	const uint8_t *data,
 	size_t len,
-	uint32_t *best_version)
+	uint32_t *best_version,
+	uint32_t *best_flags)
 {
 	struct rdp_reader r;
 	uint16_t count;
 	uint16_t i;
 	uint32_t ver;
 	uint32_t dlen;
+	uint32_t cflags;
 	uint32_t chosen;
+	uint32_t chosen_flags;
 	int error;
 
 	/* Initializes the cursor over the advertise body. */
 	rdp_reader_init(&r, data, len);
 	chosen = 0U;
+	chosen_flags = 0U;
 	error = rdp_read_u16_le(&r, &count);
 	if (error != RDP_OK)
 		return error;
@@ -100,19 +104,35 @@ rdp_gfx_decode_caps_advertise(
 		error = rdp_read_u32_le(&r, &dlen);
 		if (error != RDP_OK)
 			return error;
-		error = rdp_skip_bytes(&r, dlen);
-		if (error != RDP_OK)
-			return error;
+		cflags = 0U;
+		if (dlen >= 4U) {
+			error = rdp_read_u32_le(&r, &cflags);
+			if (error != RDP_OK)
+				return error;
+			if (dlen > 4U) {
+				error = rdp_skip_bytes(&r, dlen - 4U);
+				if (error != RDP_OK)
+					return error;
+			}
+		} else if (dlen > 0U) {
+			error = rdp_skip_bytes(&r, dlen);
+			if (error != RDP_OK)
+				return error;
+		}
 		if (ver == RDPGFX_CAPVERSION_106 ||
 		    ver == RDPGFX_CAPVERSION_104 ||
 		    ver == RDPGFX_CAPVERSION_81) {
-			if (ver > chosen)
+			if (ver > chosen) {
 				chosen = ver;
+				chosen_flags = cflags;
+			}
 		}
 	}
 	if (chosen == 0U)
 		return RDP_ERR_UNSUPPORTED;
 	*best_version = chosen;
+	if (best_flags != NULL)
+		*best_flags = chosen_flags;
 
 	/* Succeeded: compatible RDPEGFX capability version chosen. */
 	return RDP_OK;
@@ -124,15 +144,16 @@ rdp_gfx_decode_caps_advertise(
 int
 rdp_gfx_encode_caps_confirm(
 	struct rdp_buf *out,
-	uint32_t version)
+	uint32_t version,
+	uint32_t client_flags)
 {
 	uint32_t flags;
 	int error;
 
-	/* Sets AVC420_ENABLED explicitly when confirming version 8.1. */
-	flags = RDPGFX_CAPS_FLAG_THINCLIENT;
+	/* Only confirms capability flags that the client actually advertised. */
+	flags = client_flags & RDPGFX_CAPS_FLAG_THINCLIENT;
 	if (version == RDPGFX_CAPVERSION_81)
-		flags |= RDPGFX_CAPS_FLAG_AVC420_ENABLED;
+		flags |= (client_flags & RDPGFX_CAPS_FLAG_AVC420_ENABLED);
 	error = encode_gfx_hdr(out, RDPGFX_CMD_CAPS_CONFIRM, 12U);
 	if (error != RDP_OK)
 		return error;
