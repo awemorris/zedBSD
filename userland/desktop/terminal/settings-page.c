@@ -3510,6 +3510,9 @@ page_extended_display(
 	connected = 0;
 	if (ops->status != NULL)
 		(void)ops->status(page.program->extdisp_data, status, sizeof(status), &connected);
+	if (connected && strncmp(status, "Connected to ", 13) == 0 &&
+	    strncmp(page.extdisp_message.text, "Connecting to ", 14) == 0)
+		page_say(&page.extdisp_message, 0, "");
 	if (status[0] == '\0')
 		(void)snprintf(status, sizeof(status), "Listening for DisplaySink (Display Mode) on UDP 33890.");
 

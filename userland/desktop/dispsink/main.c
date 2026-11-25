@@ -685,11 +685,15 @@ main(
 			} else if (ev.kind == KL_APP_POST &&
 				   ev.code == RDP_APP_POST_FRAME) {
 				if (session != NULL) {
-					if (!logged_first_frame) {
-						dispsink_log("ui: first frame presented %ux%u", win_w, win_h);
-						logged_first_frame = 1;
-					}
 					present_rdp_canvas(win, session, canvas, win_w, win_h);
+					if (logged_first_frame < 3) {
+						uint32_t cx = win_w / 2U;
+						uint32_t cy = win_h / 2U;
+						uint32_t px = canvas[(size_t)cy * win_w + cx];
+						logged_first_frame++;
+						dispsink_log("ui: frame %d presented %ux%u center=0x%08x",
+						    logged_first_frame, win_w, win_h, px);
+					}
 				}
 			} else if (ev.kind == KL_APP_POST &&
 				   ev.code == RDP_APP_POST_END) {

@@ -112,6 +112,8 @@ struct extdisp_session {
 	int authed;
 	int connected;
 	int running;
+	uint32_t frames_sent;
+	uint32_t frames_acked;
 };
 
 struct extdisp_state {
@@ -184,16 +186,40 @@ static void
 fill_standby_i420(
 	uint32_t width,
 	uint32_t height,
+	uint32_t frame_num,
 	uint8_t *y_plane,
 	uint8_t *u_plane,
 	uint8_t *v_plane)
 {
-	size_t y_sz = (size_t)width * height;
-	size_t uv_sz = ((size_t)width / 2U) * ((size_t)height / 2U);
+	static const uint8_t bar_y[8] = { 235U, 210U, 170U, 145U, 106U, 81U, 41U, 16U };
+	static const uint8_t bar_u[8] = { 128U,  16U, 166U,  54U, 202U, 90U, 240U, 128U };
+	static const uint8_t bar_v[8] = { 128U, 146U,  16U,  34U, 222U, 240U, 110U, 128U };
+	uint32_t y;
+	uint32_t x;
+	uint32_t uv_w = width / 2U;
+	uint32_t bar_y0 = (frame_num * 8U) % (height > 16U ? height - 16U : 1U);
 
-	memset(y_plane, 32, y_sz);
-	memset(u_plane, 132, uv_sz);
-	memset(v_plane, 124, uv_sz);
+	for (y = 0U; y < height; y++) {
+		uint8_t *ydst = y_plane + (size_t)y * width;
+		int in_band = (y >= bar_y0 && y < bar_y0 + 16U);
+		for (x = 0U; x < width; x++) {
+			uint32_t idx = (x * 8U) / (width > 0U ? width : 1U);
+			if (idx > 7U)
+				idx = 7U;
+			ydst[x] = in_band ? 235U : bar_y[idx];
+		}
+		if ((y & 1U) == 0U && y + 1U < height) {
+			uint8_t *udst = u_plane + (size_t)(y / 2U) * uv_w;
+			uint8_t *vdst = v_plane + (size_t)(y / 2U) * uv_w;
+			for (x = 0U; x < uv_w; x++) {
+				uint32_t idx = (x * 8U) / (uv_w > 0U ? uv_w : 1U);
+				if (idx > 7U)
+					idx = 7U;
+				udst[x] = in_band ? 128U : bar_u[idx];
+				vdst[x] = in_band ? 128U : bar_v[idx];
+			}
+		}
+	}
 }
 
 struct extdisp_mon_search {
@@ -341,6 +367,26 @@ cb_on_connected(
 	(void)height;
 	mikuterm_log("extdisp: connected %ux%u", width, height);
 	s->connected = 1;
+	EnterCriticalSection(&extdisp.lock);
+	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text),
+	    "Connected to %s (%ux%u).", s->target_name, s->width, s->height);
+	LeaveCriticalSection(&extdisp.lock);
+}
+
+static void
+cb_on_frame_ack(
+	void *user,
+	uint32_t frame_id,
+	uint32_t queue_depth,
+	uint32_t total_decoded)
+{
+	struct extdisp_session *s = (struct extdisp_session *)user;
+
+	(void)queue_depth;
+	(void)total_decoded;
+	s->frames_acked++;
+	if (s->frames_acked == 1U)
+		mikuterm_log("extdisp: first frame_ack fid=%u", frame_id);
 }
 
 static void
@@ -454,9 +500,9 @@ extdisp_sw_callback(
 	PCWSTR pszDeviceInstanceId)
 {
 	(void)hSwDevice;
-	(void)CreateResult;
 	(void)pContext;
 	(void)pszDeviceInstanceId;
+	mikuterm_log("extdisp: SwDevice callback hr=0x%08lx", (unsigned long)CreateResult);
 }
 
 static void
@@ -467,6 +513,7 @@ extdisp_try_create_sw_device(struct extdisp_session *s)
 	extdisp_sw_close_fn sw_close;
 	struct extdisp_sw_create_info info;
 	static const WCHAR hw_ids[] = L"Root\\MikutermIdd\0";
+	HRESULT hr;
 
 	mod = LoadLibraryExW(L"cfgmgr32.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
 	if (mod == NULL)
@@ -486,18 +533,21 @@ extdisp_try_create_sw_device(struct extdisp_session *s)
 	info.CapabilityFlags = 0x1U | 0x2U;
 	info.pszDeviceDescription = L"mikuterm Virtual Display";
 
-	if (FAILED(sw_create(L"Root", L"HTREE\\ROOT\\0", &info, 0, NULL,
-	    extdisp_sw_callback, NULL, &s->sw_device))) {
+	hr = sw_create(L"Root", L"HTREE\\ROOT\\0", &info, 0, NULL,
+	    extdisp_sw_callback, NULL, &s->sw_device);
+	if (FAILED(hr)) {
+		mikuterm_log("extdisp: SwDeviceCreate failed hr=0x%08lx", (unsigned long)hr);
 		s->sw_device = NULL;
 		FreeLibrary(mod);
 		return;
 	}
+	mikuterm_log("extdisp: SwDeviceCreate ok");
 	s->cfgmgr32 = mod;
 	s->sw_close = sw_close;
 }
 
 static void
-extdisp_open_driver_shm(struct extdisp_session *s)
+extdisp_open_driver_shm(struct extdisp_session *s, int log_fail)
 {
 	s->shm_handle = OpenFileMappingW(FILE_MAP_READ, FALSE, MIKUTERM_IDD_SHM_NAME);
 	if (s->shm_handle != NULL) {
@@ -506,15 +556,23 @@ extdisp_open_driver_shm(struct extdisp_session *s)
 		if (s->shm_hdr == NULL ||
 		    s->shm_hdr->magic != MIKUTERM_IDD_SHM_MAGIC ||
 		    s->shm_hdr->version != MIKUTERM_IDD_SHM_VERSION) {
+			mikuterm_log("extdisp: driver SHM invalid hdr=%p", (const void *)s->shm_hdr);
 			if (s->shm_hdr != NULL) {
 				UnmapViewOfFile(s->shm_hdr);
 				s->shm_hdr = NULL;
 			}
 			CloseHandle(s->shm_handle);
 			s->shm_handle = NULL;
+		} else {
+			mikuterm_log("extdisp: driver SHM opened active=%u %ux%u",
+			    s->shm_hdr->active, s->shm_hdr->width, s->shm_hdr->height);
 		}
+	} else if (log_fail) {
+		mikuterm_log("extdisp: driver SHM not present err=%lu (using standby pattern)",
+		    (unsigned long)GetLastError());
 	}
-	s->frame_event = OpenEventW(SYNCHRONIZE, FALSE, MIKUTERM_IDD_EVENT_NAME);
+	if (s->frame_event == NULL)
+		s->frame_event = OpenEventW(SYNCHRONIZE, FALSE, MIKUTERM_IDD_EVENT_NAME);
 }
 
 static void
@@ -596,7 +654,7 @@ extdisp_session_thread(LPVOID param)
 
 	(void)param;
 	extdisp_try_create_sw_device(s);
-	extdisp_open_driver_shm(s);
+	extdisp_open_driver_shm(s, 1);
 
 	start_ms = GetTickCount64();
 	while (!s->stop && !extdisp.stop && (GetTickCount64() - start_ms) < EXTDISP_ACCEPT_MS) {
@@ -670,6 +728,7 @@ extdisp_session_thread(LPVOID param)
 	cb.on_auth_request = cb_on_auth_request;
 	cb.on_ntlm_lookup = cb_on_ntlm_lookup;
 	cb.on_connected = cb_on_connected;
+	cb.on_frame_ack = cb_on_frame_ack;
 	cb.on_input_key = cb_on_input_key;
 	cb.on_input_unicode = cb_on_input_unicode;
 	cb.on_input_mouse = cb_on_input_mouse;
@@ -693,7 +752,7 @@ extdisp_session_thread(LPVOID param)
 
 	EnterCriticalSection(&extdisp.lock);
 	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text),
-	    "Connected to %s (%ux%u).", s->target_name, s->width, s->height);
+	    "Handshaking with %s...", s->target_name);
 	LeaveCriticalSection(&extdisp.lock);
 
 	s->running = 1;
@@ -701,6 +760,7 @@ extdisp_session_thread(LPVOID param)
 	{
 		int logged_gfx_ready = 0;
 		int logged_first_frame = 0;
+		ULONGLONG last_shm_retry_ms = GetTickCount64();
 
 	while (s->running && !s->stop && !extdisp.stop) {
 		fd_set rfds;
@@ -782,6 +842,11 @@ extdisp_session_thread(LPVOID param)
 				logged_gfx_ready = 1;
 			}
 
+			if (s->shm_hdr == NULL && (now_ms - last_shm_retry_ms) >= 1000ULL) {
+				last_shm_retry_ms = now_ms;
+				extdisp_open_driver_shm(s, 0);
+			}
+
 			if (s->shm_hdr != NULL && s->shm_hdr->active != 0U) {
 				uint32_t seq = s->shm_hdr->frame_seq;
 				if (seq != s->last_frame_seq &&
@@ -797,7 +862,7 @@ extdisp_session_thread(LPVOID param)
 					have_frame = 1;
 				}
 			} else if (now_ms - last_frame_ms >= 66ULL) {
-				fill_standby_i420(s->width, s->height,
+				fill_standby_i420(s->width, s->height, s->frames_sent,
 				    s->y_plane, s->u_plane, s->v_plane);
 				have_frame = 1;
 			}
@@ -847,6 +912,7 @@ extdisp_session_thread(LPVOID param)
 							s->running = 0;
 							break;
 						}
+						s->frames_sent++;
 						if (!logged_first_frame) {
 							mikuterm_log("extdisp: first frame sent fid=%u size=%zu", frame_id, pkt.size);
 							logged_first_frame = 1;
@@ -859,7 +925,8 @@ extdisp_session_thread(LPVOID param)
 		}
 	}
 	}
-	mikuterm_log("extdisp: session loop ended running=%d stop=%d", s->running, s->stop);
+	mikuterm_log("extdisp: session loop ended running=%d stop=%d sent=%u acked=%u",
+	    s->running, s->stop, s->frames_sent, s->frames_acked);
 
 	EnterCriticalSection(&extdisp.lock);
 	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text), "Idle.");
