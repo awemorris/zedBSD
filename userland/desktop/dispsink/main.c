@@ -339,7 +339,7 @@ draw_waiting_screen(
 
 	if (canvas == NULL || w == 0U || h == 0U)
 		return;
-	if (kl_canvas_init(&c, canvas, (size_t)w * 4U, (int)w, (int)h) != 0)
+	if (kl_canvas_init(&c, canvas, (size_t)w, (int)w, (int)h) != 0)
 		return;
 	full.x = 0;
 	full.y = 0;
