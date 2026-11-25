@@ -19,6 +19,7 @@
  */
 
 #include "mikuterm.h"
+#include "extdisp.h"
 #include "session.h"
 #include "sftp-view.h"
 #include "vi-connection-win32.h"
@@ -207,7 +208,9 @@ wWinMain(
 	run.data = &main_state;
 
 	/* The run, until the last tab or the window closes; then the threads have a while to say goodbye. */
+	(void)mikuterm_extdisp_start();
 	status = terminal_run(&run, &result);
+	mikuterm_extdisp_stop();
 	(void)mikuterm_connections_wait(MAIN_FAREWELL_MS);
 
 	/* A run that failed says what failed. */

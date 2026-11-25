@@ -936,6 +936,13 @@ main(
 	signal(SIGINT, on_sig);
 	signal(SIGTERM, on_sig);
 	signal(SIGPIPE, SIG_IGN);
+	{
+		struct sigaction sa;
+		memset(&sa, 0, sizeof(sa));
+		sa.sa_handler = SIG_IGN;
+		sa.sa_flags = SA_NOCLDWAIT;
+		(void)sigaction(SIGCHLD, &sa, NULL);
+	}
 	ssl_ctx = SSL_CTX_new(TLS_server_method());
 	if (ssl_ctx == NULL)
 		return 1;
@@ -991,6 +998,7 @@ main(
 		/* Forks a worker child for the accepted client. */
 		pid = fork();
 		if (pid == 0) {
+			signal(SIGCHLD, SIG_DFL);
 			close(listen_fd);
 			handle_client(client_fd, ssl_ctx);
 			SSL_CTX_free(ssl_ctx);

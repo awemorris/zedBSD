@@ -29,7 +29,8 @@
 #define TERMINAL_PANE_APPEARANCE	1U
 #define TERMINAL_PANE_BEHAVIOR		2U
 #define TERMINAL_PANE_KEYS		3U
-#define TERMINAL_PANES			4U
+#define TERMINAL_PANE_EXTENDED_DISPLAY	4U
+#define TERMINAL_PANES			5U
 
 /* What a program's setting holds: text, or a whole number. */
 #define TERMINAL_ITEM_TEXT		0U
@@ -65,6 +66,28 @@ struct terminal_page_item {
 	unsigned kind;
 	unsigned effect;
 	const char *hint;
+};
+
+/* The most discovered Extended Display peers shown in the Extended Display pane. */
+#define TERMINAL_EXTDISP_DEVICES_MAX	16U
+
+/* One discovered Network Display peer shown in the Extended Display pane. */
+struct terminal_extdisp_device {
+	char device_id[33];
+	char name[64];
+	char address[64];
+	char fingerprint[16];
+	unsigned width;
+	unsigned height;
+	int connected;
+};
+
+/* Callbacks for the Extended Display pane (NULL on platforms without host support). */
+struct terminal_extdisp_ops {
+	unsigned (*list)(void *data, struct terminal_extdisp_device *out, unsigned cap);
+	int (*status)(void *data, char *text, size_t size, int *connected);
+	int (*connect)(void *data, const char *device_id, char *why, size_t size);
+	void (*disconnect)(void *data);
 };
 
 /*
@@ -123,6 +146,8 @@ struct terminal_page_program {
 	int (*rdp_password_get)(void *data, const char *host, uint16_t port, const char *user, char *password, size_t size);
 	int (*rdp_password_set)(void *data, const char *host, uint16_t port, const char *user, const char *password);
 	void (*rdp_password_del)(void *data, const char *host, uint16_t port, const char *user);
+	const struct terminal_extdisp_ops *extdisp;
+	void *extdisp_data;
 };
 
 /*

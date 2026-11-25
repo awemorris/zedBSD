@@ -847,6 +847,7 @@ thread_hosts_read(
 			error = ssh_config_parse(config, text, size, hosts->names[index], error_text);
 			if (error != 0)
 				continue;
+			ssh_config_defaults(config);
 
 			/* Its User, Port, HostName and RDP settings. */
 			(void)snprintf(hosts->host_names[index], sizeof(hosts->host_names[index]), "%s", config->host_name);
@@ -980,17 +981,19 @@ thread_ssh_rdp_check(
 	config = malloc(sizeof(*config));
 	if (config != NULL) {
 		ssh_config_init(config);
-		if (ssh_config_parse(config, text, size, target->host, error_text) == 0 &&
-		    config->use_rdp != 0) {
-			memset(rdp_target, 0, sizeof(*rdp_target));
-			(void)snprintf(rdp_target->name, sizeof(rdp_target->name), "%s", target->host);
-			(void)snprintf(rdp_target->host_name, sizeof(rdp_target->host_name), "%s",
-				       config->host_name[0] != '\0' ? config->host_name : target->host);
-			rdp_target->port = target->port != 0U ? target->port
-					   : (config->port != 0U ? config->port : 3389U);
-			(void)snprintf(rdp_target->user, sizeof(rdp_target->user), "%s",
-				       target->user[0] != '\0' ? target->user : config->user);
-			found = 1;
+		if (ssh_config_parse(config, text, size, target->host, error_text) == 0) {
+			ssh_config_defaults(config);
+			if (config->use_rdp != 0) {
+				memset(rdp_target, 0, sizeof(*rdp_target));
+				(void)snprintf(rdp_target->name, sizeof(rdp_target->name), "%s", target->host);
+				(void)snprintf(rdp_target->host_name, sizeof(rdp_target->host_name), "%s",
+					       config->host_name[0] != '\0' ? config->host_name : target->host);
+				rdp_target->port = target->port != 0U ? target->port
+						   : (config->port != 0U ? config->port : 3389U);
+				(void)snprintf(rdp_target->user, sizeof(rdp_target->user), "%s",
+					       target->user[0] != '\0' ? target->user : config->user);
+				found = 1;
+			}
 		}
 		free(config);
 	}
@@ -1167,7 +1170,16 @@ thread_rdp(
 		text = NULL;
 		size = 0U;
 		if (mikuterm_file_read(path, MIKUTERM_HOSTS_MAX, &text, &size) == 0) {
-			(void)rdp_hosts_parse(text, size, 3389U, &choice->rdp_hosts);
+			struct rdp_host_list *file_hosts;
+
+			file_hosts = malloc(sizeof(*file_hosts));
+			if (file_hosts != NULL) {
+				if (rdp_hosts_parse(text, size, 3389U, file_hosts) == 0) {
+					for (index = 0U; index < file_hosts->count && choice->rdp_hosts.count < RDP_HOSTS_MAX; index++)
+						choice->rdp_hosts.entries[choice->rdp_hosts.count++] = file_hosts->entries[index];
+				}
+				free(file_hosts);
+			}
 			free(text);
 		}
 	}

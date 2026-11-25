@@ -87,6 +87,8 @@
 #define PAGE_ID_KEY_PUBLIC_AREA	89U
 #define PAGE_ID_HOST_RDP_PASS	90U
 #define PAGE_ID_HOST_FIELD	96U
+#define PAGE_ID_EXTDISP_DISCONNECT	127U
+#define PAGE_ID_EXTDISP_CONNECT		128U
 
 /* The layout: the margin round the panels, the sidebar's width, a pane's padding and the gap between cards, in pixels. */
 #define PAGE_MARGIN		12
@@ -341,14 +343,17 @@ struct page_state {
 	int known_read;
 	unsigned remove_line;
 	struct page_message known_message;
+
+	/* Extended Display: last action status/error message. */
+	struct page_message extdisp_message;
 };
 
 /* The page (large: the known hosts and the host's fields; one for the run). */
 static struct page_state page;
 
 /* The panes' names and icons, in their order. */
-static const char *const page_pane_names[TERMINAL_PANES] = { "Hosts", "Appearance", "Behavior", "Keys" };
-static const enum kl_icon page_pane_icons[TERMINAL_PANES] = { KL_ICON_COMPUTER, KL_ICON_PALETTE, KL_ICON_KEYBOARD, KL_ICON_LOCK };
+static const char *const page_pane_names[TERMINAL_PANES] = { "Hosts", "Appearance", "Behavior", "Keys", "Extended Display" };
+static const enum kl_icon page_pane_icons[TERMINAL_PANES] = { KL_ICON_COMPUTER, KL_ICON_PALETTE, KL_ICON_KEYBOARD, KL_ICON_LOCK, KL_ICON_COMPUTER };
 
 /* The themes' names and their actions, in the order of TERMINAL_THEME_*. */
 static const char *const page_theme_names[TERMINAL_THEMES] = { "Dark", "Light", "High Contrast" };
@@ -444,6 +449,7 @@ static int page_field_button(int top, int left, int width, const char *label, ui
 static int page_appearance(struct terminal_window *window, const struct terminal_page_state *state, int top, int left, int width);
 static int page_behavior(struct terminal_window *window, const struct terminal_page_state *state, int top, int left, int width);
 static int page_keys(struct terminal_window *window, int top, int left, int width);
+static int page_extended_display(int top, int left, int width);
 static int page_known(int top, int left, int width);
 static int page_items(unsigned pane, int top, int left, int width);
 static void page_items_read(void);
@@ -702,6 +708,9 @@ terminal_page_draw(
 	case TERMINAL_PANE_KEYS:
 		bottom = page_keys(window, top, left, inner);
 		break;
+	case TERMINAL_PANE_EXTENDED_DISPLAY:
+		bottom = page_extended_display(top, left, inner);
+		break;
 	default:
 		bottom = page_hosts(window, top, left, inner);
 		break;
@@ -738,7 +747,8 @@ terminal_page_draw(
 		if ((event.modifiers & KL_MOD_CTRL) != 0U &&
 		    (event.code == PAGE_KEY_UP ||
 		     event.code == PAGE_KEY_PAGEUP)) {
-			page_pane((page.pane + TERMINAL_PANES - 1U) % TERMINAL_PANES);
+			unsigned n = (page.program != NULL && page.program->extdisp != NULL) ? TERMINAL_PANES : (TERMINAL_PANES - 1U);
+			page_pane((page.pane + n - 1U) % n);
 			continue;
 		}
 
@@ -746,7 +756,8 @@ terminal_page_draw(
 		if ((event.modifiers & KL_MOD_CTRL) != 0U &&
 		    (event.code == PAGE_KEY_DOWN ||
 		     event.code == PAGE_KEY_PAGEDOWN)) {
-			page_pane((page.pane + 1U) % TERMINAL_PANES);
+			unsigned n = (page.program != NULL && page.program->extdisp != NULL) ? TERMINAL_PANES : (TERMINAL_PANES - 1U);
+			page_pane((page.pane + 1U) % n);
 			continue;
 		}
 
@@ -1076,6 +1087,9 @@ page_sidebar(
 
 	/* Each pane; a click shows it from its top. */
 	for (index = 0U; index < TERMINAL_PANES; index++) {
+		if (index == TERMINAL_PANE_EXTENDED_DISPLAY &&
+		    (page.program == NULL || page.program->extdisp == NULL))
+			continue;
 		item.x = sidebar->x + 8;
 		item.y = top + (int)index * PAGE_ITEM_HEIGHT;
 		item.width = sidebar->width - 16;
@@ -3466,6 +3480,121 @@ page_keys(
 
 	/* Reports the pane's bottom. */
 	return y;
+}
+
+/* Draws the Extended Display pane: connection status and discovered Network Displays. */
+static int
+page_extended_display(
+	int top,
+	int left,
+	int width)
+{
+	const struct kl_theme *theme;
+	const struct terminal_extdisp_ops *ops;
+	struct terminal_extdisp_device devices[TERMINAL_EXTDISP_DEVICES_MAX];
+	unsigned count;
+	unsigned i;
+	struct kl_rect card;
+	struct kl_rect control;
+	char status[128];
+	int connected;
+	int y;
+	int pressed;
+
+	theme = page.style.theme;
+	ops = (page.program != NULL) ? page.program->extdisp : NULL;
+	if (ops == NULL)
+		return top;
+
+	memset(status, 0, sizeof(status));
+	connected = 0;
+	if (ops->status != NULL)
+		(void)ops->status(page.program->extdisp_data, status, sizeof(status), &connected);
+	if (status[0] == '\0')
+		(void)snprintf(status, sizeof(status), "Listening for Network Displays on UDP 33890.");
+
+	/* Status card. */
+	card.x = left;
+	card.y = top;
+	card.width = width;
+	card.height = PAGE_CARD_SUBTITLED + page_note_height(width - 40, status) + 8 +
+	    (connected ? theme->control_height + 8 : 0) +
+	    page_note_height(width - 40, page.extdisp_message.text) + PAGE_CARD_FOOT;
+	y = page_card(&card, "Extended Display", "Stream a virtual Windows monitor to a mikuterm Network Display on the LAN.");
+	y = page_note(y, card.x + 20, card.width - 40, status, connected ? theme->text : theme->text_secondary);
+	if (connected && ops->disconnect != NULL) {
+		control.x = card.x + 20;
+		control.y = y + 6;
+		control.width = kl_button_width(&page.style, "Disconnect");
+		control.height = theme->control_height;
+		pressed = kl_button(page.ui, &page.style, PAGE_ID_EXTDISP_DISCONNECT, &control, "Disconnect", KL_BUTTON_DANGER);
+		if (pressed) {
+			ops->disconnect(page.program->extdisp_data);
+			page_say(&page.extdisp_message, 0, "Disconnected.");
+		}
+		y = control.y + control.height + 6;
+	}
+	(void)page_message_draw(y, card.x + 20, card.width - 40, &page.extdisp_message);
+	top = card.y + card.height + PAGE_GAP;
+
+	/* Discovered Network Displays. */
+	count = (ops->list != NULL) ? ops->list(page.program->extdisp_data, devices, TERMINAL_EXTDISP_DEVICES_MAX) : 0U;
+	if (count == 0U) {
+		const char *empty_note = "No Network Displays found yet. Open the Network Display tab on another mikuterm device on the same LAN.";
+		card.x = left;
+		card.y = top;
+		card.width = width;
+		card.height = PAGE_CARD_SUBTITLED + page_note_height(width - 40, empty_note) + PAGE_CARD_FOOT;
+		y = page_card(&card, "Discovered Displays", "Waiting for UDP 33890 advertisements");
+		(void)page_note(y, card.x + 20, card.width - 40, empty_note, theme->text_secondary);
+		return card.y + card.height;
+	}
+
+	for (i = 0U; i < count; i++) {
+		char sub[160];
+		char detail[160];
+		const char *btn_label;
+		unsigned btn_flags;
+
+		(void)snprintf(sub, sizeof(sub), "%s  (%ux%u)", devices[i].address, devices[i].width, devices[i].height);
+		(void)snprintf(detail, sizeof(detail), "Verification code: %s", devices[i].fingerprint);
+		btn_label = devices[i].connected ? "Disconnect" : "Connect";
+		btn_flags = devices[i].connected ? KL_BUTTON_DANGER : KL_BUTTON_PRIMARY;
+
+		card.x = left;
+		card.y = top;
+		card.width = width;
+		card.height = PAGE_CARD_SUBTITLED + page_note_height(width - 40, detail) + 8 +
+		    theme->control_height + PAGE_CARD_FOOT;
+		y = page_card(&card, devices[i].name[0] != '\0' ? devices[i].name : "Network Display", sub);
+		y = page_note(y, card.x + 20, card.width - 40, detail, theme->text_secondary);
+
+		control.x = card.x + 20;
+		control.y = y + 6;
+		control.width = kl_button_width(&page.style, btn_label);
+		control.height = theme->control_height;
+		pressed = kl_button(page.ui, &page.style, PAGE_ID_EXTDISP_CONNECT + i, &control, btn_label, btn_flags);
+		if (pressed) {
+			if (devices[i].connected) {
+				if (ops->disconnect != NULL)
+					ops->disconnect(page.program->extdisp_data);
+				page_say(&page.extdisp_message, 0, "Disconnected.");
+			} else if (ops->connect != NULL) {
+				char why[PAGE_MESSAGE];
+				char msg[PAGE_MESSAGE];
+				memset(why, 0, sizeof(why));
+				if (ops->connect(page.program->extdisp_data, devices[i].device_id, why, sizeof(why)) != 0) {
+					page_say(&page.extdisp_message, 1, why[0] ? why : "Failed to connect.");
+				} else {
+					(void)snprintf(msg, sizeof(msg), "Connecting to %s...", devices[i].name);
+					page_say(&page.extdisp_message, 0, msg);
+				}
+			}
+		}
+		top = card.y + card.height + PAGE_GAP;
+	}
+
+	return top - PAGE_GAP;
 }
 
 /* Draws the card that keeps a pasted private key under the key's name: an area for its text, Paste and Save Key; reports the card's bottom. */

@@ -507,12 +507,22 @@ sessiond_seat_poll_done(
 			if (!seat_sockets[index].live)
 				continue;
 			if (seat_sockets[index].descriptor == entries[entry].fd) {
+				if ((entries[entry].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0 &&
+				    (entries[entry].revents & POLLIN) == 0) {
+					seat_socket_close(&seat_sockets[index]);
+					break;
+				}
 				seat_socket_read(&seat_sockets[index]);
 				break;
 			}
 			if (seat_sockets[index].rdp_only && seat_sockets[index].rdp_owner_fd == entries[entry].fd) {
 				char drain[16];
 				ssize_t n;
+				if ((entries[entry].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0 &&
+				    (entries[entry].revents & POLLIN) == 0) {
+					seat_socket_close(&seat_sockets[index]);
+					break;
+				}
 				n = read(seat_sockets[index].rdp_owner_fd, drain, sizeof(drain));
 				if (n <= 0 && errno != EAGAIN && errno != EINTR)
 					seat_socket_close(&seat_sockets[index]);
@@ -524,6 +534,16 @@ sessiond_seat_poll_done(
 		for (index = 0U; index < SEAT_RDP_CONTROLS_MAX; index++) {
 			if (seat_rdp_controls[index].live &&
 			    seat_rdp_controls[index].control == entries[entry].fd) {
+				if ((entries[entry].revents & (POLLHUP | POLLERR | POLLNVAL)) != 0 &&
+				    (entries[entry].revents & POLLIN) == 0) {
+					int ctrl = seat_rdp_controls[index].control;
+					sessiond_admin_end(ctrl);
+					sessiond_sleep_forget(ctrl);
+					(void)close(ctrl);
+					seat_rdp_controls[index].live = 0;
+					seat_rdp_controls[index].control = -1;
+					break;
+				}
 				seat_rdp_control_read(&seat_rdp_controls[index]);
 				break;
 			}

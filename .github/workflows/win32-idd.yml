@@ -1,0 +1,80 @@
+name: Win32 IddCx Driver
+
+on:
+  push:
+    paths:
+      - 'drivers/win32/mikuterm-idd/**'
+      - '.github/workflows/win32-idd.yml'
+  pull_request:
+    paths:
+      - 'drivers/win32/mikuterm-idd/**'
+      - '.github/workflows/win32-idd.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-idd:
+    name: Build & Test-Sign mikuterm-idd (${{ matrix.arch }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            cat_os: 10_X64
+          - arch: ARM64
+            cat_os: 10_ARM64
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install WDK
+        shell: pwsh
+        run: |
+          $wdkUrl = "https://go.microsoft.com/fwlink/?linkid=2286137"
+          Invoke-WebRequest -Uri $wdkUrl -OutFile "$env:RUNNER_TEMP\wdksetup.exe"
+          Start-Process -FilePath "$env:RUNNER_TEMP\wdksetup.exe" -ArgumentList "/quiet /norestart" -Wait
+
+      - name: Build mikuterm_idd
+        shell: pwsh
+        run: |
+          msbuild drivers\win32\mikuterm-idd\mikuterm_idd.vcxproj `
+            /p:Configuration=Release `
+            /p:Platform=${{ matrix.arch }} `
+            /m
+
+      - name: Package & Test-Sign Driver
+        shell: pwsh
+        run: |
+          $out = "drivers\win32\mikuterm-idd\${{ matrix.arch }}\Release"
+          $pkg = "$env:RUNNER_TEMP\mikuterm-idd-${{ matrix.arch }}"
+          New-Item -ItemType Directory -Force -Path $pkg | Out-Null
+          Copy-Item "$out\mikuterm_idd.dll" $pkg
+          Copy-Item "drivers\win32\mikuterm-idd\mikuterm_idd.inf" $pkg
+
+          $kitBin = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin\*\x64" | Sort-Object FullName -Descending | Select-Object -First 1
+          $cert = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=mikuterm-idd-test" -CertStoreLocation "Cert:\CurrentUser\My"
+          Export-Certificate -Cert $cert -FilePath "$pkg\mikuterm_idd_test.cer" | Out-Null
+
+          $inf2cat = Join-Path $kitBin.FullName "inf2cat.exe"
+          if (Test-Path $inf2cat) {
+            & $inf2cat /driver:"$pkg" /os:${{ matrix.cat_os }}
+          }
+          $signtool = Join-Path $kitBin.FullName "signtool.exe"
+          if (Test-Path $signtool) {
+            & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint "$pkg\mikuterm_idd.dll"
+            if (Test-Path "$pkg\mikuterm_idd.cat") {
+              & $signtool sign /fd SHA256 /sha1 $cert.Thumbprint "$pkg\mikuterm_idd.cat"
+            }
+          }
+
+      - name: Upload Driver Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mikuterm-idd-${{ matrix.arch }}
+          path: ${{ runner.temp }}\mikuterm-idd-${{ matrix.arch }}

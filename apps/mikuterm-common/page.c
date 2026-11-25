@@ -25,6 +25,14 @@
 #include "userland/desktop/terminal/settings-page.h"
 #include "userland/base/ssh/ssh-config.h"
 
+#ifndef MIKUTERM_HAVE_EXTDISP
+#define MIKUTERM_HAVE_EXTDISP 0
+#endif
+
+#if MIKUTERM_HAVE_EXTDISP
+#include "apps/terminal-win32/extdisp.h"
+#endif
+
 /* Whether a file can be opened in another program (an editor, the desktop's opener): each build says so. */
 #ifndef MIKUTERM_HAVE_OPENER
 #error "MIKUTERM_HAVE_OPENER must be defined (1 or 0) by the build"
@@ -237,6 +245,9 @@ mikuterm_page_init(
 	page_state.program.rdp_password_get = page_rdp_password_get;
 	page_state.program.rdp_password_set = page_rdp_password_set;
 	page_state.program.rdp_password_del = page_rdp_password_del;
+#if MIKUTERM_HAVE_EXTDISP
+	page_state.program.extdisp = mikuterm_extdisp_ops();
+#endif
 	page_state.program.item_get = page_item_get;
 	page_state.program.item_set = page_item_set;
 	page_state.program.comment = page_state.comment;

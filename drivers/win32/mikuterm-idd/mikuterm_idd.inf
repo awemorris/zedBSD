@@ -1,0 +1,73 @@
+;
+; zedBSD
+; Copyright (C) 2026 Awe Morris
+;
+; SPDX-License-Identifier: Zlib
+;
+
+[Version]
+Signature="$Windows NT$"
+Class=Display
+ClassGuid={4d36e968-e325-11ce-bfc1-08002be10318}
+Provider=%ManufacturerName%
+CatalogFile=mikuterm_idd.cat
+DriverVer=11/26/2026,1.0.0.0
+PnpLockdown=1
+
+[Manufacturer]
+%ManufacturerName%=Standard,NTamd64,NTARM64
+
+[Standard.NTamd64]
+%DeviceName%=MikutermIdd_Install, Root\MikutermIdd
+
+[Standard.NTARM64]
+%DeviceName%=MikutermIdd_Install, Root\MikutermIdd
+
+[SourceDisksFiles]
+mikuterm_idd.dll=1
+
+[SourceDisksNames]
+1 = %DiskName%,,,
+
+[DestinationDirs]
+UMDriverCopy=12,UMDF
+
+[MikutermIdd_Install.NT]
+CopyFiles=UMDriverCopy
+
+[MikutermIdd_Install.NT.hw]
+AddReg=MikutermIdd_Hardware_AddReg
+
+[MikutermIdd_Hardware_AddReg]
+HKR,,"UpperFilters",0x00010000,"IndirectKmd"
+
+[MikutermIdd_Install.NT.Services]
+AddService=WUDFRd,0x000001fa,WUDFRD_ServiceInstall
+
+[WUDFRD_ServiceInstall]
+DisplayName = %WudfRdDisplayName%
+ServiceType = 1
+StartType = 3
+ErrorControl = 1
+ServiceBinary = %12%\WUDFRd.sys
+
+[MikutermIdd_Install.NT.Wdf]
+UmdfService=mikuterm_idd,MikutermIdd_Service
+UmdfServiceOrder=mikuterm_idd
+UmdfKernelModeClientPolicy=AllowKernelModeClients
+UmdfFileObjectPolicy=AllowNullAndUnknownFileObjects
+UmdfHostProcessSharing=ProcessSharingDisabled
+
+[MikutermIdd_Service]
+UmdfLibraryVersion=$UMDFVERSION$
+ServiceBinary=%12%\UMDF\mikuterm_idd.dll
+UmdfExtensions=IddCx0104
+
+[UMDriverCopy]
+mikuterm_idd.dll
+
+[Strings]
+ManufacturerName="zedBSD"
+DiskName="mikuterm Virtual Display Driver Disk"
+DeviceName="mikuterm Virtual Display Adapter"
+WudfRdDisplayName="Windows Driver Foundation - User-mode Driver Framework Reflector"
