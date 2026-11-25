@@ -265,12 +265,25 @@ cb_send_bytes(
 
 	while (sent < len) {
 		int n;
-		if (s->tls_active && s->ssl != NULL)
+		if (s->tls_active && s->ssl != NULL) {
 			n = SSL_write(s->ssl, data + sent, (int)(len - sent));
-		else
+			if (n <= 0) {
+				int err = SSL_get_error(s->ssl, n);
+				if (err == SSL_ERROR_WANT_WRITE ||
+				    err == SSL_ERROR_WANT_READ) {
+					Sleep(1);
+					continue;
+				}
+				mikuterm_log("extdisp: SSL_write failed n=%d err=%d", n, err);
+				return -1;
+			}
+		} else {
 			n = send(s->client_sock, (const char *)(data + sent), (int)(len - sent), 0);
-		if (n <= 0)
-			return -1;
+			if (n <= 0) {
+				mikuterm_log("extdisp: send failed n=%d wsa=%d", n, WSAGetLastError());
+				return -1;
+			}
+		}
 		sent += (size_t)n;
 	}
 	return 0;
@@ -685,6 +698,8 @@ extdisp_session_thread(LPVOID param)
 
 	s->running = 1;
 	s->force_key = 1;
+	{
+		int logged_gfx_ready = 0;
 
 	while (s->running && !s->stop && !extdisp.stop) {
 		fd_set rfds;
@@ -715,18 +730,44 @@ extdisp_session_thread(LPVOID param)
 		tv.tv_sec = 0;
 		tv.tv_usec = 16000;
 		rc = select(0, &rfds, NULL, NULL, &tv);
-		if (rc < 0)
+		if (rc < 0) {
+			mikuterm_log("extdisp: select failed wsa=%d", WSAGetLastError());
 			break;
+		}
 
 		if (rc > 0 && FD_ISSET(s->client_sock, &rfds)) {
-			int n;
-			if (s->tls_active)
-				n = SSL_read(s->ssl, io_buf, sizeof(io_buf));
-			else
-				n = recv(s->client_sock, (char *)io_buf, sizeof(io_buf), 0);
-			if (n <= 0)
-				break;
-			if (rdp_server_feed(s->srv, io_buf, (size_t)n) != 0)
+			for (;;) {
+				int n;
+				int feed_rc;
+				if (s->tls_active) {
+					n = SSL_read(s->ssl, io_buf, sizeof(io_buf));
+					if (n <= 0) {
+						int ssl_err = SSL_get_error(s->ssl, n);
+						if (ssl_err == SSL_ERROR_WANT_READ ||
+						    ssl_err == SSL_ERROR_WANT_WRITE)
+							break;
+						mikuterm_log("extdisp: SSL_read n=%d err=%d", n, ssl_err);
+						s->running = 0;
+						break;
+					}
+				} else {
+					n = recv(s->client_sock, (char *)io_buf, sizeof(io_buf), 0);
+					if (n <= 0) {
+						mikuterm_log("extdisp: recv n=%d wsa=%d", n, WSAGetLastError());
+						s->running = 0;
+						break;
+					}
+				}
+				feed_rc = rdp_server_feed(s->srv, io_buf, (size_t)n);
+				if (feed_rc != 0) {
+					mikuterm_log("extdisp: rdp_server_feed rc=%d", feed_rc);
+					s->running = 0;
+					break;
+				}
+				if (!s->tls_active || SSL_pending(s->ssl) <= 0)
+					break;
+			}
+			if (!s->running)
 				break;
 		}
 
@@ -734,6 +775,11 @@ extdisp_session_thread(LPVOID param)
 		    rdp_server_unacked_frames(s->srv) < 6U) {
 			ULONGLONG now_ms = GetTickCount64();
 			int have_frame = 0;
+
+			if (!logged_gfx_ready) {
+				mikuterm_log("extdisp: RDPEGFX ready");
+				logged_gfx_ready = 1;
+			}
 
 			if (s->shm_hdr != NULL && s->shm_hdr->active != 0U) {
 				uint32_t seq = s->shm_hdr->frame_seq;
@@ -759,6 +805,7 @@ extdisp_session_thread(LPVOID param)
 				struct media_encoder_picture pic;
 				struct media_encoded pkt;
 				unsigned eflags = s->force_key ? MEDIA_ENCODE_FORCE_KEY : 0U;
+				int enc_rc;
 
 				last_frame_ms = now_ms;
 				memset(&pic, 0, sizeof(pic));
@@ -769,13 +816,15 @@ extdisp_session_thread(LPVOID param)
 				pic.stride[1] = s->width / 2U;
 				pic.stride[2] = s->width / 2U;
 
-				if (media_encoder_send(s->encoder, &pic, (int64_t)(now_ms * 1000ULL), eflags) == 0) {
+				enc_rc = media_encoder_send(s->encoder, &pic, (int64_t)(now_ms * 1000ULL), eflags);
+				if (enc_rc == 0) {
 					s->force_key = 0;
 					while (media_encoder_receive(s->encoder, MEDIA_RECEIVE_NOWAIT, &pkt) == 0) {
 						struct rdp_avc_rect rect;
 						struct rdp_avc_quant quant;
 						struct rdp_avc_stream avc;
 						uint32_t frame_id = 0U;
+						int avc_rc;
 
 						memset(&rect, 0, sizeof(rect));
 						rect.right = (uint16_t)s->width;
@@ -789,13 +838,23 @@ extdisp_session_thread(LPVOID param)
 						avc.luma.quants = &quant;
 						avc.luma.data = pkt.data;
 						avc.luma.data_len = pkt.size;
-						(void)rdp_server_send_avc_frame(
-						    s->srv, 0U, &avc, (uint32_t)now_ms, &frame_id);
+						avc_rc = rdp_server_send_avc_frame(
+						    s->srv, RDP_GFX_CODEC_AVC420, &avc,
+						    (uint32_t)now_ms, &frame_id);
+						if (avc_rc != 0) {
+							mikuterm_log("extdisp: send_avc_frame rc=%d", avc_rc);
+							s->running = 0;
+							break;
+						}
 					}
+				} else {
+					mikuterm_log("extdisp: media_encoder_send rc=%d", enc_rc);
 				}
 			}
 		}
 	}
+	}
+	mikuterm_log("extdisp: session loop ended running=%d stop=%d", s->running, s->stop);
 
 	EnterCriticalSection(&extdisp.lock);
 	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text), "Idle.");
