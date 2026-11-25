@@ -304,6 +304,10 @@ struct system_view {
 	 */
 	struct system_view_scale display_scales[KL_DISPLAYS_MAX];
 	struct system_view_scale display_scales_pending[KL_DISPLAYS_MAX];
+	struct kl_network_display network_displays[KL_NETWORK_DISPLAYS_MAX];
+	size_t network_display_count;
+	struct kl_network_display network_displays_pending[KL_NETWORK_DISPLAYS_MAX];
+	size_t network_displays_pending_count;
 	/*
 	 * What Settings reads of the computer (ws188-p002): the parts in
 	 * effect, which of them were ever answered (machine_known, the
@@ -471,6 +475,7 @@ void system_view_print_job(struct system_view *view, const struct kl_print_job *
 void system_view_printers_done(struct system_view *view);
 void system_view_print_queued(struct system_view *view, uint32_t request, uint32_t job);
 void system_view_display(struct system_view *view, const struct kl_display *display);
+void system_view_network_display(struct system_view *view, const struct kl_network_display *netdisp);
 void system_view_displays_done(struct system_view *view, uint32_t serial, uint32_t mode);
 void system_view_display_rotation(struct system_view *view, const char *key, uint32_t rotation);
 void system_view_display_rotations(struct system_view *view, const char *key, uint32_t mask, uint32_t why);

@@ -429,7 +429,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION 38U
+#define KL_SYSTEM_MANAGER_VERSION 39U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -510,6 +510,9 @@
 
 /* Since when the displays have set_scale and the event scale. */
 #define KL_SYSTEM_SINCE_SCALE			38U
+
+/* Since when the displays have connect_network, disconnect_network, and network_display. */
+#define KL_SYSTEM_SINCE_NETWORK_DISPLAY		39U
 
 /* Since when the mail object tells a reader whether it is allowed (ws177-p005). */
 #define KL_SYSTEM_SINCE_MAIL_ALLOWED		20U
@@ -660,6 +663,8 @@
 #define KL_SYSTEM_DISPLAYS_REVERT_RESOLUTION	9U
 #define KL_SYSTEM_DISPLAYS_RESET_RESOLUTION	10U
 #define KL_SYSTEM_DISPLAYS_SET_SCALE		11U
+#define KL_SYSTEM_DISPLAYS_CONNECT_NETWORK	12U
+#define KL_SYSTEM_DISPLAYS_DISCONNECT_NETWORK	13U
 #define KL_SYSTEM_DISPLAYS_EVENT_OUTPUT		0U
 #define KL_SYSTEM_DISPLAYS_EVENT_DONE		1U
 #define KL_SYSTEM_DISPLAYS_EVENT_RESULT		2U
@@ -669,6 +674,7 @@
 #define KL_SYSTEM_DISPLAYS_EVENT_MODE		6U
 #define KL_SYSTEM_DISPLAYS_EVENT_RESOLUTION	7U
 #define KL_SYSTEM_DISPLAYS_EVENT_SCALE		8U
+#define KL_SYSTEM_DISPLAYS_EVENT_NETWORK_DISPLAY 9U
 #define KL_SYSTEM_DISPLAYS_EXTENDED		0U
 #define KL_SYSTEM_DISPLAYS_MIRROR		1U
 #define KL_SYSTEM_DISPLAY_INTERNAL		0x1U

@@ -36,4 +36,9 @@ extern const struct rdp_decoder_ops rdp_h264sw_decoder_ops;
 /* H.264 decoder backend backed by libmedia (Vulkan Video with h264sw fallback). */
 extern const struct rdp_decoder_ops rdp_media_decoder_ops;
 
+#ifdef __ANDROID__
+/* H.264 decoder backend backed by Android AMediaCodec (with h264sw fallback). */
+extern const struct rdp_decoder_ops rdp_mediacodec_decoder_ops;
+#endif
+
 #endif

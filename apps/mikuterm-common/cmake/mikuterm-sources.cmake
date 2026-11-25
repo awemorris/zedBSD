@@ -60,7 +60,9 @@ set(MIKUTERM_COMMON_RDP_SOURCES
 	${MIKUTERM_COMMON_DIR}/rdp-hosts.c
 	${MIKUTERM_COMMON_DIR}/rdp-h264sw.c
 	${MIKUTERM_COMMON_DIR}/rdp-tab.c
-	${MIKUTERM_COMMON_DIR}/rdp-thread.c)
+	${MIKUTERM_COMMON_DIR}/rdp-thread.c
+	${MIKUTERM_COMMON_DIR}/netdisp-proto.c
+	${MIKUTERM_COMMON_DIR}/netdisp-tab.c)
 
 set(MIKUTERM_COMMON_MEDIA_SOURCES
 	${MIKUTERM_COMMON_DIR}/rdp-media.c)

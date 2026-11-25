@@ -237,6 +237,7 @@ struct system_displays_listener {
 	void (*mode)(void *data, struct wl_proxy *proxy, const char *key, uint32_t width, uint32_t height, uint32_t refresh_mhz, uint32_t flags);
 	void (*resolution)(void *data, struct wl_proxy *proxy, const char *key, uint32_t state, uint32_t remaining_ms, uint32_t why);
 	void (*scale)(void *data, struct wl_proxy *proxy, const char *key, uint32_t current, uint32_t chosen, uint32_t recommended, uint32_t width, uint32_t height, uint32_t why, struct wl_array *offered);
+	void (*network_display)(void *data, struct wl_proxy *proxy, const char *device_id, const char *name, const char *ip, const char *fingerprint, uint32_t width, uint32_t height, uint32_t scale120, uint32_t state);
 };
 
 /* The listener of kl_system_machine_v1's events (ws188-p002), in their order. */
@@ -323,6 +324,7 @@ static void system_display_touch(void *data, struct wl_proxy *proxy, const char 
 static void system_display_mode(void *data, struct wl_proxy *proxy, const char *key, uint32_t width, uint32_t height, uint32_t refresh_mhz, uint32_t flags);
 static void system_display_resolution(void *data, struct wl_proxy *proxy, const char *key, uint32_t state, uint32_t remaining_ms, uint32_t why);
 static void system_display_scale(void *data, struct wl_proxy *proxy, const char *key, uint32_t current, uint32_t chosen, uint32_t recommended, uint32_t width, uint32_t height, uint32_t why, struct wl_array *offered);
+static void system_display_network_display(void *data, struct wl_proxy *proxy, const char *device_id, const char *name, const char *ip, const char *fingerprint, uint32_t width, uint32_t height, uint32_t scale120, uint32_t state);
 static unsigned system_scale_to_96(unsigned scale120);
 static void system_machine_parts(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what);
 static void system_machine_about(void *data, struct wl_proxy *proxy, const char *name, const char *kernel, const char *architecture, const char *processor, const char *host, uint32_t cpus);
@@ -493,7 +495,8 @@ static const struct system_displays_listener system_displays_listener = {
 	system_display_touch,
 	system_display_mode,
 	system_display_resolution,
-	system_display_scale
+	system_display_scale,
+	system_display_network_display
 };
 
 /* The computer's object's callbacks (ws188-p002). */
@@ -2471,6 +2474,64 @@ kl_system_displays_set_rotation(
 	wl_proxy_marshal(system->displays, KL_SYSTEM_DISPLAYS_SET_ROTATION, number, key, (uint32_t)rotation);
 
 	/* Succeeded: the snapshot and the answer come later. */
+	return 0;
+}
+
+size_t
+kl_system_displays_network_get(
+	const struct kl_system *system,
+	struct kl_network_display *displays,
+	size_t capacity)
+{
+	size_t count;
+
+	if (system == NULL)
+		return 0U;
+	count = system->view.network_display_count;
+	if (displays != NULL && capacity > 0U) {
+		size_t copy = count < capacity ? count : capacity;
+		if (copy > 0U)
+			memcpy(displays, system->view.network_displays,
+			       copy * sizeof(displays[0]));
+	}
+	return count;
+}
+
+int
+kl_system_displays_connect_network(
+	struct kl_system *system,
+	const char *device_id_hex,
+	uint32_t *request)
+{
+	uint32_t number;
+
+	if (system == NULL || device_id_hex == NULL || strlen(device_id_hex) != 32U)
+		return EINVAL;
+	if (system->displays == NULL || system->lost ||
+	    system->manager_version < KL_SYSTEM_SINCE_NETWORK_DISPLAY)
+		return ENOTSUP;
+	number = system_number(system, request);
+	wl_proxy_marshal(system->displays, KL_SYSTEM_DISPLAYS_CONNECT_NETWORK,
+			 number, device_id_hex);
+	return 0;
+}
+
+int
+kl_system_displays_disconnect_network(
+	struct kl_system *system,
+	const char *device_id_hex,
+	uint32_t *request)
+{
+	uint32_t number;
+
+	if (system == NULL || device_id_hex == NULL)
+		return EINVAL;
+	if (system->displays == NULL || system->lost ||
+	    system->manager_version < KL_SYSTEM_SINCE_NETWORK_DISPLAY)
+		return ENOTSUP;
+	number = system_number(system, request);
+	wl_proxy_marshal(system->displays, KL_SYSTEM_DISPLAYS_DISCONNECT_NETWORK,
+			 number, device_id_hex);
 	return 0;
 }
 
@@ -6205,6 +6266,42 @@ system_display_scale(
 	/* Kept with the display. */
 	system = data;
 	system_view_display_scale(&system->view, key, &scale);
+}
+
+static void
+system_display_network_display(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *device_id,
+	const char *name,
+	const char *ip,
+	const char *fingerprint,
+	uint32_t width,
+	uint32_t height,
+	uint32_t scale120,
+	uint32_t state)
+{
+	struct kl_network_display net;
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	memset(&net, 0, sizeof(net));
+	if (device_id != NULL)
+		snprintf(net.device_id, sizeof(net.device_id), "%s", device_id);
+	if (name != NULL)
+		snprintf(net.name, sizeof(net.name), "%s", name);
+	if (ip != NULL)
+		snprintf(net.ip, sizeof(net.ip), "%s", ip);
+	if (fingerprint != NULL)
+		snprintf(net.fingerprint, sizeof(net.fingerprint), "%s", fingerprint);
+	net.width = width;
+	net.height = height;
+	net.scale120 = scale120;
+	net.state = state;
+
+	system = data;
+	system_view_network_display(&system->view, &net);
 }
 
 /* Reports a scale in the compositor's 120ths in 96ths (KL_SCALE_BASE), rounded to the nearest. */

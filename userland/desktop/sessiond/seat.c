@@ -856,6 +856,23 @@ seat_is_rdp_event(
 	return 0;
 }
 
+/* Maximum concurrent pending one-shot RDP extend credentials. */
+#define SEAT_EXTEND_MAX		8U
+#define SEAT_EXTEND_TTL_MS	30000LL
+
+struct seat_extend_entry {
+	unsigned active;
+	uid_t uid;
+	gid_t gid;
+	int control;
+	long long expires_ms;
+	char extend_user[64];
+	uint8_t nt_hash[16];
+};
+
+static struct seat_extend_entry seat_extend_table[SEAT_EXTEND_MAX];
+static unsigned seat_extend_seq = 1U;
+
 /* Opens the root-only Unix socket on which rdpd claims isolated RDP seats. */
 static void
 seat_rdp_listen_open(
@@ -913,6 +930,51 @@ seat_rdp_accept(
 		return;
 	}
 	buf[n] = '\0';
+	while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r'))
+		buf[--n] = '\0';
+	if (strncmp(buf, "RDP_EXTEND_LOOKUP ", 18U) == 0) {
+		uint8_t nt_hash[16];
+		char reply[64];
+		static const char hex[] = "0123456789abcdef";
+		size_t i;
+		if (sessiond_extend_lookup(buf + 18U, nt_hash) == 0) {
+			memcpy(reply, "OK ", 3U);
+			for (i = 0U; i < 16U; i++) {
+				reply[3U + i * 2U] = hex[(nt_hash[i] >> 4) & 0x0FU];
+				reply[3U + i * 2U + 1U] = hex[nt_hash[i] & 0x0FU];
+			}
+			reply[35] = '\n';
+			(void)write(client_fd, reply, 36U);
+			memset(nt_hash, 0, sizeof(nt_hash));
+			memset(reply, 0, sizeof(reply));
+		} else {
+			seat_answer(client_fd, ENOENT, -1);
+		}
+		(void)close(client_fd);
+		return;
+	}
+	if (strncmp(buf, "RDP_EXTEND ", 11U) == 0) {
+		char ext_user[64];
+		unsigned long w = 0UL;
+		unsigned long h = 0UL;
+		int rdp_fd = -1;
+		int rc;
+		if (sscanf(buf + 11U, "%63s %lu %lu", ext_user, &w, &h) != 3) {
+			seat_answer(client_fd, EINVAL, -1);
+			(void)close(client_fd);
+			return;
+		}
+		rc = sessiond_extend_consume(ext_user, (uint32_t)w, (uint32_t)h, &rdp_fd);
+		if (rc != 0 || rdp_fd < 0) {
+			seat_answer(client_fd, rc != 0 ? rc : ENOENT, -1);
+			(void)close(client_fd);
+			return;
+		}
+		seat_answer(client_fd, 0, rdp_fd);
+		(void)close(rdp_fd);
+		(void)close(client_fd);
+		return;
+	}
 	if (strncmp(buf, "RDP_SEAT ", 9U) != 0) {
 		seat_answer(client_fd, EINVAL, -1);
 		(void)close(client_fd);
@@ -947,4 +1009,304 @@ seat_rdp_accept(
 	seat_answer(client_fd, 0, pair[1]);
 	(void)close(pair[1]);
 	sessiond_log("SESSIOND SEAT rdp claimed event=%d socket=%d", ev_idx, pair[0]);
+}
+
+static uint32_t
+md4_rotl(
+	uint32_t x,
+	unsigned n)
+{
+	return (x << n) | (x >> (32U - n));
+}
+
+/* Computes RFC 1320 MD4 over UTF-16LE password for NTLM NT hash. */
+static void
+seat_nt_hash(
+	const char *password,
+	uint8_t out[16])
+{
+	uint8_t msg[256];
+	size_t plen;
+	size_t byte_len;
+	size_t padded_len;
+	size_t i;
+	uint64_t bit_len;
+	uint32_t a;
+	uint32_t b;
+	uint32_t c;
+	uint32_t d;
+
+	plen = strlen(password);
+	if (plen > 110U)
+		plen = 110U;
+	byte_len = plen * 2U;
+	memset(msg, 0, sizeof(msg));
+	for (i = 0U; i < plen; i++) {
+		msg[i * 2U] = (uint8_t)password[i];
+		msg[i * 2U + 1U] = 0U;
+	}
+	msg[byte_len] = 0x80U;
+	padded_len = ((byte_len + 8U) / 64U + 1U) * 64U;
+	bit_len = (uint64_t)byte_len * 8ULL;
+	for (i = 0U; i < 8U; i++)
+		msg[padded_len - 8U + i] = (uint8_t)((bit_len >> (i * 8U)) & 0xFFU);
+
+	a = 0x67452301U;
+	b = 0xEFCDAB89U;
+	c = 0x98BADCFEU;
+	d = 0x10325476U;
+
+	for (i = 0U; i < padded_len; i += 64U) {
+		uint32_t x[16];
+		uint32_t aa = a;
+		uint32_t bb = b;
+		uint32_t cc = c;
+		uint32_t dd = d;
+		size_t j;
+		static const unsigned r1[4] = { 3U, 7U, 11U, 19U };
+		static const unsigned r2[4] = { 3U, 5U, 9U, 13U };
+		static const unsigned r3[4] = { 3U, 9U, 11U, 15U };
+		static const unsigned k3[16] = {
+			0U, 8U, 4U, 12U, 2U, 10U, 6U, 14U,
+			1U, 9U, 5U, 13U, 3U, 11U, 7U, 15U
+		};
+
+		for (j = 0U; j < 16U; j++) {
+			const uint8_t *p = msg + i + j * 4U;
+			x[j] = (uint32_t)p[0] |
+			       ((uint32_t)p[1] << 8) |
+			       ((uint32_t)p[2] << 16) |
+			       ((uint32_t)p[3] << 24);
+		}
+		for (j = 0U; j < 16U; j++) {
+			uint32_t f = (b & c) | ((~b) & d);
+			uint32_t t = md4_rotl(a + f + x[j], r1[j & 3U]);
+			a = d;
+			d = c;
+			c = b;
+			b = t;
+		}
+		for (j = 0U; j < 16U; j++) {
+			uint32_t f = (b & c) | (b & d) | (c & d);
+			uint32_t idx = (j & 3U) * 4U + (j >> 2);
+			uint32_t t = md4_rotl(a + f + x[idx] + 0x5A827999U, r2[j & 3U]);
+			a = d;
+			d = c;
+			c = b;
+			b = t;
+		}
+		for (j = 0U; j < 16U; j++) {
+			uint32_t f = b ^ c ^ d;
+			uint32_t t = md4_rotl(a + f + x[k3[j]] + 0x6ED9EBA1U, r3[j & 3U]);
+			a = d;
+			d = c;
+			c = b;
+			b = t;
+		}
+		a += aa;
+		b += bb;
+		c += cc;
+		d += dd;
+	}
+	{
+		uint32_t s[4] = { a, b, c, d };
+		for (i = 0U; i < 4U; i++) {
+			out[i * 4U] = (uint8_t)(s[i] & 0xFFU);
+			out[i * 4U + 1U] = (uint8_t)((s[i] >> 8) & 0xFFU);
+			out[i * 4U + 2U] = (uint8_t)((s[i] >> 16) & 0xFFU);
+			out[i * 4U + 3U] = (uint8_t)((s[i] >> 24) & 0xFFU);
+		}
+	}
+	memset(msg, 0, sizeof(msg));
+}
+
+static void
+seat_extend_prune(
+	long long now_ms)
+{
+	size_t i;
+
+	for (i = 0U; i < SEAT_EXTEND_MAX; i++) {
+		if (seat_extend_table[i].active &&
+		    now_ms >= seat_extend_table[i].expires_ms) {
+			memset(&seat_extend_table[i], 0,
+			       sizeof(seat_extend_table[i]));
+		}
+	}
+}
+
+int
+sessiond_extend_prepare(
+	const struct sessiond_account *account,
+	int control,
+	char *out_user,
+	size_t user_cap,
+	char *out_pass,
+	size_t pass_cap,
+	unsigned *out_port)
+{
+	static const char alphabet[] =
+		"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
+	struct seat_extend_entry *slot;
+	long long now_ms;
+	uint8_t rnd[24];
+	int rfd;
+	ssize_t got;
+	size_t i;
+
+	if (account == NULL || control < 0 || out_user == NULL ||
+	    out_pass == NULL || out_port == NULL ||
+	    user_cap < 32U || pass_cap < 25U)
+		return -1;
+
+	now_ms = sessiond_milliseconds();
+	seat_extend_prune(now_ms);
+
+	slot = NULL;
+	for (i = 0U; i < SEAT_EXTEND_MAX; i++) {
+		if (!seat_extend_table[i].active) {
+			slot = &seat_extend_table[i];
+			break;
+		}
+	}
+	if (slot == NULL)
+		return -1;
+
+	rfd = open("/dev/urandom", O_RDONLY | O_CLOEXEC);
+	if (rfd < 0)
+		return -1;
+	got = read(rfd, rnd, sizeof(rnd));
+	(void)close(rfd);
+	if (got != (ssize_t)sizeof(rnd))
+		return -1;
+
+	for (i = 0U; i < sizeof(rnd); i++)
+		out_pass[i] = alphabet[rnd[i] % (sizeof(alphabet) - 1U)];
+	out_pass[sizeof(rnd)] = '\0';
+
+	memset(slot, 0, sizeof(*slot));
+	slot->active = 1U;
+	slot->uid = account->passwd.pw_uid;
+	slot->gid = account->passwd.pw_gid;
+	slot->control = control;
+	slot->expires_ms = now_ms + SEAT_EXTEND_TTL_MS;
+	snprintf(slot->extend_user, sizeof(slot->extend_user), "%s+extend%u",
+		 account->passwd.pw_name, seat_extend_seq++);
+	seat_nt_hash(out_pass, slot->nt_hash);
+	snprintf(out_user, user_cap, "%s", slot->extend_user);
+	*out_port = 3389U;
+	memset(rnd, 0, sizeof(rnd));
+	return 0;
+}
+
+int
+sessiond_extend_lookup(
+	const char *extend_user,
+	uint8_t out_nt_hash[16])
+{
+	long long now_ms;
+	size_t i;
+
+	if (extend_user == NULL || extend_user[0] == '\0')
+		return -1;
+	now_ms = sessiond_milliseconds();
+	seat_extend_prune(now_ms);
+	for (i = 0U; i < SEAT_EXTEND_MAX; i++) {
+		if (seat_extend_table[i].active &&
+		    strcmp(seat_extend_table[i].extend_user, extend_user) == 0) {
+			memcpy(out_nt_hash, seat_extend_table[i].nt_hash, 16U);
+			return 0;
+		}
+	}
+	return -1;
+}
+
+int
+sessiond_extend_consume(
+	const char *extend_user,
+	uint32_t width,
+	uint32_t height,
+	int *out_rdp_fd)
+{
+	long long now_ms;
+	struct seat_extend_entry entry;
+	int pair[2];
+	union {
+		struct cmsghdr header;
+		char space[CMSG_SPACE(sizeof(int))];
+	} control;
+	struct cmsghdr *cmsg;
+	struct msghdr msg;
+	struct iovec vec;
+	char line[64];
+	ssize_t sent;
+	size_t i;
+
+	if (extend_user == NULL || out_rdp_fd == NULL)
+		return EINVAL;
+	*out_rdp_fd = -1;
+	now_ms = sessiond_milliseconds();
+	seat_extend_prune(now_ms);
+
+	memset(&entry, 0, sizeof(entry));
+	for (i = 0U; i < SEAT_EXTEND_MAX; i++) {
+		if (seat_extend_table[i].active &&
+		    strcmp(seat_extend_table[i].extend_user, extend_user) == 0) {
+			entry = seat_extend_table[i];
+			memset(&seat_extend_table[i], 0,
+			       sizeof(seat_extend_table[i]));
+			break;
+		}
+	}
+	if (!entry.active || entry.control < 0)
+		return ENOENT;
+
+	if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0)
+		return errno;
+	(void)fcntl(pair[0], F_SETFD, FD_CLOEXEC);
+	(void)fcntl(pair[1], F_SETFD, FD_CLOEXEC);
+
+	snprintf(line, sizeof(line), "EXTEND_ATTACH %u %u\n",
+		 (unsigned)width, (unsigned)height);
+	memset(&msg, 0, sizeof(msg));
+	memset(&control, 0, sizeof(control));
+	vec.iov_base = line;
+	vec.iov_len = strlen(line);
+	msg.msg_iov = &vec;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control.space;
+	msg.msg_controllen = sizeof(control.space);
+	cmsg = CMSG_FIRSTHDR(&msg);
+	cmsg->cmsg_level = SOL_SOCKET;
+	cmsg->cmsg_type = SCM_RIGHTS;
+	cmsg->cmsg_len = CMSG_LEN(sizeof(int));
+	memcpy(CMSG_DATA(cmsg), &pair[0], sizeof(int));
+
+	sent = sendmsg(entry.control, &msg, MSG_NOSIGNAL);
+	(void)close(pair[0]);
+	if (sent != (ssize_t)vec.iov_len) {
+		(void)close(pair[1]);
+		return EIO;
+	}
+	*out_rdp_fd = pair[1];
+	sessiond_log("SESSIOND EXTEND attached user=%s %ux%u",
+		     extend_user, (unsigned)width, (unsigned)height);
+	return 0;
+}
+
+void
+sessiond_extend_forget(
+	int control)
+{
+	size_t i;
+
+	if (control < 0)
+		return;
+	for (i = 0U; i < SEAT_EXTEND_MAX; i++) {
+		if (seat_extend_table[i].active &&
+		    seat_extend_table[i].control == control) {
+			memset(&seat_extend_table[i], 0,
+			       sizeof(seat_extend_table[i]));
+		}
+	}
 }

@@ -375,9 +375,13 @@ struct kwl_layers {
  * display went (an acquire or a present said so): the next look closes
  * it.  `global` is its wl_output global's name (0: none).
  */
+struct kwl_rdp_ext;
+
 struct kwl_head {
 	unsigned open;
 	unsigned lost;
+	unsigned virtual_rdp;
+	struct kwl_rdp_ext *rdp_ext;
 	VkDisplayKHR display;
 	char name[KWL_COMPOSE_NAME];
 	struct vkdemo_display output;

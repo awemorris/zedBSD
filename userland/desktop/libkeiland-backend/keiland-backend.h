@@ -78,6 +78,8 @@ struct kl_backend_host {
 	void (*lid_changed)(void *data, unsigned open);
 	void (*keys_changed)(void *data);
 	void (*session_admin)(void *data, struct kl_backend_admin_answer *answer);
+	void (*extend_prepared)(void *data, int error, const char *user, const char *password, unsigned port);
+	void (*extend_attach)(void *data, int rdp_fd, uint32_t width, uint32_t height);
 };
 
 /*
@@ -2417,6 +2419,9 @@ int kl_backend_sharing_request(struct kl_backend *backend, unsigned action);
 
 /* Copies Remote Login's state as last answered. */
 void kl_backend_sharing_get(const struct kl_backend *backend, struct kl_backend_sharing *state);
+
+/* Requests one-shot RDP extended display credentials from sessiond. */
+int kl_backend_session_extend_prepare(struct kl_backend *backend);
 
 /* The media database CLI operations offered by every desktop OS backend. */
 #define KL_BACKEND_MEDIA_LIST 1U

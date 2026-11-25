@@ -1355,6 +1355,26 @@ kl_backend_session_send(
 	return error;
 }
 
+int
+kl_backend_session_extend_prepare(
+	struct kl_backend *backend)
+{
+	int descriptor;
+	static const char cmd[] = "EXTEND_PREPARE\n";
+	ssize_t written;
+
+	if (backend == NULL)
+		return EINVAL;
+	descriptor = session_descriptor(backend);
+	if (descriptor < 0 || backend->session_gone ||
+	    backend->options.greeter_descriptor >= 0)
+		return ENOTSUP;
+	written = write(descriptor, cmd, sizeof(cmd) - 1U);
+	if (written != (ssize_t)(sizeof(cmd) - 1U))
+		return errno != 0 ? errno : EIO;
+	return 0;
+}
+
 /* Returns the descriptor to sessiond: the login screen's, a session's, or -1. */
 static int
 session_descriptor(
@@ -1411,6 +1431,51 @@ session_answered(
 	same = strncmp(line, "ADMIN ", 6U);
 	if (same == 0) {
 		session_admin_line(backend, line + 6);
+		return;
+	}
+
+	/* One-shot RDP extend credential response. */
+	if (strncmp(line, "EXTEND_OK ", 10U) == 0) {
+		char ext_user[64];
+		char ext_pass[64];
+		unsigned ext_port = 0U;
+		if (sscanf(line + 10U, "%63s %63s %u", ext_user, ext_pass, &ext_port) == 3 &&
+		    backend->host.extend_prepared != NULL) {
+			backend->host.extend_prepared(backend->host.data, 0,
+						      ext_user, ext_pass, ext_port);
+		} else if (backend->host.extend_prepared != NULL) {
+			backend->host.extend_prepared(backend->host.data, EPROTO,
+						      NULL, NULL, 0U);
+		}
+		memset(ext_pass, 0, sizeof(ext_pass));
+		return;
+	}
+	if (strcmp(line, "EXTEND_FAIL") == 0) {
+		if (backend->host.extend_prepared != NULL)
+			backend->host.extend_prepared(backend->host.data, EIO,
+						      NULL, NULL, 0U);
+		return;
+	}
+	if (strncmp(line, "EXTEND_ATTACH ", 14U) == 0) {
+		unsigned long w = 0UL;
+		unsigned long h = 0UL;
+		int fd = -1;
+		if (backend->admin_held_count > 0U) {
+			fd = backend->admin_held[0];
+			if (backend->admin_held_count > 1U) {
+				memmove(&backend->admin_held[0],
+					&backend->admin_held[1],
+					(backend->admin_held_count - 1U) * sizeof(int));
+			}
+			backend->admin_held_count--;
+		}
+		if (fd >= 0 && sscanf(line + 14U, "%lu %lu", &w, &h) == 2 &&
+		    backend->host.extend_attach != NULL) {
+			backend->host.extend_attach(backend->host.data, fd,
+						    (uint32_t)w, (uint32_t)h);
+		} else if (fd >= 0) {
+			(void)close(fd);
+		}
 		return;
 	}
 

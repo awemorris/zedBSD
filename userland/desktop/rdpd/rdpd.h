@@ -23,8 +23,11 @@ extern "C" {
 #endif
 
 #define RDPD_DEFAULT_PORT	3389U
-#define RDPD_CERT_PATH		"/etc/rdpd/cert.pem"
-#define RDPD_KEY_PATH		"/etc/rdpd/key.pem"
+#define RDPD_STATE_PARENT	"/var/db"
+#define RDPD_STATE_DIR		"/var/db/rdpd"
+#define RDPD_CERT_PATH		"/var/db/rdpd/cert.pem"
+#define RDPD_KEY_PATH		"/var/db/rdpd/key.pem"
+#define RDPD_NTLM_USERS_PATH	"/var/db/rdpd/ntlm.users"
 #define RDPD_PASSKEY_PATH	"/sbin/passkey"
 #define RDPD_WAYLAND_PATH	"/bin/wayland"
 #define RDPD_SESSION_PATH	"/etc/keiland/session"
@@ -90,6 +93,12 @@ void rdpd_session_resize(struct rdpd_session *sess, uint32_t width, uint32_t hei
 
 /* Sends a FORCE_KEY control message to the headless compositor. */
 void rdpd_session_force_key(struct rdpd_session *sess);
+
+/* Looks up a one-shot extend NT hash via /run/sessiond-rdp.sock. */
+int rdpd_extend_lookup(const char *user, uint8_t out_nt_hash[16]);
+
+/* Attaches a one-shot extend session to the active compositor via /run/sessiond-rdp.sock. */
+int rdpd_extend_attach(const char *user, uint32_t width, uint32_t height, int *out_rdp_fd);
 
 /* Terminates the headless compositor and session processes. */
 void rdpd_session_stop(struct rdpd_session *sess);

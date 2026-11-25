@@ -31,6 +31,12 @@
 /* Distance per wheel notch in libkeiland pointer axis units. */
 #define RDP_WHEEL_NOTCH		60.0
 
+/* Touch gesture thresholds in view pixels and microseconds. */
+#define RDP_TOUCH_DRAG_PX	8
+#define RDP_TOUCH_TWO_TAP_PX	16
+#define RDP_TOUCH_WHEEL_PX	60
+#define RDP_TOUCH_TWO_TAP_US	300000ULL
+
 static size_t rdp_conn_read(struct terminal_connection *conn, unsigned char *buf, size_t size);
 static int rdp_conn_write(struct terminal_connection *conn, const unsigned char *bytes, size_t size, size_t *written);
 static int rdp_conn_resize(struct terminal_connection *conn, unsigned cols, unsigned rows, unsigned w, unsigned h);
@@ -52,6 +58,8 @@ static void rdp_view_refuse(struct terminal_connection *conn);
 static void tab_wake_ui(struct rdp_tab *tab);
 static void tab_wake_worker(struct rdp_tab *tab);
 static void tab_queue_input(struct rdp_tab *tab, unsigned kind, uint16_t code, uint16_t flags, uint16_t x, uint16_t y);
+static void rdp_map_coords(struct rdp_tab *tab, int32_t vx, int32_t vy, uint16_t *out_px, uint16_t *out_py);
+static void rdp_handle_touch(struct rdp_tab *tab, const struct terminal_picture_event *event);
 static uint32_t decode_utf8_one(const char *s, size_t len, size_t *step);
 
 /* View operations table for RDP tabs. */
@@ -688,43 +696,14 @@ rdp_view_input(
 		}
 		return;
 	}
-	{
-		uint32_t fb_w;
-		uint32_t fb_h;
-		uint32_t vw;
-		uint32_t vh;
-		uint32_t dst_x;
-		uint32_t dst_y;
-		uint32_t dst_w;
-		uint32_t dst_h;
-		int32_t rx;
-		int32_t ry;
-		kl_mutex_lock(&tab->lock);
-		fb_w = tab->fb_width;
-		fb_h = tab->fb_height;
-		vw = tab->view_width;
-		vh = tab->view_height;
-		kl_mutex_unlock(&tab->lock);
-		if (fb_w > 0U && fb_h > 0U && vw > 0U && vh > 0U) {
-			rdp_fit_rect(fb_w, fb_h, vw, vh,
-				     &dst_x, &dst_y, &dst_w, &dst_h);
-			rx = (int32_t)event->x - (int32_t)dst_x;
-			ry = (int32_t)event->y - (int32_t)dst_y;
-			if (rx < 0)
-				rx = 0;
-			if (ry < 0)
-				ry = 0;
-			if ((uint32_t)rx >= dst_w)
-				rx = (int32_t)(dst_w - 1U);
-			if ((uint32_t)ry >= dst_h)
-				ry = (int32_t)(dst_h - 1U);
-			px = (uint16_t)(((uint32_t)rx * fb_w) / dst_w);
-			py = (uint16_t)(((uint32_t)ry * fb_h) / dst_h);
-		} else {
-			px = event->x > 0 ? (uint16_t)event->x : 0U;
-			py = event->y > 0 ? (uint16_t)event->y : 0U;
-		}
+	if (event->kind == TERMINAL_PICTURE_TOUCH_DOWN ||
+	    event->kind == TERMINAL_PICTURE_TOUCH_MOVE ||
+	    event->kind == TERMINAL_PICTURE_TOUCH_UP ||
+	    event->kind == TERMINAL_PICTURE_TOUCH_CANCEL) {
+		rdp_handle_touch(tab, event);
+		return;
 	}
+	rdp_map_coords(tab, event->x, event->y, &px, &py);
 	if (event->kind == TERMINAL_PICTURE_MOTION) {
 		tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U, RDP_PTR_FLAG_MOVE,
 				px, py);
@@ -916,6 +895,224 @@ tab_queue_input(
 
 	kl_mutex_unlock(&tab->lock);
 	tab_wake_worker(tab);
+}
+
+/* Maps view coordinates to remote RDP framebuffer coordinates. */
+static void
+rdp_map_coords(
+	struct rdp_tab *tab,
+	int32_t vx,
+	int32_t vy,
+	uint16_t *out_px,
+	uint16_t *out_py)
+{
+	uint32_t fb_w;
+	uint32_t fb_h;
+	uint32_t vw;
+	uint32_t vh;
+	uint32_t dst_x;
+	uint32_t dst_y;
+	uint32_t dst_w;
+	uint32_t dst_h;
+	int32_t rx;
+	int32_t ry;
+
+	kl_mutex_lock(&tab->lock);
+	fb_w = tab->fb_width;
+	fb_h = tab->fb_height;
+	vw = tab->view_width;
+	vh = tab->view_height;
+	kl_mutex_unlock(&tab->lock);
+	if (fb_w > 0U && fb_h > 0U && vw > 0U && vh > 0U) {
+		rdp_fit_rect(fb_w, fb_h, vw, vh,
+			     &dst_x, &dst_y, &dst_w, &dst_h);
+		rx = vx - (int32_t)dst_x;
+		ry = vy - (int32_t)dst_y;
+		if (rx < 0)
+			rx = 0;
+		if (ry < 0)
+			ry = 0;
+		if ((uint32_t)rx >= dst_w)
+			rx = (int32_t)(dst_w - 1U);
+		if ((uint32_t)ry >= dst_h)
+			ry = (int32_t)(dst_h - 1U);
+		*out_px = (uint16_t)(((uint32_t)rx * fb_w) / dst_w);
+		*out_py = (uint16_t)(((uint32_t)ry * fb_h) / dst_h);
+	} else {
+		*out_px = vx > 0 ? (uint16_t)vx : 0U;
+		*out_py = vy > 0 ? (uint16_t)vy : 0U;
+	}
+}
+
+/* Converts touch contacts into RDP pointer motion, left/right clicks, and wheel scroll. */
+static void
+rdp_handle_touch(
+	struct rdp_tab *tab,
+	const struct terminal_picture_event *event)
+{
+	int slot;
+	int32_t id;
+	int32_t dx;
+	int32_t dy;
+	int32_t avg_y;
+	int notches;
+	uint16_t px;
+	uint16_t py;
+	uint16_t flags;
+	int i;
+
+	id = (int32_t)event->code;
+	if (event->kind == TERMINAL_PICTURE_TOUCH_CANCEL) {
+		if (tab->touch_pressed_left != 0) {
+			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+					RDP_PTR_FLAG_BUTTON1,
+					tab->touch_last_px, tab->touch_last_py);
+			tab->touch_pressed_left = 0;
+		}
+		tab->touch_active[0] = 0;
+		tab->touch_active[1] = 0;
+		tab->touch_two_finger = 0;
+		tab->touch_two_done = 0;
+		tab->touch_moved_far = 0;
+		tab->touch_wheel_accum_y = 0;
+		return;
+	}
+
+	if (event->kind == TERMINAL_PICTURE_TOUCH_DOWN) {
+		slot = !tab->touch_active[0] ? 0 : (!tab->touch_active[1] ? 1 : -1);
+		if (slot < 0)
+			return;
+		tab->touch_active[slot] = 1;
+		tab->touch_id[slot] = id;
+		tab->touch_start_x[slot] = event->x;
+		tab->touch_start_y[slot] = event->y;
+		tab->touch_x[slot] = event->x;
+		tab->touch_y[slot] = event->y;
+		if (tab->touch_active[0] && tab->touch_active[1]) {
+			if (tab->touch_pressed_left != 0) {
+				tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+						RDP_PTR_FLAG_BUTTON1,
+						tab->touch_last_px,
+						tab->touch_last_py);
+				tab->touch_pressed_left = 0;
+			}
+			tab->touch_two_finger = 1;
+			tab->touch_two_done = 0;
+			tab->touch_moved_far = 0;
+			tab->touch_wheel_accum_y = 0;
+			tab->touch_two_start_us = kl_clock_us();
+			tab->touch_two_last_y = (tab->touch_y[0] + tab->touch_y[1]) / 2;
+		} else if (!tab->touch_two_finger) {
+			rdp_map_coords(tab, event->x, event->y, &px, &py);
+			tab->touch_last_px = px;
+			tab->touch_last_py = py;
+			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+					RDP_PTR_FLAG_MOVE, px, py);
+		}
+		return;
+	}
+
+	slot = (tab->touch_active[0] && tab->touch_id[0] == id) ? 0 :
+	       ((tab->touch_active[1] && tab->touch_id[1] == id) ? 1 : -1);
+	if (slot < 0)
+		return;
+
+	if (event->kind == TERMINAL_PICTURE_TOUCH_MOVE) {
+		tab->touch_x[slot] = event->x;
+		tab->touch_y[slot] = event->y;
+		if (tab->touch_two_finger) {
+			if (!tab->touch_active[0] || !tab->touch_active[1])
+				return;
+			for (i = 0; i < 2; i++) {
+				dx = tab->touch_x[i] - tab->touch_start_x[i];
+				dy = tab->touch_y[i] - tab->touch_start_y[i];
+				if (dx < 0)
+					dx = -dx;
+				if (dy < 0)
+					dy = -dy;
+				if (dx > RDP_TOUCH_TWO_TAP_PX || dy > RDP_TOUCH_TWO_TAP_PX)
+					tab->touch_moved_far = 1;
+			}
+			avg_y = (tab->touch_y[0] + tab->touch_y[1]) / 2;
+			tab->touch_wheel_accum_y += avg_y - tab->touch_two_last_y;
+			tab->touch_two_last_y = avg_y;
+			notches = tab->touch_wheel_accum_y / RDP_TOUCH_WHEEL_PX;
+			if (notches != 0) {
+				tab->touch_wheel_accum_y -= notches * RDP_TOUCH_WHEEL_PX;
+				tab->touch_two_done = 1;
+				for (i = 0; i < (notches < 0 ? -notches : notches); i++) {
+					flags = RDP_PTR_FLAG_WHEEL;
+					if (notches > 0)
+						flags |= (uint16_t)(120U & 0x01FFU);
+					else
+						flags |= (uint16_t)(RDP_PTR_FLAG_WHEEL_NEGATIVE | ((-120) & 0x00FFU));
+					tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+							flags, tab->touch_last_px,
+							tab->touch_last_py);
+				}
+			}
+			return;
+		}
+		rdp_map_coords(tab, event->x, event->y, &px, &py);
+		if (tab->touch_pressed_left == 0) {
+			dx = event->x - tab->touch_start_x[slot];
+			dy = event->y - tab->touch_start_y[slot];
+			if (dx < 0)
+				dx = -dx;
+			if (dy < 0)
+				dy = -dy;
+			if (dx > RDP_TOUCH_DRAG_PX || dy > RDP_TOUCH_DRAG_PX) {
+				tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+						RDP_PTR_FLAG_BUTTON1 | RDP_PTR_FLAG_DOWN,
+						tab->touch_last_px, tab->touch_last_py);
+				tab->touch_pressed_left = 1;
+			}
+		}
+		tab->touch_last_px = px;
+		tab->touch_last_py = py;
+		tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+				RDP_PTR_FLAG_MOVE, px, py);
+		return;
+	}
+
+	if (event->kind == TERMINAL_PICTURE_TOUCH_UP) {
+		tab->touch_x[slot] = event->x;
+		tab->touch_y[slot] = event->y;
+		if (tab->touch_two_finger) {
+			uint64_t now_us = kl_clock_us();
+			if (!tab->touch_two_done && !tab->touch_moved_far &&
+			    now_us >= tab->touch_two_start_us &&
+			    (now_us - tab->touch_two_start_us) <= RDP_TOUCH_TWO_TAP_US) {
+				tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+						RDP_PTR_FLAG_BUTTON2 | RDP_PTR_FLAG_DOWN,
+						tab->touch_last_px, tab->touch_last_py);
+				tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+						RDP_PTR_FLAG_BUTTON2,
+						tab->touch_last_px, tab->touch_last_py);
+				tab->touch_two_done = 1;
+			}
+			tab->touch_active[slot] = 0;
+			if (!tab->touch_active[0] && !tab->touch_active[1]) {
+				tab->touch_two_finger = 0;
+				tab->touch_two_done = 0;
+				tab->touch_moved_far = 0;
+				tab->touch_wheel_accum_y = 0;
+			}
+			return;
+		}
+		rdp_map_coords(tab, event->x, event->y, &px, &py);
+		tab->touch_last_px = px;
+		tab->touch_last_py = py;
+		if (tab->touch_pressed_left == 0) {
+			tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+					RDP_PTR_FLAG_BUTTON1 | RDP_PTR_FLAG_DOWN,
+					px, py);
+		}
+		tab_queue_input(tab, RDP_TAB_IN_MOUSE, 0U,
+				RDP_PTR_FLAG_BUTTON1, px, py);
+		tab->touch_pressed_left = 0;
+		tab->touch_active[slot] = 0;
+	}
 }
 
 /* Decodes one UTF-8 codepoint from s[0..len). */

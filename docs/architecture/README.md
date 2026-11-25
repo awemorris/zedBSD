@@ -38,6 +38,10 @@ the target design; the implementation follows ([rules](../style.md)).
 - [Keiland desktop environment](keiland.md):
   Purpose, layers, unified touch and desktop UI/UX, the stable `libkeiland` API,
   internal Wayland extensions, OS backends, and the titlebar.
+- [Network Display architecture](network-display.md):
+  UDP discovery, X25519 + HKDF-SHA256 + ChaCha20 + HMAC-SHA256 pairing,
+  one-shot `sessiond`/`rdpd` attachment, and non-blocking virtual extended
+  display rendering in `wayland`.
 
 ---
 

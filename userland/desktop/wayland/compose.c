@@ -25,6 +25,7 @@
 #include "extras.h"
 #include "ime.h"
 #include "rdp-headless.h"
+#include "netdisp.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -5893,6 +5894,10 @@ compose_op_acquire_head(
 	head = &compose->heads[slot];
 	if (!head->open)
 		return VK_ERROR_OUT_OF_DATE_KHR;
+	if (head->virtual_rdp) {
+		*image = 0U;
+		return VK_SUCCESS;
+	}
 
 	/* Its next image now, or not ready. */
 	result = vkAcquireNextImageKHR(compose->device, head->output.swapchain, 0U, head->acquired, VK_NULL_HANDLE, image);
@@ -5957,7 +5962,7 @@ compose_op_run(
 		wait_count = 1U;
 		signal_count = 1U;
 		for (index = 0U; index < KWL_HEADS; index++) {
-			if (!job->heads[index])
+			if (!job->heads[index] || compose->heads[index].virtual_rdp)
 				continue;
 			head = &compose->heads[index];
 			waits[wait_count] = head->acquired;
@@ -6050,6 +6055,11 @@ compose_op_run(
 		if (!job->heads[index])
 			continue;
 		head = &compose->heads[index];
+		if (head->virtual_rdp) {
+			outcome->heads[index] = 1U;
+			outcome->head_results[index] = VK_SUCCESS;
+			continue;
+		}
 		memset(&present, 0, sizeof(present));
 		present.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
 		present.waitSemaphoreCount = 1U;
@@ -6071,6 +6081,17 @@ compose_op_run(
 
 	/* Lets the queue go once all the presents are made. */
 	kwl_queue_unlock(compose);
+
+	for (index = 0U; index < KWL_HEADS; index++) {
+		if (!job->heads[index])
+			continue;
+		head = &compose->heads[index];
+		if (head->virtual_rdp && head->rdp_ext != NULL) {
+			if (vkWaitForFences(compose->device, 1U, &slot->fence,
+					    VK_TRUE, UINT64_MAX) == VK_SUCCESS)
+				kwl_netdisp_copy_frame(compose, head);
+		}
+	}
 
 	/* The present's end, and the render thread's time of the job. */
 	outcome->present_cycles = kwl_cycles() - mark;

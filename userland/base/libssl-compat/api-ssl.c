@@ -922,7 +922,266 @@ SSL_CTX_use_certificate_file(
 }
 
 /*
- * Loads a private key file into ctx.
+ * Reads one DER tag-length-value element from buf[pos..len].
+ */
+static int
+sslc_read_der_tlv(
+	const uint8_t *buf,
+	size_t len,
+	size_t *pos,
+	uint8_t *out_tag,
+	const uint8_t **out_val,
+	size_t *out_vlen)
+{
+	uint8_t tag;
+	uint8_t lb;
+	size_t vlen;
+	size_t nbytes;
+	size_t i;
+
+	if (*pos >= len)
+		return -1;
+	tag = buf[(*pos)++];
+	if (*pos >= len)
+		return -1;
+	lb = buf[(*pos)++];
+	if ((lb & 0x80U) == 0U) {
+		vlen = lb;
+	} else {
+		nbytes = lb & 0x7FU;
+		if (nbytes == 0U || nbytes > 2U || *pos + nbytes > len)
+			return -1;
+		vlen = 0U;
+		for (i = 0U; i < nbytes; i++)
+			vlen = (vlen << 8) | buf[(*pos)++];
+	}
+	if (*pos + vlen > len)
+		return -1;
+
+	*out_tag = tag;
+	*out_val = buf + *pos;
+	*out_vlen = vlen;
+	*pos += vlen;
+	return 0;
+}
+
+/*
+ * Extracts a 32-byte ECDSA P-256 private scalar from SEC1 ECPrivateKey
+ * or PKCS#8 PrivateKeyInfo DER.
+ */
+static int
+sslc_extract_p256_priv_der(
+	const uint8_t *der,
+	size_t der_len,
+	uint8_t out_priv[32])
+{
+	static const uint8_t oid_ec_pubkey[7] = {
+		0x2AU, 0x86U, 0x48U, 0xCEU, 0x3DU, 0x02U, 0x01U
+	};
+	size_t pos;
+	uint8_t tag;
+	const uint8_t *seq;
+	size_t seq_len;
+	size_t spos;
+	const uint8_t *ver;
+	size_t ver_len;
+	const uint8_t *val;
+	size_t vlen;
+
+	pos = 0U;
+	if (sslc_read_der_tlv(der, der_len, &pos, &tag, &seq, &seq_len) != 0 ||
+	    tag != 0x30U)
+		return -1;
+
+	spos = 0U;
+	if (sslc_read_der_tlv(seq, seq_len, &spos, &tag, &ver, &ver_len) != 0 ||
+	    tag != 0x02U || ver_len != 1U)
+		return -1;
+
+	if (ver[0] == 0x01U) {
+		/* SEC1 ECPrivateKey: version INTEGER 1, privateKey OCTET STRING (32). */
+		if (sslc_read_der_tlv(seq, seq_len, &spos, &tag, &val, &vlen) != 0 ||
+		    tag != 0x04U || vlen != 32U)
+			return -1;
+		memcpy(out_priv, val, 32U);
+		return 0;
+	}
+
+	if (ver[0] == 0x00U) {
+		/* PKCS#8 PrivateKeyInfo: version 0, AlgorithmIdentifier, privateKey OCTET STRING. */
+		const uint8_t *alg;
+		size_t alg_len;
+		size_t apos;
+		const uint8_t *oid;
+		size_t oid_len;
+
+		if (sslc_read_der_tlv(seq, seq_len, &spos, &tag, &alg, &alg_len) != 0 ||
+		    tag != 0x30U)
+			return -1;
+		apos = 0U;
+		if (sslc_read_der_tlv(alg, alg_len, &apos, &tag, &oid, &oid_len) != 0 ||
+		    tag != 0x06U || oid_len != sizeof(oid_ec_pubkey) ||
+		    memcmp(oid, oid_ec_pubkey, sizeof(oid_ec_pubkey)) != 0)
+			return -1;
+		if (sslc_read_der_tlv(seq, seq_len, &spos, &tag, &val, &vlen) != 0 ||
+		    tag != 0x04U)
+			return -1;
+		return sslc_extract_p256_priv_der(val, vlen, out_priv);
+	}
+
+	return -1;
+}
+
+/*
+ * Encodes der[0..der_len) as a PEM block with the given label into a
+ * malloc'd NUL-terminated buffer.
+ */
+static int
+sslc_encode_pem(
+	const char *label,
+	const uint8_t *der,
+	size_t der_len,
+	char **out_pem,
+	size_t *out_len)
+{
+	static const char b64[] =
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	size_t label_len;
+	size_t b64_len;
+	size_t lines;
+	size_t cap;
+	char *buf;
+	size_t pos;
+	size_t i;
+	size_t col;
+
+	label_len = strlen(label);
+	b64_len = ((der_len + 2U) / 3U) * 4U;
+	lines = (b64_len + 63U) / 64U;
+	if (lines == 0U)
+		lines = 1U;
+	cap = 11U + label_len + 6U + b64_len + lines + 9U + label_len + 6U + 1U;
+	buf = (char *)malloc(cap);
+	if (buf == NULL)
+		return -1;
+
+	pos = 0U;
+	memcpy(buf + pos, "-----BEGIN ", 11U);
+	pos += 11U;
+	memcpy(buf + pos, label, label_len);
+	pos += label_len;
+	memcpy(buf + pos, "-----\n", 6U);
+	pos += 6U;
+
+	col = 0U;
+	for (i = 0U; i < der_len; i += 3U) {
+		uint32_t v = ((uint32_t)der[i]) << 16;
+		char q[4];
+		size_t k;
+
+		if (i + 1U < der_len)
+			v |= ((uint32_t)der[i + 1U]) << 8;
+		if (i + 2U < der_len)
+			v |= (uint32_t)der[i + 2U];
+
+		q[0] = b64[(v >> 18) & 0x3FU];
+		q[1] = b64[(v >> 12) & 0x3FU];
+		q[2] = (i + 1U < der_len) ? b64[(v >> 6) & 0x3FU] : '=';
+		q[3] = (i + 2U < der_len) ? b64[v & 0x3FU] : '=';
+		for (k = 0U; k < 4U; k++) {
+			buf[pos++] = q[k];
+			col++;
+			if (col == 64U) {
+				buf[pos++] = '\n';
+				col = 0U;
+			}
+		}
+	}
+	if (col != 0U)
+		buf[pos++] = '\n';
+
+	memcpy(buf + pos, "-----END ", 9U);
+	pos += 9U;
+	memcpy(buf + pos, label, label_len);
+	pos += label_len;
+	memcpy(buf + pos, "-----\n", 6U);
+	pos += 6U;
+	buf[pos] = '\0';
+
+	*out_pem = buf;
+	*out_len = pos;
+	return 0;
+}
+
+/*
+ * Finds a PEM block matching begin_hdr / end_hdr in text[0..size) and
+ * base64-decodes it into a malloc'd DER buffer.
+ */
+static int
+sslc_decode_pem_block(
+	const char *text,
+	size_t size,
+	const char *begin_hdr,
+	const char *end_hdr,
+	uint8_t **out_der,
+	size_t *out_len)
+{
+	size_t blen;
+	size_t elen;
+	size_t i;
+	size_t body_start;
+	size_t body_end;
+	size_t room;
+	uint8_t *der;
+	size_t written;
+
+	blen = strlen(begin_hdr);
+	elen = strlen(end_hdr);
+	body_start = size;
+	for (i = 0U; i + blen <= size; i++) {
+		if (memcmp(text + i, begin_hdr, blen) == 0) {
+			body_start = i + blen;
+			break;
+		}
+	}
+	if (body_start >= size)
+		return -1;
+
+	while (body_start < size &&
+	       (text[body_start] == '\r' || text[body_start] == '\n'))
+		body_start++;
+
+	body_end = size;
+	for (i = body_start; i + elen <= size; i++) {
+		if (memcmp(text + i, end_hdr, elen) == 0) {
+			body_end = i;
+			break;
+		}
+	}
+	if (body_end >= size || body_end <= body_start)
+		return -1;
+
+	room = ((body_end - body_start) / 4U + 1U) * 3U;
+	der = (uint8_t *)malloc(room);
+	if (der == NULL)
+		return -1;
+
+	written = 0U;
+	if (cryc_base64_decode(text + body_start, body_end - body_start,
+			       der, room, &written) != 0 ||
+	    written == 0U) {
+		cryc_wipe(der, room);
+		free(der);
+		return -1;
+	}
+
+	*out_der = der;
+	*out_len = written;
+	return 0;
+}
+
+/*
+ * Loads a private key file (PEM PKCS#8 / SEC1 EC, or raw 32-byte P-256) into ctx.
  */
 int
 SSL_CTX_use_PrivateKey_file(
@@ -932,9 +1191,11 @@ SSL_CTX_use_PrivateKey_file(
 {
 	uint8_t *buf;
 	size_t size;
+	uint8_t *der;
+	size_t der_len;
+	uint8_t priv32[32];
 	int ok;
 
-	(void)type;
 	if (ctx == NULL || file == NULL)
 		return 0;
 
@@ -946,8 +1207,30 @@ SSL_CTX_use_PrivateKey_file(
 	ok = 0;
 	if (size == 32U) {
 		ok = SSL_CTX_use_PrivateKey_ASN1(0, ctx, buf, (long)size);
+	} else if (type == SSL_FILETYPE_ASN1) {
+		if (sslc_extract_p256_priv_der(buf, size, priv32) == 0)
+			ok = SSL_CTX_use_PrivateKey_ASN1(0, ctx, priv32, 32L);
+	} else {
+		der = NULL;
+		der_len = 0U;
+		if (sslc_decode_pem_block((const char *)buf, size,
+					  "-----BEGIN PRIVATE KEY-----",
+					  "-----END PRIVATE KEY-----",
+					  &der, &der_len) != 0) {
+			(void)sslc_decode_pem_block((const char *)buf, size,
+						    "-----BEGIN EC PRIVATE KEY-----",
+						    "-----END EC PRIVATE KEY-----",
+						    &der, &der_len);
+		}
+		if (der != NULL) {
+			if (sslc_extract_p256_priv_der(der, der_len, priv32) == 0)
+				ok = SSL_CTX_use_PrivateKey_ASN1(0, ctx, priv32, 32L);
+			cryc_wipe(der, der_len);
+			free(der);
+		}
 	}
 
+	cryc_wipe(priv32, sizeof(priv32));
 	cryc_wipe(buf, size);
 	free(buf);
 	return ok;
@@ -1008,6 +1291,86 @@ SSL_CTX_get0_certificate_ASN1(
 	*len = ctx->cert_der_len;
 	cryc_os_mutex_unlock(&ctx->lock);
 	return (*der != NULL && *len > 0U) ? 1 : 0;
+}
+
+/*
+ * Exports the configured certificate and P-256 private key as PEM-encoded
+ * NUL-terminated buffers (caller frees *cert_pem and *key_pem).
+ */
+int
+SSL_CTX_export_PEM(
+	SSL_CTX *ctx,
+	char **cert_pem,
+	size_t *cert_len,
+	char **key_pem,
+	size_t *key_len)
+{
+	static const uint8_t pkcs8_p256_prefix[35] = {
+		0x30U, 0x41U,
+		0x02U, 0x01U, 0x00U,
+		0x30U, 0x13U,
+		0x06U, 0x07U, 0x2AU, 0x86U, 0x48U, 0xCEU, 0x3DU, 0x02U, 0x01U,
+		0x06U, 0x08U, 0x2AU, 0x86U, 0x48U, 0xCEU, 0x3DU, 0x03U, 0x01U, 0x07U,
+		0x04U, 0x27U,
+		0x30U, 0x25U,
+		0x02U, 0x01U, 0x01U,
+		0x04U, 0x20U
+	};
+	uint8_t *cert_copy;
+	size_t cert_copy_len;
+	uint8_t pkcs8[67];
+	int has_both;
+
+	if (ctx == NULL || cert_pem == NULL || cert_len == NULL ||
+	    key_pem == NULL || key_len == NULL)
+		return 0;
+
+	*cert_pem = NULL;
+	*cert_len = 0U;
+	*key_pem = NULL;
+	*key_len = 0U;
+
+	cert_copy = NULL;
+	cert_copy_len = 0U;
+	has_both = 0;
+
+	cryc_os_mutex_lock(&ctx->lock);
+	if (ctx->cert_der != NULL && ctx->cert_der_len > 0U &&
+	    ctx->ec_priv != NULL && ctx->ec_priv_len == 32U) {
+		cert_copy = (uint8_t *)malloc(ctx->cert_der_len);
+		if (cert_copy != NULL) {
+			memcpy(cert_copy, ctx->cert_der, ctx->cert_der_len);
+			cert_copy_len = ctx->cert_der_len;
+			memcpy(pkcs8, pkcs8_p256_prefix, sizeof(pkcs8_p256_prefix));
+			memcpy(pkcs8 + sizeof(pkcs8_p256_prefix), ctx->ec_priv, 32U);
+			has_both = 1;
+		}
+	}
+	cryc_os_mutex_unlock(&ctx->lock);
+
+	if (!has_both) {
+		free(cert_copy);
+		return 0;
+	}
+
+	if (sslc_encode_pem("CERTIFICATE", cert_copy, cert_copy_len,
+			    cert_pem, cert_len) != 0 ||
+	    sslc_encode_pem("PRIVATE KEY", pkcs8, sizeof(pkcs8),
+			    key_pem, key_len) != 0) {
+		cryc_wipe(pkcs8, sizeof(pkcs8));
+		free(cert_copy);
+		free(*cert_pem);
+		free(*key_pem);
+		*cert_pem = NULL;
+		*cert_len = 0U;
+		*key_pem = NULL;
+		*key_len = 0U;
+		return 0;
+	}
+
+	cryc_wipe(pkcs8, sizeof(pkcs8));
+	free(cert_copy);
+	return 1;
 }
 
 /*

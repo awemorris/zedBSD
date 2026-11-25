@@ -21,6 +21,7 @@
 #include "data.h"
 #include "titlebar.h"
 #include "rdp-headless.h"
+#include "netdisp.h"
 #include "userland/desktop/paths.h"
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
 #include <sys/socket.h>
@@ -176,6 +177,8 @@ main(
 	backend_host.lid_changed = kwl_backend_lid_changed;
 	backend_host.keys_changed = kwl_backend_keys_changed;
 	backend_host.session_admin = kwl_admin_answer;
+	backend_host.extend_prepared = kwl_netdisp_extend_prepared;
+	backend_host.extend_attach = kwl_netdisp_extend_attach;
 
 	/* Reads the command line; a mistake ends the run with the usage. */
 	error = parse_options(&server, count, arguments);
@@ -395,6 +398,8 @@ main(
 		error = kwl_input_threads_start(&server);
 		if (error != 0)
 			printf("KWL FAILED site=input-thread errno=%d\n", error);
+		else if (!server.headless)
+			kwl_netdisp_start(&server);
 	}
 
 	/*
@@ -1275,6 +1280,13 @@ event_loop(
 			server->watched[server->watched_count].revents = 0;
 			server->watched_count++;
 		}
+		if (!server->headless && kwl_netdisp_rdp_fd(server) >= 0 &&
+		    server->watched_count < KWL_WATCH_MAX) {
+			server->watched[server->watched_count].fd = kwl_netdisp_rdp_fd(server);
+			server->watched[server->watched_count].events = POLLIN;
+			server->watched[server->watched_count].revents = 0;
+			server->watched_count++;
+		}
 		for (index = 0; index < server->watched_count; index++)
 			descriptors[first_watched + index] = server->watched[index];
 
@@ -1338,6 +1350,10 @@ event_loop(
 		/* Poll headless RDP control channel for dynamic resize or keyframe requests. */
 		if (server->headless)
 			kwl_rdp_poll(server);
+		else {
+			kwl_netdisp_poll(server);
+			kwl_netdisp_tick(server, now);
+		}
 
 		/*
 		 * A backend that does not wake the loop has its areas read on every
@@ -1554,6 +1570,7 @@ service_cleanup(
 	kwl_retire_flush(server);
 
 	/* The swapchain and the Vulkan device go after every buffer's image. */
+	kwl_netdisp_stop(server);
 	kwl_compose_close(server);
 
 	/* The input thread lets go of every device; then, no client remaining to hear from the seat, they close quietly. */
@@ -1866,6 +1883,10 @@ loop_timeout(
 		int rdp_timeout = kwl_rdp_idle_timeout(server);
 		if (rdp_timeout >= 0 && (timeout < 0 || rdp_timeout < timeout))
 			timeout = rdp_timeout;
+	} else {
+		int nd_timeout = kwl_netdisp_timeout(server, kwl_milliseconds());
+		if (nd_timeout >= 0 && (timeout < 0 || nd_timeout < timeout))
+			timeout = nd_timeout;
 	}
 
 	/* Succeeded: the wait's end, -1 for an event only. */

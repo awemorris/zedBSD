@@ -299,7 +299,7 @@ mikuterm_rdp_password_keep(
 	memset(&credential, 0, sizeof(credential));
 	credential.Type = CRED_TYPE_GENERIC;
 	credential.TargetName = name;
-	credential.Comment = L"RDP password saved by mikuterm";
+	credential.Comment = L"Password saved by mikuterm";
 	credential.CredentialBlobSize = (DWORD)length;
 	credential.CredentialBlob = (LPBYTE)password;
 	credential.Persist = CRED_PERSIST_ENTERPRISE;

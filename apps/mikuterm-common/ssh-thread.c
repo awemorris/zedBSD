@@ -40,6 +40,7 @@
 #include "rdp-hosts.h"
 #include "rdp-tab.h"
 #include "rdp-thread.h"
+#include "netdisp-tab.h"
 #include "sftp-link.h"
 #include "x11-host.h"
 #include "mikuterm-version.h"
@@ -287,6 +288,9 @@ struct thread_link {
 	unsigned missing_count;
 	int keys_said;
 	int recalled[SSH_ENGINE_IDENTITIES_MAX];
+	int password_recalled;
+	int password_from_store;
+	char password_pending[SESSION_LINE_MAX];
 	uint8_t host_key[SSH_ED25519_PUBLIC];
 	char fingerprint[SSH_KEY_FINGERPRINT_SIZE];
 	char known_name[MIKUTERM_HOST_MAX + 8U];
@@ -555,6 +559,7 @@ thread_choose(
 	(void)launch_add(&choice->screen, "c", LAUNCH_CODESPACES, "GitHub Codespaces", NULL);
 #endif
 	(void)launch_add(&choice->screen, "r", LAUNCH_RDP, "RDP", NULL);
+	(void)launch_add(&choice->screen, "n", LAUNCH_NETWORK_DISPLAY, "Network Display", NULL);
 	(void)launch_add(&choice->screen, "x", LAUNCH_SETTINGS, "Settings", NULL);
 	if (choice->hosts.count == 0U) {
 		mikuterm_path_shown(THREAD_SSH_CONFIG, config, sizeof(config));
@@ -707,6 +712,48 @@ thread_choose(
 			break;
 		}
 
+		/* Network Display: advertise on LAN and transition to RDP on offer. */
+		if (choice->screen.rows[index].kind == LAUNCH_NETWORK_DISPLAY) {
+			struct rdp_host_entry target;
+			struct rdp_tab *tab = NULL;
+			error = netdisp_wait_and_receive(choice->session, &target);
+			if (error == ECANCELED) {
+				error = 0;
+				launch_choose(&choice->screen, index);
+				continue;
+			}
+			if (error != 0)
+				break;
+			error = rdp_tab_create(target.host_name, target.width,
+					       target.height, 1,
+					       choice->session->app,
+					       choice->session->number, &tab);
+			if (error != 0) {
+				OPENSSL_cleanse(target.password, sizeof(target.password));
+				launch_choose(&choice->screen, index);
+				continue;
+			}
+#ifdef MIKUTERM_HAVE_LIBMEDIA
+			error = rdp_thread_start(tab, &target, &rdp_media_decoder_ops,
+						 choice->session->connect_timeout);
+#elif defined(__ANDROID__)
+			error = rdp_thread_start(tab, &target, &rdp_mediacodec_decoder_ops,
+						 choice->session->connect_timeout);
+#else
+			error = rdp_thread_start(tab, &target, &rdp_h264sw_decoder_ops,
+						 choice->session->connect_timeout);
+#endif
+			OPENSSL_cleanse(target.password, sizeof(target.password));
+			if (error != 0) {
+				rdp_tab_release(tab);
+				launch_choose(&choice->screen, index);
+				continue;
+			}
+			session_rdp_tab(choice->session, &tab->connection);
+			launch_choose(&choice->screen, index);
+			continue;
+		}
+
 #if MIKUTERM_HAVE_LOGIN_SHELL
 		/* The login shell, the tab's from now on; one that cannot be found is said, and the screen stays. */
 		if (choice->screen.rows[index].kind == LAUNCH_SHELL) {
@@ -801,7 +848,7 @@ thread_hosts_read(
 			(void)snprintf(hosts->users[index], sizeof(hosts->users[index]), "%s", config->user);
 			hosts->ports[index] = config->port;
 			hosts->use_rdp[index] = config->use_rdp;
-			hosts->rdp_ports[index] = config->rdp_port != 0U ? config->rdp_port : 3389U;
+			hosts->rdp_ports[index] = config->port != 0U ? config->port : 3389U;
 			if (config->host_name[0] != '\0')
 				hosts->named[index] = 1;
 		}
@@ -935,7 +982,7 @@ thread_ssh_rdp_check(
 			(void)snprintf(rdp_target->host_name, sizeof(rdp_target->host_name), "%s",
 				       config->host_name[0] != '\0' ? config->host_name : target->host);
 			rdp_target->port = target->port != 0U ? target->port
-					   : (config->rdp_port != 0U ? config->rdp_port : 3389U);
+					   : (config->port != 0U ? config->port : 3389U);
 			(void)snprintf(rdp_target->user, sizeof(rdp_target->user), "%s",
 				       target->user[0] != '\0' ? target->user : config->user);
 			found = 1;
@@ -991,6 +1038,9 @@ thread_launch_rdp_target(
 
 #ifdef MIKUTERM_HAVE_LIBMEDIA
 	error = rdp_thread_start(tab, target, &rdp_media_decoder_ops,
+				 choice->session->connect_timeout);
+#elif defined(__ANDROID__)
+	error = rdp_thread_start(tab, target, &rdp_mediacodec_decoder_ops,
 				 choice->session->connect_timeout);
 #else
 	error = rdp_thread_start(tab, target, &rdp_h264sw_decoder_ops,
@@ -2331,6 +2381,7 @@ thread_attempt(
 		thread_keys_said(link);
 	if (status == THREAD_FAILED)
 		thread_proxy_said(link);
+	OPENSSL_cleanse(link->password_pending, sizeof(link->password_pending));
 	thread_hang_up(link);
 
 	/* Reports how it ended. */
@@ -3055,10 +3106,30 @@ thread_events(
 			break;
 		case SSH_ENGINE_PASSWORD:
 			/* A password, asked in the tab without being shown (first, which keys were not taken). */
-			if (event.tries != 0U)
-				session_say(session, "Permission denied, please try again.\r\n");
-			else
+			OPENSSL_cleanse(link->password_pending, sizeof(link->password_pending));
+			if (event.tries != 0U) {
+				if (link->password_from_store) {
+					mikuterm_rdp_password_forget(link->host_name, link->config.port, link->config.user);
+					link->password_from_store = 0;
+				} else {
+					session_say(session, "Permission denied, please try again.\r\n");
+				}
+			} else {
 				thread_keys_said(link);
+			}
+			if (!link->password_recalled) {
+				char kept[SESSION_LINE_MAX];
+				link->password_recalled = 1;
+				if (mikuterm_rdp_password_recall(link->host_name, link->config.port,
+								 link->config.user, kept, sizeof(kept)) == 0 &&
+				    kept[0] != '\0') {
+					link->password_from_store = 1;
+					(void)ssh_engine_password(link->engine, kept);
+					OPENSSL_cleanse(kept, sizeof(kept));
+					break;
+				}
+				OPENSSL_cleanse(kept, sizeof(kept));
+			}
 			(void)snprintf(prompt, sizeof(prompt), "%s@%s's password: ", link->config.user, link->host_name);
 			thread_ask_start(session, prompt, SESSION_ASK_SECRET);
 			link->asked = THREAD_ASKED_PASSWORD;
@@ -3068,6 +3139,12 @@ thread_events(
 			thread_passphrase(link, &event);
 			break;
 		case SSH_ENGINE_AUTHENTICATED:
+			/* Save a newly entered password once authentication succeeds. */
+			if (link->password_pending[0] != '\0') {
+				(void)mikuterm_rdp_password_keep(link->host_name, link->config.port,
+								 link->config.user, link->password_pending);
+				OPENSSL_cleanse(link->password_pending, sizeof(link->password_pending));
+			}
 			/* The port forwardings start once the user is in, and SFTP may open. */
 			kl_mutex_lock(&session->lock);
 			session->sftp_ready = 1;
@@ -3728,10 +3805,14 @@ thread_answers(
 	} else {
 		/* A password, or none more when the user gave up. */
 		link->asked = THREAD_ASKED_NONE;
-		if (cancelled)
+		if (cancelled) {
+			OPENSSL_cleanse(link->password_pending, sizeof(link->password_pending));
 			(void)ssh_engine_password(link->engine, NULL);
-		else
+		} else {
+			if (answer[0] != '\0')
+				(void)snprintf(link->password_pending, sizeof(link->password_pending), "%s", answer);
 			(void)ssh_engine_password(link->engine, answer);
+		}
 	}
 
 	/* The answer may be a password. */

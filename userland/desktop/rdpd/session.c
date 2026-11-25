@@ -55,6 +55,134 @@ write_str_fd(
 	return 0;
 }
 
+static int
+rdp_sock_connect(
+	void)
+{
+	struct sockaddr_un addr;
+	int fd;
+
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0)
+		return -1;
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	(void)snprintf(addr.sun_path, sizeof(addr.sun_path), "/run/sessiond-rdp.sock");
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		close(fd);
+		return -1;
+	}
+	return fd;
+}
+
+static int
+hex_val(
+	char c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return 10 + (c - 'a');
+	if (c >= 'A' && c <= 'F')
+		return 10 + (c - 'A');
+	return -1;
+}
+
+int
+rdpd_extend_lookup(
+	const char *user,
+	uint8_t out_nt_hash[16])
+{
+	char req[96];
+	char resp[96];
+	ssize_t n;
+	int fd;
+	size_t i;
+
+	if (user == NULL || user[0] == '\0' || out_nt_hash == NULL)
+		return -1;
+	fd = rdp_sock_connect();
+	if (fd < 0)
+		return -1;
+	(void)snprintf(req, sizeof(req), "RDP_EXTEND_LOOKUP %s\n", user);
+	if (write_str_fd(fd, req, strlen(req)) != 0) {
+		close(fd);
+		return -1;
+	}
+	n = read(fd, resp, sizeof(resp) - 1U);
+	close(fd);
+	if (n <= 0)
+		return -1;
+	resp[n] = '\0';
+	if (strncmp(resp, "OK ", 3U) != 0 || strlen(resp) < 35U)
+		return -1;
+	for (i = 0U; i < 16U; i++) {
+		int hi = hex_val(resp[3U + i * 2U]);
+		int lo = hex_val(resp[3U + i * 2U + 1U]);
+		if (hi < 0 || lo < 0)
+			return -1;
+		out_nt_hash[i] = (uint8_t)((hi << 4) | lo);
+	}
+	memset(resp, 0, sizeof(resp));
+	return 0;
+}
+
+int
+rdpd_extend_attach(
+	const char *user,
+	uint32_t width,
+	uint32_t height,
+	int *out_rdp_fd)
+{
+	char req[128];
+	char resp[32];
+	union {
+		struct cmsghdr header;
+		char space[CMSG_SPACE(sizeof(int))];
+	} control;
+	struct msghdr msg;
+	struct iovec vec;
+	struct cmsghdr *cmsg;
+	ssize_t n;
+	int fd;
+
+	if (user == NULL || out_rdp_fd == NULL)
+		return -1;
+	*out_rdp_fd = -1;
+	fd = rdp_sock_connect();
+	if (fd < 0)
+		return -1;
+	(void)snprintf(req, sizeof(req), "RDP_EXTEND %s %u %u\n",
+		       user, (unsigned)width, (unsigned)height);
+	if (write_str_fd(fd, req, strlen(req)) != 0) {
+		close(fd);
+		return -1;
+	}
+	memset(&msg, 0, sizeof(msg));
+	memset(&control, 0, sizeof(control));
+	vec.iov_base = resp;
+	vec.iov_len = sizeof(resp) - 1U;
+	msg.msg_iov = &vec;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control.space;
+	msg.msg_controllen = sizeof(control.space);
+	n = recvmsg(fd, &msg, 0);
+	close(fd);
+	if (n <= 0)
+		return -1;
+	resp[n] = '\0';
+	if (strncmp(resp, "OK", 2U) != 0)
+		return -1;
+	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+		if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS &&
+		    cmsg->cmsg_len >= CMSG_LEN(sizeof(int))) {
+			memcpy(out_rdp_fd, CMSG_DATA(cmsg), sizeof(int));
+			break;
+		}
+	}
+	return (*out_rdp_fd >= 0) ? 0 : -1;
+}
+
 /* Authenticates user/password via /sbin/passkey and returns account info. */
 int
 rdpd_auth_user(

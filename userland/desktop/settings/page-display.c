@@ -74,6 +74,9 @@
 #define DISPLAY_REFRESHES	3000
 #define DISPLAY_RECOMMENDED	5000
 #define DISPLAY_STRIDE		100
+#define DISPLAY_NETDISP_ROW	6000
+#define DISPLAY_NETDISP_CONFIRM	6100
+#define DISPLAY_NETDISP_CANCEL	6101
 
 /*
  * A display's part of the resolutions' card: its label's row, a line of
@@ -243,6 +246,102 @@ se_display_draw(
 	y = display_rotation(app, canvas, x, y, width);
 	y = display_light(app, canvas, x, y, width);
 
+	/* Discovered network displays (LAN mikuterm instances). */
+	{
+		size_t ncount = display->network_count;
+		int card_h;
+		int ny;
+		size_t ni;
+		if (display->netdisp_confirm_open &&
+		    display->netdisp_confirm_index < ncount) {
+			const struct kl_network_display *nd =
+				&display->network_displays[display->netdisp_confirm_index];
+			char info[160];
+			card_h = DISPLAY_TITLED + 108 + DISPLAY_BUTTONS + DISPLAY_PAD;
+			ny = se_card_begin(app, canvas, x, y, width, card_h,
+					   kl_tr("Connect Network Display"),
+					   nd->name);
+			snprintf(info, sizeof(info), "IP: %s", nd->ip);
+			(void)kl_text_draw_fit(app->text, canvas, x + DISPLAY_PAD,
+					       ny + 20, info, DISPLAY_TEXT_SMALL, 0,
+					       width - 2 * DISPLAY_PAD, SE_COLOR_TEXT);
+			snprintf(info, sizeof(info), "Verification Code: %s",
+				 nd->fingerprint);
+			(void)kl_text_draw_fit(app->text, canvas, x + DISPLAY_PAD,
+					       ny + 44, info, DISPLAY_TEXT_SMALL, 0,
+					       width - 2 * DISPLAY_PAD, SE_COLOR_TEXT);
+			if (nd->width > 0U && nd->height > 0U)
+				snprintf(info, sizeof(info), "Resolution: %ux%u",
+					 (unsigned)nd->width, (unsigned)nd->height);
+			else
+				snprintf(info, sizeof(info), "Resolution: 1280x720");
+			(void)kl_text_draw_fit(app->text, canvas, x + DISPLAY_PAD,
+					       ny + 68, info, DISPLAY_TEXT_SMALL, 0,
+					       width - 2 * DISPLAY_PAD, SE_COLOR_TEXT_SECONDARY);
+			bx = x + DISPLAY_PAD;
+			bx += se_button_draw(app, canvas, bx, ny + 96,
+					     kl_tr("Connect"), 1, 1,
+					     DISPLAY_NETDISP_CONFIRM) + 8;
+			(void)se_button_draw(app, canvas, bx, ny + 96,
+					     kl_tr("Cancel"), 0, 1,
+					     DISPLAY_NETDISP_CANCEL);
+			y += card_h + DISPLAY_GAP;
+		} else {
+			size_t rows = ncount > 0U ? ncount : 1U;
+			card_h = DISPLAY_TITLED + (int)rows * DISPLAY_ROW + DISPLAY_PAD;
+			ny = se_card_begin(app, canvas, x, y, width, card_h,
+					   kl_tr("Network Displays"),
+					   kl_tr("Connect to a device running mikuterm on the local network."));
+			if (ncount == 0U) {
+				(void)kl_text_draw_fit(app->text, canvas, x + DISPLAY_PAD,
+						       ny + 24,
+						       kl_tr("No network displays found."),
+						       DISPLAY_TEXT_SMALL, 0,
+						       width - 2 * DISPLAY_PAD,
+						       SE_COLOR_TEXT_SECONDARY);
+			} else {
+				for (ni = 0U; ni < ncount; ni++) {
+					const struct kl_network_display *nd =
+						&display->network_displays[ni];
+					char label[128];
+					const char *btn_label;
+					int enabled = 1;
+					int ry = ny + (int)ni * DISPLAY_ROW;
+					if (nd->state == KL_NETWORK_DISPLAY_CONNECTED) {
+						snprintf(label, sizeof(label),
+							 "%s (%s) — Connected",
+							 nd->name, nd->ip);
+						btn_label = kl_tr("Disconnect");
+					} else if (nd->state == KL_NETWORK_DISPLAY_CONNECTING) {
+						snprintf(label, sizeof(label),
+							 "%s (%s) — Connecting...",
+							 nd->name, nd->ip);
+						btn_label = kl_tr("Connecting...");
+						enabled = 0;
+					} else {
+						snprintf(label, sizeof(label),
+							 "Network Display %zu (%s — %s)",
+							 ni + 1U, nd->name, nd->ip);
+						btn_label = kl_tr("Connect");
+					}
+					(void)kl_text_draw_fit(app->text, canvas,
+							       x + DISPLAY_PAD, ry + 24,
+							       label, DISPLAY_TEXT_SMALL, 0,
+							       width - 2 * DISPLAY_PAD - 130,
+							       SE_COLOR_TEXT);
+					bx = x + width - DISPLAY_PAD -
+					     se_button_width(app, btn_label);
+					(void)se_button_draw(app, canvas, bx, ry + 6,
+							     btn_label,
+							     nd->state == KL_NETWORK_DISPLAY_CONNECTED ? 0 : 1,
+							     enabled,
+							     DISPLAY_NETDISP_ROW + (int)ni);
+				}
+			}
+			y += card_h + DISPLAY_GAP;
+		}
+	}
+
 	/* The edge below the cards. */
 	return y;
 }
@@ -261,7 +360,44 @@ se_display_press(
 
 	/* Nothing while a request is awaited, or without the desktop's system. */
 	display = &app->display;
-	if (display->request != 0U || app->system == NULL)
+	if (app->system == NULL)
+		return;
+
+	if (index == DISPLAY_NETDISP_CANCEL) {
+		display->netdisp_confirm_open = 0;
+		app->dirty = 1;
+		return;
+	}
+	if (index == DISPLAY_NETDISP_CONFIRM) {
+		if (display->netdisp_confirm_open &&
+		    display->netdisp_confirm_index < display->network_count) {
+			const struct kl_network_display *nd =
+				&display->network_displays[display->netdisp_confirm_index];
+			(void)kl_system_displays_connect_network(app->system,
+								 nd->device_id,
+								 &display->netdisp_request);
+		}
+		display->netdisp_confirm_open = 0;
+		app->dirty = 1;
+		return;
+	}
+	if (index >= DISPLAY_NETDISP_ROW &&
+	    index < DISPLAY_NETDISP_ROW + (int)display->network_count) {
+		size_t ni = (size_t)(index - DISPLAY_NETDISP_ROW);
+		const struct kl_network_display *nd = &display->network_displays[ni];
+		if (nd->state == KL_NETWORK_DISPLAY_CONNECTED) {
+			(void)kl_system_displays_disconnect_network(app->system,
+								    nd->device_id,
+								    &display->netdisp_request);
+		} else if (nd->state == KL_NETWORK_DISPLAY_IDLE) {
+			display->netdisp_confirm_open = 1;
+			display->netdisp_confirm_index = ni;
+		}
+		app->dirty = 1;
+		return;
+	}
+
+	if (display->request != 0U)
 		return;
 
 	/* A mode: the draft's. */
@@ -968,6 +1104,27 @@ display_take(
 	memcpy(display->displays, displays, count * sizeof(displays[0]));
 	display->count = count;
 	display->mode = mode;
+
+	{
+		struct kl_network_display net_list[KL_NETWORK_DISPLAYS_MAX];
+		size_t net_count;
+		memset(net_list, 0, sizeof(net_list));
+		net_count = kl_system_displays_network_get(app->system, net_list,
+							   KL_NETWORK_DISPLAYS_MAX);
+		if (net_count > KL_NETWORK_DISPLAYS_MAX)
+			net_count = KL_NETWORK_DISPLAYS_MAX;
+		if (net_count != display->network_count ||
+		    memcmp(display->network_displays, net_list,
+			   net_count * sizeof(net_list[0])) != 0) {
+			memcpy(display->network_displays, net_list,
+			       net_count * sizeof(net_list[0]));
+			display->network_count = net_count;
+			if (display->netdisp_confirm_open &&
+			    display->netdisp_confirm_index >= display->network_count)
+				display->netdisp_confirm_open = 0;
+			changed = 1;
+		}
+	}
 	turned = display_take_rotations(app);
 	if (turned)
 		changed = 1;

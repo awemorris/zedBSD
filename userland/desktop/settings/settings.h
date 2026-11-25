@@ -636,6 +636,11 @@ struct se_display {
 	char message[SE_MESSAGE];
 	int message_bad;
 	int taken;
+	struct kl_network_display network_displays[KL_NETWORK_DISPLAYS_MAX];
+	size_t network_count;
+	int netdisp_confirm_open;
+	size_t netdisp_confirm_index;
+	uint32_t netdisp_request;
 };
 
 /* The Printers page's fields (ws145-p004): the address, the port, the path or queue; an edit's name and path or queue (ws177-p025). */

@@ -360,6 +360,7 @@ sessiond_session_run(
 	sessiond_exchange_stop(&exchange);
 	sessiond_admin_end();
 	sessiond_sleep_forget(control);
+	sessiond_extend_forget(control);
 	if (control >= 0)
 		(void)close(control);
 
@@ -501,6 +502,27 @@ session_request(
 	match = strncmp(line, "POWER ", 6);
 	if (match == 0) {
 		sessiond_power_session(account, control, line + 6);
+		return 0;
+	}
+
+	/* One-shot RDP virtual extended display credential request. */
+	match = strcmp(line, "EXTEND_PREPARE");
+	if (match == 0) {
+		char ext_user[64];
+		char ext_pass[64];
+		unsigned rdp_port = 0U;
+		char reply[192];
+		int n;
+		if (sessiond_extend_prepare(account, control, ext_user, sizeof(ext_user),
+					    ext_pass, sizeof(ext_pass), &rdp_port) == 0)
+			n = snprintf(reply, sizeof(reply), "EXTEND_OK %s %s %u\n",
+				     ext_user, ext_pass, rdp_port);
+		else
+			n = snprintf(reply, sizeof(reply), "EXTEND_FAIL\n");
+		if (n > 0)
+			(void)write(control, reply, (size_t)n);
+		memset(ext_pass, 0, sizeof(ext_pass));
+		memset(reply, 0, sizeof(reply));
 		return 0;
 	}
 

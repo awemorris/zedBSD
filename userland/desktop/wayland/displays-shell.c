@@ -37,6 +37,7 @@
 #include "kwl.h"
 #include "compose.h"
 #include "displays.h"
+#include "netdisp.h"
 
 #include "userland/desktop/libkeiland/system/kl-system-protocol.h"
 
@@ -232,6 +233,29 @@ kwl_displays_request(
 		error = displays_touch_request(object, opcode, bytes, size);
 		if (error != 0)
 			return error;
+		return 0;
+	}
+
+	/* Network Display connect/disconnect requests (since 39). */
+	if (opcode == KL_SYSTEM_DISPLAYS_CONNECT_NETWORK ||
+	    opcode == KL_SYSTEM_DISPLAYS_DISCONNECT_NETWORK) {
+		uint32_t request = 0U;
+		const char *device_id = NULL;
+		size_t next = 0U;
+		int rc;
+		if (object->version < KL_SYSTEM_SINCE_NETWORK_DISPLAY)
+			return EPROTO;
+		if (size < 8U)
+			return EPROTO;
+		request = displays_word(bytes, 0U);
+		if (displays_string(bytes, size, 4U, 64U, &device_id, &next) != 0 ||
+		    next != size)
+			return EPROTO;
+		if (opcode == KL_SYSTEM_DISPLAYS_CONNECT_NETWORK)
+			rc = kwl_netdisp_connect(object->client->server, device_id);
+		else
+			rc = kwl_netdisp_disconnect(object->client->server, device_id);
+		displays_result(object, request, rc == 0 ? 0U : 1U, 0U);
 		return 0;
 	}
 
@@ -467,6 +491,44 @@ displays_snapshot(
 	if (compose != NULL) {
 		for (index = 0U; index < compose->display_count; index++)
 			displays_output(object, server, index);
+		for (index = 0U; index < KWL_HEADS; index++) {
+			const struct kwl_head *vh = &compose->heads[index];
+			unsigned char vpayload[DISPLAYS_EVENT_MAX];
+			size_t voff = 0U;
+			if (!vh->open || !vh->virtual_rdp)
+				continue;
+			voff = displays_put_string(vpayload, voff, vh->name);
+			voff = displays_put_string(vpayload, voff, "Network Display");
+			voff = displays_put_word(vpayload, voff, (uint32_t)vh->x);
+			voff = displays_put_word(vpayload, voff, (uint32_t)vh->y);
+			voff = displays_put_word(vpayload, voff, vh->width);
+			voff = displays_put_word(vpayload, voff, vh->height);
+			voff = displays_put_word(vpayload, voff, vh->refresh);
+			voff = displays_put_word(vpayload, voff, KL_SYSTEM_DISPLAY_SHOWN);
+			voff = displays_put_word(vpayload, voff, 0U);
+			(void)kwl_emit(object->client, object->id,
+				       KL_SYSTEM_DISPLAYS_EVENT_OUTPUT, vpayload, voff);
+		}
+	}
+	if (object->version >= KL_SYSTEM_SINCE_NETWORK_DISPLAY) {
+		struct kwl_netdisp_info list[KWL_NETDISP_MAX];
+		size_t ncount = kwl_netdisp_snapshot(server, list, KWL_NETDISP_MAX);
+		size_t ni;
+		for (ni = 0U; ni < ncount && ni < KWL_NETDISP_MAX; ni++) {
+			unsigned char npayload[512];
+			size_t noff = 0U;
+			noff = displays_put_string(npayload, noff, list[ni].device_id);
+			noff = displays_put_string(npayload, noff, list[ni].name);
+			noff = displays_put_string(npayload, noff, list[ni].ip);
+			noff = displays_put_string(npayload, noff, list[ni].fingerprint);
+			noff = displays_put_word(npayload, noff, list[ni].width);
+			noff = displays_put_word(npayload, noff, list[ni].height);
+			noff = displays_put_word(npayload, noff, list[ni].scale120);
+			noff = displays_put_word(npayload, noff, list[ni].state);
+			(void)kwl_emit(object->client, object->id,
+				       KL_SYSTEM_DISPLAYS_EVENT_NETWORK_DISPLAY,
+				       npayload, noff);
+		}
 	}
 
 	/* The serial and the mode close the snapshot. */

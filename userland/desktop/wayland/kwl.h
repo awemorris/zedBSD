@@ -2550,6 +2550,8 @@ int kwl_output_view(struct kwl_server *server, uint32_t head, struct kwl_output_
 uint32_t kwl_output_head_of_global(struct kwl_server *server, uint32_t name);
 unsigned kwl_output_head_globals(struct kwl_server *server, uint32_t *names, unsigned room);
 void kwl_output_global_add(struct kwl_server *server, uint32_t name);
+void kwl_heads_evacuate_slot(struct kwl_server *server, unsigned slot);
+void kwl_displays_tell(struct kwl_server *server);
 void kwl_output_global_remove(struct kwl_server *server, uint32_t name);
 void kwl_sleep_tick(struct kwl_server *server);
 void kwl_sleep_button(struct kwl_server *server);

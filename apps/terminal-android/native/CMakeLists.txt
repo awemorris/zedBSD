@@ -135,7 +135,8 @@ else()
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/mikuterm-android.c
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/places-android.c
 		${MIKUTERM_ROOT}/apps/terminal-android/jni/credential-android.c
-		${MIKUTERM_ROOT}/apps/terminal-android/jni/sftp-local-android.c)
+		${MIKUTERM_ROOT}/apps/terminal-android/jni/sftp-local-android.c
+		${MIKUTERM_ROOT}/apps/terminal-android/native/rdp-mediacodec.c)
 	set(MIKUTERM_ANDROID_HELLO_VALUE 0)
 endif()
 if(MIKUTERM_ANDROID_ECHO)
@@ -168,7 +169,7 @@ target_link_libraries(mikuterm PRIVATE mikuterm_common mikuterm_terminal mikuter
 # The system's native-activity loader looks the entry point up in the library, and the runtime
 # looks JNI_OnLoad up, so both stay in the library's symbols even though nothing in the library
 # calls them.  Pages are 16 KB aligned for devices with 16 KB pages.
-target_link_libraries(mikuterm PRIVATE android log)
+target_link_libraries(mikuterm PRIVATE android log mediandk)
 target_link_options(mikuterm PRIVATE
 	-Wl,-u,ANativeActivity_onCreate
 	-Wl,-u,JNI_OnLoad

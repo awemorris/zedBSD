@@ -844,7 +844,8 @@ terminal_hosts_put_x11(
 		good = hosts_time(word, length);
 	} else if (root) {
 		*why = "off, or a size from 320x200 to 7680x4320";
-		good = hosts_equal(word, length, "off");
+		good = hosts_equal(word, length, "off") ||
+		    hosts_equal(word, length, "no");
 		if (!good)
 			good = hosts_root(word, length);
 	} else if (flag) {

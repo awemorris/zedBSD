@@ -179,6 +179,9 @@
 		kl_system_displays_reset_resolution;
 		kl_system_displays_scale;
 		kl_system_displays_set_scale;
+		kl_system_displays_network_get;
+		kl_system_displays_connect_network;
+		kl_system_displays_disconnect_network;
 		kl_system_machine_query;
 		kl_system_machine_known;
 		kl_system_machine_serial;

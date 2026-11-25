@@ -881,6 +881,26 @@ int kl_system_displays_apply(struct kl_system *system, unsigned mode, const stru
 int kl_system_displays_set_brightness(struct kl_system *system, const char *key, unsigned percent, uint32_t *request);
 int kl_system_displays_set_shown(struct kl_system *system, const char *key, unsigned shown, uint32_t *request);
 
+#define KL_NETWORK_DISPLAYS_MAX		16U
+#define KL_NETWORK_DISPLAY_IDLE		0U
+#define KL_NETWORK_DISPLAY_CONNECTING	1U
+#define KL_NETWORK_DISPLAY_CONNECTED	2U
+
+struct kl_network_display {
+	char device_id[33];
+	char name[64];
+	char ip[64];
+	char fingerprint[16];
+	uint32_t width;
+	uint32_t height;
+	uint32_t scale120;
+	unsigned state;
+};
+
+size_t kl_system_displays_network_get(const struct kl_system *system, struct kl_network_display *displays, size_t capacity);
+int kl_system_displays_connect_network(struct kl_system *system, const char *device_id_hex, uint32_t *request);
+int kl_system_displays_disconnect_network(struct kl_system *system, const char *device_id_hex, uint32_t *request);
+
 /*
  * A display's angle (KL_VERSION 93): the picture turned on the panel
  * clockwise by KL_DISPLAY_ROTATE_0, _90, _180 or _270 degrees (at 90 and 270

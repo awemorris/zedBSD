@@ -1217,6 +1217,7 @@ system_view_display(
 	if (!view->displays_open) {
 		view->displays_open = 1U;
 		view->displays_pending_count = 0U;
+		view->network_displays_pending_count = 0U;
 	}
 
 	/* The display, while there is room, its angle not told yet. */
@@ -1227,6 +1228,22 @@ system_view_display(
 	memset(&view->display_resolutions_pending[view->displays_pending_count], 0, sizeof(view->display_resolutions_pending[0]));
 	memset(&view->display_scales_pending[view->displays_pending_count], 0, sizeof(view->display_scales_pending[0]));
 	view->displays_pending_count++;
+}
+
+void
+system_view_network_display(
+	struct system_view *view,
+	const struct kl_network_display *netdisp)
+{
+	if (!view->displays_open) {
+		view->displays_open = 1U;
+		view->displays_pending_count = 0U;
+		view->network_displays_pending_count = 0U;
+	}
+	if (view->network_displays_pending_count >= KL_NETWORK_DISPLAYS_MAX)
+		return;
+	view->network_displays_pending[view->network_displays_pending_count] = *netdisp;
+	view->network_displays_pending_count++;
 }
 
 /*
@@ -1487,8 +1504,10 @@ system_view_displays_done(
 	uint32_t mode)
 {
 	/* A done after nothing: no display. */
-	if (!view->displays_open)
+	if (!view->displays_open) {
 		view->displays_pending_count = 0U;
+		view->network_displays_pending_count = 0U;
+	}
 
 	/* The snapshot, as one state. */
 	view->displays_open = 0U;
@@ -1497,6 +1516,8 @@ system_view_displays_done(
 	memcpy(view->display_resolutions, view->display_resolutions_pending, view->displays_pending_count * sizeof(view->display_resolutions[0]));
 	memcpy(view->display_scales, view->display_scales_pending, view->displays_pending_count * sizeof(view->display_scales[0]));
 	view->display_count = view->displays_pending_count;
+	memcpy(view->network_displays, view->network_displays_pending, view->network_displays_pending_count * sizeof(view->network_displays[0]));
+	view->network_display_count = view->network_displays_pending_count;
 	view->displays_serial = serial;
 	view->displays_mode = mode;
 	view->changed |= KL_SYSTEM_CHANGED_DISPLAYS;

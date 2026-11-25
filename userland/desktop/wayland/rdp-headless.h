@@ -20,10 +20,12 @@
 extern "C" {
 #endif
 
-/* IPC message types between wayland --headless and rdpd. */
+/* IPC message types between wayland (--headless or virtual_rdp) and rdpd. */
 #define KWL_RDP_MSG_FRAME	1U
 #define KWL_RDP_MSG_RESIZE	2U
 #define KWL_RDP_MSG_FORCE_KEY	3U
+#define KWL_RDP_MSG_POINTER	4U
+#define KWL_RDP_MSG_KEY		5U
 
 /* Frame flags in KWL_RDP_MSG_FRAME header. */
 #define KWL_RDP_FRAME_KEY	1U

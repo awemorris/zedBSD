@@ -44,6 +44,7 @@ rdp_hosts_parse(
 	size_t kw_len;
 	struct rdp_host_entry *cur;
 	uint32_t num;
+	int has_port;
 
 	/* Validates arguments and initializes the output list. */
 	if (list == NULL)
@@ -52,6 +53,7 @@ rdp_hosts_parse(
 	if (text == NULL || size == 0U)
 		return 0;
 	cur = NULL;
+	has_port = 0;
 	pos = 0U;
 
 	/* Iterates line by line over the configuration text. */
@@ -92,6 +94,7 @@ rdp_hosts_parse(
 			cur = &list->entries[list->count++];
 			memset(cur, 0, sizeof(*cur));
 			cur->port = default_port > 0U ? default_port : 3389U;
+			has_port = 0;
 			copy_field(cur->name, sizeof(cur->name), val,
 				   (size_t)(e - val));
 			copy_field(cur->host_name, sizeof(cur->host_name), val,
@@ -111,6 +114,13 @@ rdp_hosts_parse(
 				   (size_t)(e - val));
 		} else if (eq_ci(kw, "Port")) {
 			if (parse_u32(val, (size_t)(e - val), &num) == 0 &&
+			    num >= 1U && num <= 65535U) {
+				cur->port = (uint16_t)num;
+				has_port = 1;
+			}
+		} else if (eq_ci(kw, "RDPPort")) {
+			if (!has_port &&
+			    parse_u32(val, (size_t)(e - val), &num) == 0 &&
 			    num >= 1U && num <= 65535U) {
 				cur->port = (uint16_t)num;
 			}

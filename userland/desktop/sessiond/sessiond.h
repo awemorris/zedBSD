@@ -180,6 +180,13 @@ void sessiond_sleep_forget(int control);
 /* A session's SERVICE request (service.c). */
 void sessiond_service(const struct sessiond_account *account, int control, const char *arguments);
 
+/* A session's ADMIN requests: */
+/* One-shot RDP extend credentials and attachment (seat.c). */
+int sessiond_extend_prepare(const struct sessiond_account *account, int control, char *out_user, size_t user_cap, char *out_pass, size_t pass_cap, unsigned *out_port);
+int sessiond_extend_lookup(const char *extend_user, uint8_t out_nt_hash[16]);
+int sessiond_extend_consume(const char *extend_user, uint32_t width, uint32_t height, int *out_rdp_fd);
+void sessiond_extend_forget(int control);
+
 /*
  * A session's ADMIN requests: the admin actions run as root once the
  * person at the screen allows them (admin.c).  begin and end bracket a

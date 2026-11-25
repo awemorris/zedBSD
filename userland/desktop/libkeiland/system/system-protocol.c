@@ -533,6 +533,8 @@ static const struct wl_message system_displays_requests[] = {
 	{ "revert_resolution", "us", system_plain_types },
 	{ "reset_resolution", "us", system_plain_types },
 	{ "set_scale", "usu", system_plain_types },
+	{ "connect_network", "us", system_plain_types },
+	{ "disconnect_network", "us", system_plain_types },
 };
 
 /* The events of kl_system_displays_v1. */
@@ -546,23 +548,15 @@ static const struct wl_message system_displays_events[] = {
 	{ "mode", "suuuu", system_plain_types },
 	{ "resolution", "suuu", system_plain_types },
 	{ "scale", "suuuuuua", system_plain_types },
+	{ "network_display", "ssssuuuu", system_plain_types },
 };
 
-/*
- * kl_system_displays_v1, made at the manager's version (18; set_shown since
- * 19, ws113-p014; set_rotation, bind_touch, listen_touch and the events
- * rotation, rotations and touch since 34, ws217-p004; set_resolution,
- * keep_resolution, revert_resolution, reset_resolution and the events mode
- * and resolution since 36; set_scale and the event scale since 38): twelve
- * requests and nine events.  It lives
- * for the program.
- */
 const struct wl_interface kl_system_displays_v1_interface = {
 	KL_SYSTEM_DISPLAYS_NAME,
-	KL_SYSTEM_SINCE_SCALE,
-	12,
+	KL_SYSTEM_SINCE_NETWORK_DISPLAY,
+	14,
 	system_displays_requests,
-	9,
+	10,
 	system_displays_events
 };
 

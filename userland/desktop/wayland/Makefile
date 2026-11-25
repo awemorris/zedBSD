@@ -162,6 +162,8 @@ KEILAND_SOURCES := \
 	userland/desktop/wayland/clipboard.c \
 	userland/desktop/wayland/rdp-headless.c \
 	userland/desktop/wayland/rdp-headless-proto.c \
+	userland/desktop/wayland/netdisp.c \
+	apps/mikuterm-common/netdisp-proto.c \
 	userland/tests/vkdemo/display.c \
 	userland/desktop/artwork/mark.c \
 	userland/desktop/picture/color-glyph.c \
@@ -185,4 +187,4 @@ KEILAND_DATA := $(KEILAND_FONT_DATA) \
 	/usr/libexec/keiland-x11=userland/desktop/wayland/keiland-x11 \
 	/etc/keiland/apps.conf=userland/desktop/wayland/apps.conf
 
-$(eval $(call USERLAND_PACKAGE,wayland,wayland - Wayland compositor,x86_64,y,basic,$(KEILAND_SOURCES),y,desktop,desktop/wayland,desktop/libvulkan desktop/libtruetype desktop/libkeiland desktop/sessiond desktop/mediastorage desktop/libmedia desktop/libpng-compat base/libz-compat desktop/libjpeg-compat fonts/noto-color-emoji fonts/hand-hershey,0755,program,$(KEILAND_DATA),,bin))
+$(eval $(call USERLAND_PACKAGE,wayland,wayland - Wayland compositor,x86_64,y,basic,$(KEILAND_SOURCES),y,desktop,desktop/wayland,desktop/libvulkan desktop/libtruetype desktop/libkeiland desktop/sessiond desktop/mediastorage desktop/libmedia desktop/libpng-compat base/libz-compat base/libcrypto-compat desktop/libjpeg-compat fonts/noto-color-emoji fonts/hand-hershey,0755,program,$(KEILAND_DATA),,bin))

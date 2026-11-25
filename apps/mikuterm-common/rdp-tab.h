@@ -74,6 +74,21 @@ struct rdp_tab {
 	struct rdp_tab_input inputs[RDP_TAB_INPUTS];
 	unsigned input_count;
 	double wheel_y;
+	int touch_active[2];
+	int32_t touch_id[2];
+	int32_t touch_start_x[2];
+	int32_t touch_start_y[2];
+	int32_t touch_x[2];
+	int32_t touch_y[2];
+	int touch_pressed_left;
+	int touch_two_finger;
+	int touch_two_done;
+	int touch_moved_far;
+	int32_t touch_two_last_y;
+	int32_t touch_wheel_accum_y;
+	uint64_t touch_two_start_us;
+	uint16_t touch_last_px;
+	uint16_t touch_last_py;
 };
 
 int rdp_tab_create(const char *host, uint32_t width, uint32_t height,

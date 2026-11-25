@@ -194,10 +194,11 @@ struct sshd_config {
  * forward_x11_timeout 0 (seconds; 0 for none, where OpenSSH's default is
  * 20 minutes: the program that forwards X11 decides what the time means),
  * gateway_ports 0, exit_on_forward_failure 0, clear_all_forwardings 0,
- * session_type_none 0, x11_root_width and x11_root_height 0 (off: the
- * program that forwards X11 shows each remote window as one of the
- * system's), x11_window_tabify 0 (the program that forwards X11 shows a
- * remote window as a window of its own, not in a tab of its own window),
+ * session_type_none 0, x11_root_width 1280 and x11_root_height 720 (the
+ * program that forwards X11 shows the remote X screen as one window of that
+ * size; 0 for off), x11_window_tabify 1 (the program that forwards X11 shows
+ * each remote top-level window in a tab of its own window; 0 for an
+ * independent window),
  * remote_command "" (none: the shell, or the command the user
  * gave the program), proxy_command "" (none: the host is connected to
  * directly).  forward holds forward_count forwardings, from

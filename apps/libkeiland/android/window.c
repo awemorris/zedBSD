@@ -482,6 +482,18 @@ keiland_android_screen(
 		*scale = atomic_load(&screen_scale_atomic);
 }
 
+/*
+ * Android has no hardware mouse cursor to hide over remote desktop tabs.
+ */
+void
+kl_window_set_cursor_hidden(
+	struct kl_window *window,
+	int hidden)
+{
+	(void)window;
+	(void)hidden;
+}
+
 /* Queues an input of a kind with no more than the kind and whether it is pressed (a focus, 1 when it came). */
 static void
 window_input(

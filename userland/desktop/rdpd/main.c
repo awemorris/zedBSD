@@ -16,6 +16,7 @@
 #include <arpa/inet.h>
 #include <compat/ssl/ssl.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <poll.h>
@@ -24,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -33,6 +35,7 @@ struct rdpd_client_ctx {
 	int tls_active;
 	int running;
 	int authed;
+	int is_extend;
 	int session_started;
 	uint32_t width;
 	uint32_t height;
@@ -101,7 +104,7 @@ cb_send_bytes(
 	return 0;
 }
 
-/* Looks up an NTLM NT hash from /etc/rdpd/ntlm.users (user:password or user:ntlm:<hex32>). */
+/* Looks up an NTLM NT hash from RDPD_NTLM_USERS_PATH (user:password or user:ntlm:<hex32>). */
 static int
 hex_nibble(char c)
 {
@@ -129,8 +132,17 @@ cb_on_ntlm_lookup(
 	(void)domain;
 	if (user_name == NULL || user_name[0] == '\0')
 		return -1;
+	if (strstr(user_name, "+extend") != NULL) {
+		struct rdpd_client_ctx *ctx = (struct rdpd_client_ctx *)user;
+		if (rdpd_extend_lookup(user_name, out_nt_hash) != 0)
+			return -1;
+		ctx->is_extend = 1;
+		ctx->authed = 1;
+		(void)snprintf(ctx->user, sizeof(ctx->user), "%s", user_name);
+		return 0;
+	}
 	ulen = strlen(user_name);
-	fp = fopen("/etc/rdpd/ntlm.users", "r");
+	fp = fopen(RDPD_NTLM_USERS_PATH, "r");
 	if (fp == NULL)
 		return -1;
 	while (fgets(line, sizeof(line), fp) != NULL) {
@@ -183,6 +195,11 @@ cb_on_auth_request(
 	int rc;
 	(void)domain;
 	ctx = (struct rdpd_client_ctx *)user;
+	if (user_name != NULL && strstr(user_name, "+extend") != NULL) {
+		(void)rdp_server_reject_auth(ctx->srv, 0U);
+		ctx->running = 0;
+		return;
+	}
 	rc = rdpd_auth_user(user_name, password, &ctx->uid, &ctx->gid,
 			    ctx->home, sizeof(ctx->home),
 			    ctx->shell, sizeof(ctx->shell));
@@ -216,6 +233,16 @@ cb_on_connected(
 		ctx->width, ctx->height, ctx->authed);
 	if (!ctx->authed)
 		return;
+	if (ctx->is_extend) {
+		kwl_rdp_clamp_size(&ctx->width, &ctx->height);
+		if (rdpd_extend_attach(ctx->user, ctx->width, ctx->height,
+				       &ctx->sess.rdp_fd) == 0) {
+			ctx->sess.width = ctx->width;
+			ctx->sess.height = ctx->height;
+			ctx->session_started = 1;
+		}
+		return;
+	}
 	rc = rdpd_hid_open(&ctx->hid, ctx->width, ctx->height);
 	if (rc != 0)
 		return;
@@ -238,12 +265,13 @@ cb_on_resize(
 	kwl_rdp_clamp_size(&width, &height);
 	ctx->width = width;
 	ctx->height = height;
-	rdpd_hid_set_size(&ctx->hid, width, height);
+	if (!ctx->is_extend)
+		rdpd_hid_set_size(&ctx->hid, width, height);
 	rdpd_session_resize(&ctx->sess, width, height);
 	(void)rdp_server_resize(ctx->srv, width, height);
 }
 
-/* Forwards client keyboard scancodes into /dev/input/bridge. */
+/* Forwards client keyboard scancodes into /dev/input/bridge or extended rdp_fd. */
 static void
 cb_on_input_key(
 	void *user,
@@ -252,10 +280,19 @@ cb_on_input_key(
 {
 	struct rdpd_client_ctx *ctx;
 	ctx = (struct rdpd_client_ctx *)user;
+	if (ctx->is_extend) {
+		uint8_t msg[KWL_RDP_CTRL_HDR_SIZE];
+		if (ctx->sess.rdp_fd >= 0) {
+			kwl_rdp_pack_ctrl(msg, KWL_RDP_MSG_KEY,
+					  (uint32_t)scancode, (uint32_t)flags);
+			(void)write(ctx->sess.rdp_fd, msg, sizeof(msg));
+		}
+		return;
+	}
 	rdpd_hid_key(&ctx->hid, scancode, flags);
 }
 
-/* Forwards client mouse events into /dev/input/bridge. */
+/* Forwards client mouse events into /dev/input/bridge or extended rdp_fd. */
 static void
 cb_on_input_mouse(
 	void *user,
@@ -265,6 +302,16 @@ cb_on_input_mouse(
 {
 	struct rdpd_client_ctx *ctx;
 	ctx = (struct rdpd_client_ctx *)user;
+	if (ctx->is_extend) {
+		uint8_t msg[KWL_RDP_CTRL_HDR_SIZE];
+		if (ctx->sess.rdp_fd >= 0) {
+			uint32_t packed_xy = ((uint32_t)x << 16) | (uint32_t)y;
+			kwl_rdp_pack_ctrl(msg, KWL_RDP_MSG_POINTER,
+					  (uint32_t)flags, packed_xy);
+			(void)write(ctx->sess.rdp_fd, msg, sizeof(msg));
+		}
+		return;
+	}
 	rdpd_hid_mouse(&ctx->hid, flags, x, y);
 }
 
@@ -346,6 +393,7 @@ handle_client(
 	}
 	ctx.hid.fd = -1;
 	ctx.sess.rdp_fd = -1;
+	ctx.sess.sessiond_fd = -1;
 	ctx.running = 1;
 	ctx.width = 1280U;
 	ctx.height = 720U;
@@ -521,6 +569,109 @@ handle_client(
 	close(client_sock);
 }
 
+/* Ensures the parent directory of path exists (mode 0700). */
+static void
+ensure_parent_dir(
+	const char *path,
+	mode_t mode)
+{
+	char dir[256];
+	const char *slash;
+	size_t len;
+
+	if (path == NULL)
+		return;
+	slash = strrchr(path, '/');
+	if (slash == NULL || slash == path)
+		return;
+	len = (size_t)(slash - path);
+	if (len >= sizeof(dir))
+		return;
+	memcpy(dir, path, len);
+	dir[len] = '\0';
+	(void)mkdir(RDPD_STATE_PARENT, 0755);
+	(void)mkdir(dir, mode);
+}
+
+/* Writes data[0..len) to path with exact mode; unlinks on write failure. */
+static int
+write_file_exact(
+	const char *path,
+	const void *data,
+	size_t len,
+	mode_t mode)
+{
+	int fd;
+	size_t off;
+	ssize_t n;
+	const uint8_t *p;
+
+	fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+	if (fd < 0)
+		return -1;
+	(void)fchmod(fd, mode);
+	p = (const uint8_t *)data;
+	off = 0U;
+	while (off < len) {
+		n = write(fd, p + off, len - off);
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			close(fd);
+			(void)unlink(path);
+			return -1;
+		}
+		off += (size_t)n;
+	}
+	if (close(fd) != 0) {
+		(void)unlink(path);
+		return -1;
+	}
+	return 0;
+}
+
+/* Persists the generated self-signed certificate and private key as PEM. */
+static void
+save_tls_pem(
+	SSL_CTX *ssl_ctx,
+	const char *cert_path,
+	const char *key_path)
+{
+	char *cert_pem;
+	size_t cert_len;
+	char *key_pem;
+	size_t key_len;
+	volatile char *vp;
+	size_t i;
+
+	cert_pem = NULL;
+	cert_len = 0U;
+	key_pem = NULL;
+	key_len = 0U;
+	if (SSL_CTX_export_PEM(ssl_ctx, &cert_pem, &cert_len,
+			       &key_pem, &key_len) != 1) {
+		fprintf(stderr, "RDPD: failed to export generated TLS PEM\n");
+		return;
+	}
+
+	ensure_parent_dir(cert_path, 0700);
+	ensure_parent_dir(key_path, 0700);
+	if (write_file_exact(cert_path, cert_pem, cert_len, 0644) != 0) {
+		fprintf(stderr, "RDPD: failed to save %s: errno=%d\n",
+			cert_path, errno);
+	}
+	if (write_file_exact(key_path, key_pem, key_len, 0600) != 0) {
+		fprintf(stderr, "RDPD: failed to save %s: errno=%d\n",
+			key_path, errno);
+	}
+
+	vp = (volatile char *)key_pem;
+	for (i = 0U; i < key_len; i++)
+		vp[i] = '\0';
+	free(cert_pem);
+	free(key_pem);
+}
+
 int
 main(
 	int argc,
@@ -576,6 +727,7 @@ main(
 			SSL_CTX_free(ssl_ctx);
 			return 1;
 		}
+		save_tls_pem(ssl_ctx, cert_path, key_path);
 	}
 
 	/* Binds and listens on the configured TCP port. */

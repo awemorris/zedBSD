@@ -142,24 +142,30 @@
 #define PAGE_ICON_PIXELS	16
 
 /*
- * The fields of a host's form: Host, HostName, Port, User and
+ * The fields of a host's form: Host, UseRDP, HostName, Port, User and
  * RemoteCommand, then the X11 lines from PAGE_HOST_X11 (ForwardX11,
  * ForwardX11Trusted, ForwardX11Timeout, X11RootWindow, X11WindowTabify;
  * only for a program that forwards X11).  Then the most of a block's
  * other lines shown.
  */
-#define PAGE_HOST_FIELDS	12U
+#ifdef __ANDROID__
+#define PAGE_HOST_FIELDS	10U
+#else
+#define PAGE_HOST_FIELDS	11U
+#endif
 #define PAGE_HOST_NAME		0U
-#define PAGE_HOST_PORT		2U
-#define PAGE_HOST_COMMAND	4U
-#define PAGE_HOST_USE_RDP	5U
-#define PAGE_HOST_RDP_PORT	6U
-#define PAGE_HOST_X11		7U
-#define PAGE_HOST_X11_FORWARD	7U
-#define PAGE_HOST_X11_TRUSTED	8U
-#define PAGE_HOST_X11_TIMEOUT	9U
-#define PAGE_HOST_X11_ROOT	10U
-#define PAGE_HOST_X11_TABIFY	11U
+#define PAGE_HOST_USE_RDP	1U
+#define PAGE_HOST_ADDRESS	2U
+#define PAGE_HOST_PORT		3U
+#define PAGE_HOST_COMMAND	5U
+#define PAGE_HOST_X11		6U
+#define PAGE_HOST_X11_FORWARD	6U
+#define PAGE_HOST_X11_TRUSTED	7U
+#define PAGE_HOST_X11_TIMEOUT	8U
+#define PAGE_HOST_X11_ROOT	9U
+#ifndef __ANDROID__
+#define PAGE_HOST_X11_TABIFY	10U
+#endif
 #define PAGE_OTHER_LINES	40U
 
 /* The longest line of the Hosts pane's words (a host's title, a line shown), with its NUL. */
@@ -358,28 +364,40 @@ static const char *const page_appearance_labels[] = { "Text size", "Size", "Them
 static const char *const page_behavior_labels[] = { "Copy on select" };
 static const char *const page_key_labels[] = { "Name", "Comment", "Passphrase", "Again" };
 static const char *const page_host_labels[] = {
-	"Name", "Host address", "Port", "User", "Command", "Use RDP", "RDP port", "RDP password",
+	"Name", "Use RDP", "Host address", "Port", "User", "Password", "Command",
 	"Identity file", "Forward", "Listen", "Destination", "New host",
-	"Forward X11", "Trusted", "Timeout", "Root window", "Window tabs"
+	"Forward X11", "Trusted", "Timeout", "Root window"
+#ifndef __ANDROID__
+	, "Independent Window"
+#endif
 };
 
 /* How many of the Hosts pane's labels a program that does not forward X11 has (the X11 ones are last). */
-#define PAGE_HOST_LABELS	13U
+#define PAGE_HOST_LABELS	12U
 
 /* The keywords of a host's form, its labels and what each field shows empty, in the fields' order. */
 static const char *const page_host_keywords[PAGE_HOST_FIELDS] = {
-	"Host", "HostName", "Port", "User", "RemoteCommand", "UseRDP", "RDPPort",
-	"ForwardX11", "ForwardX11Trusted", "ForwardX11Timeout", "X11RootWindow", "X11WindowTabify"
+	"Host", "UseRDP", "HostName", "Port", "User", "RemoteCommand",
+	"ForwardX11", "ForwardX11Trusted", "ForwardX11Timeout", "X11RootWindow"
+#ifndef __ANDROID__
+	, "X11WindowTabify"
+#endif
 };
 static const char *const page_host_field_labels[PAGE_HOST_FIELDS] = {
-	"Name", "Host address", "Port", "User", "Command", "Use RDP", "RDP port",
-	"Forward X11", "Trusted", "Timeout", "Root window", "Window tabs"
+	"Name", "Use RDP", "Host address", "Port", "User", "Command",
+	"Forward X11", "Trusted", "Timeout", "Root window"
+#ifndef __ANDROID__
+	, "Independent Window"
+#endif
 };
 static const char *const page_host_placeholders[PAGE_HOST_FIELDS] = {
-	"myserver (Host)", "myserver.example.com (HostName)", "22 (Port)", "The login name (User)", "Run instead of a shell (RemoteCommand)",
-	"yes or no (UseRDP)", "3389 (RDPPort)",
+	"myserver (Host)", "yes or no (UseRDP)", "myserver.example.com (HostName)", "22 (Port)",
+	"The login name (User)", "Run instead of a shell (RemoteCommand)",
 	"yes or no (ForwardX11)", "yes or no (ForwardX11Trusted)", "A time, as 20m (ForwardX11Timeout)",
-	"off, or a size: 1280x800 (X11RootWindow)", "yes or no (X11WindowTabify)"
+	"1280x720, or off (X11RootWindow)"
+#ifndef __ANDROID__
+	, "yes or no (X11WindowTabify)"
+#endif
 };
 
 static int page_frame(uint32_t width, uint32_t height, unsigned scale);
@@ -444,7 +462,7 @@ static int page_label(int top, int left, int width, const char *label, int last)
 static int page_control_width(int left, int width, int x);
 static void page_row_text(int x, int top, int right, const char *text);
 static int page_field_row(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field, const char *placeholder);
-static int page_host_switch_row(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field);
+static int page_host_switch_row(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field, int inverted);
 static int page_host_root_slider_row(int top, int left, int width, const char *label, uint32_t id, struct kl_field *field);
 static int page_note(int top, int left, int width, const char *text, kl_color ink);
 static int page_note_height(int width, const char *text);
@@ -1304,19 +1322,25 @@ page_hosts_form(
 
 	/* Each field, and the line of another block that wins over it. */
 	for (index = first; index < PAGE_HOST_X11; index++) {
-		if (index == PAGE_HOST_USE_RDP)
-			y = page_host_switch_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index]);
-		else
-			y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], page_host_placeholders[index]);
+		if (index == PAGE_HOST_COMMAND &&
+		    page.program->rdp_password_set != NULL &&
+		    block->kind == TERMINAL_HOSTS_BLOCK_HOST) {
+			y = page_field_row(y, card.x, card.width, "Password", PAGE_ID_HOST_RDP_PASS,
+					   &page.host_rdp_password, "Saved in Windows Credential Manager");
+		}
+		if (index == PAGE_HOST_USE_RDP) {
+			y = page_host_switch_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], 0);
+		} else {
+			const char *placeholder = page_host_placeholders[index];
+			if (index == PAGE_HOST_PORT && strcmp(page.host_fields[PAGE_HOST_USE_RDP].text, "yes") == 0)
+				placeholder = "3389 (Port)";
+			y = page_field_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], placeholder);
+		}
 		if (overriding[index] == TERMINAL_HOSTS_NONE)
 			continue;
 		page_hosts_where(overriding[index], where, sizeof(where));
 		(void)snprintf(note, sizeof(note), "Overridden by %s", where);
 		y = page_note(y, page_value_x(card.x, card.width), card.width - 40, note, theme->bad);
-	}
-	if (page.program->rdp_password_set != NULL && block->kind == TERMINAL_HOSTS_BLOCK_HOST) {
-		y = page_field_row(y, card.x, card.width, "RDP password", PAGE_ID_HOST_RDP_PASS,
-				   &page.host_rdp_password, "Saved in Windows Credential Manager");
 	}
 
 	/* A wildcard's block: other blocks may give these too. */
@@ -1553,8 +1577,13 @@ page_hosts_x11(
 
 	/* The rows, and the line that wins over each. */
 	theme = page.style.theme;
-	explained = "Root window shows the remote X screen as one window of that size; Window tabs shows each remote window in a tab. "
-	    "Off and no, each remote window is a window of its own.";
+#ifdef __ANDROID__
+	explained = "Root window shows the remote X screen as one window of that size. "
+	    "Off, each remote window opens in its own tab.";
+#else
+	explained = "Root window shows the remote X screen as one window of that size; Independent Window opens each remote window in a window of its own. "
+	    "By default, each remote window opens in a tab.";
+#endif
 	card.x = left;
 	card.y = top;
 	card.width = width;
@@ -1569,9 +1598,12 @@ page_hosts_x11(
 	/* Each field, and the line of another block that wins over it. */
 	for (index = PAGE_HOST_X11; index < PAGE_HOST_FIELDS; index++) {
 		if (index == PAGE_HOST_X11_FORWARD ||
-		    index == PAGE_HOST_X11_TRUSTED ||
-		    index == PAGE_HOST_X11_TABIFY) {
-			y = page_host_switch_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index]);
+		    index == PAGE_HOST_X11_TRUSTED) {
+			y = page_host_switch_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], 0);
+#ifndef __ANDROID__
+		} else if (index == PAGE_HOST_X11_TABIFY) {
+			y = page_host_switch_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index], 1);
+#endif
 		} else if (index == PAGE_HOST_X11_ROOT) {
 			y = page_host_root_slider_row(y, card.x, card.width, page_host_field_labels[index], PAGE_ID_HOST_FIELD + index, &page.host_fields[index]);
 		} else {
@@ -2040,15 +2072,25 @@ page_hosts_rdp_target(
 	size_t user_sz)
 {
 	char port_str[32];
+	char use_rdp_str[16];
 	unsigned line;
 	unsigned long p;
 	char *end;
+	int use_rdp;
 
 	host[0] = '\0';
 	user[0] = '\0';
-	*port = 3389U;
+	*port = 22U;
 	if (block == TERMINAL_HOSTS_NONE || block >= page.hosts.block_count)
 		return;
+	use_rdp = 0;
+	line = terminal_hosts_find(&page.hosts, block, "UseRDP", TERMINAL_HOSTS_NONE);
+	if (line != TERMINAL_HOSTS_NONE &&
+	    terminal_hosts_word(&page.hosts, line, 0U, use_rdp_str, sizeof(use_rdp_str)) == 0 &&
+	    strcmp(use_rdp_str, "yes") == 0) {
+		use_rdp = 1;
+	}
+	*port = use_rdp ? 3389U : 22U;
 	line = terminal_hosts_find(&page.hosts, block, "HostName", TERMINAL_HOSTS_NONE);
 	if (line != TERMINAL_HOSTS_NONE)
 		(void)terminal_hosts_word(&page.hosts, line, 0U, host, host_sz);
@@ -2057,7 +2099,9 @@ page_hosts_rdp_target(
 	line = terminal_hosts_find(&page.hosts, block, "User", TERMINAL_HOSTS_NONE);
 	if (line != TERMINAL_HOSTS_NONE)
 		(void)terminal_hosts_word(&page.hosts, line, 0U, user, user_sz);
-	line = terminal_hosts_find(&page.hosts, block, "RDPPort", TERMINAL_HOSTS_NONE);
+	line = terminal_hosts_find(&page.hosts, block, "Port", TERMINAL_HOSTS_NONE);
+	if (line == TERMINAL_HOSTS_NONE && use_rdp)
+		line = terminal_hosts_find(&page.hosts, block, "RDPPort", TERMINAL_HOSTS_NONE);
 	if (line != TERMINAL_HOSTS_NONE &&
 	    terminal_hosts_word(&page.hosts, line, 0U, port_str, sizeof(port_str)) == 0) {
 		p = strtoul(port_str, &end, 10);
@@ -2090,8 +2134,18 @@ page_hosts_fill(void)
 			line = TERMINAL_HOSTS_NONE;
 			if (index == PAGE_HOST_NAME && block->kind == TERMINAL_HOSTS_BLOCK_HOST)
 				line = block->first;
-			if (index != PAGE_HOST_NAME && block->kind != TERMINAL_HOSTS_BLOCK_MATCH)
+			if (index != PAGE_HOST_NAME && block->kind != TERMINAL_HOSTS_BLOCK_MATCH) {
 				line = terminal_hosts_find(&page.hosts, page.hosts_block, page_host_keywords[index], TERMINAL_HOSTS_NONE);
+				if (line == TERMINAL_HOSTS_NONE && index == PAGE_HOST_PORT) {
+					unsigned rdp_line = terminal_hosts_find(&page.hosts, page.hosts_block, "UseRDP", TERMINAL_HOSTS_NONE);
+					char rdp_val[16];
+					if (rdp_line != TERMINAL_HOSTS_NONE &&
+					    terminal_hosts_word(&page.hosts, rdp_line, 0U, rdp_val, sizeof(rdp_val)) == 0 &&
+					    strcmp(rdp_val, "yes") == 0) {
+						line = terminal_hosts_find(&page.hosts, page.hosts_block, "RDPPort", TERMINAL_HOSTS_NONE);
+					}
+				}
+			}
 
 			/* The Host's names and the command as written; a value of a word without its quotes. */
 			if (line != TERMINAL_HOSTS_NONE) {
@@ -2186,7 +2240,7 @@ page_hosts_apply(void)
 		}
 
 		/* A port is a number from 1 to 65535. */
-		if (error == 0 && (index == PAGE_HOST_PORT || index == PAGE_HOST_RDP_PORT) && field[0] != '\0') {
+		if (error == 0 && index == PAGE_HOST_PORT && field[0] != '\0') {
 			port = strtoul(field, &end, 10);
 			if (*end != '\0' || port == 0UL || port > 65535UL || field[0] < '0' || field[0] > '9')
 				error = EINVAL;
@@ -2241,7 +2295,6 @@ page_hosts_why(
 	case PAGE_HOST_NAME:
 		return "a host needs a name: words without quotes, none starting with # or =";
 	case PAGE_HOST_PORT:
-	case PAGE_HOST_RDP_PORT:
 		return "a number from 1 to 65535";
 	case PAGE_HOST_COMMAND:
 		return "a command cannot start with = or hold a control character";
@@ -2290,7 +2343,7 @@ page_hosts_add_host(void)
 	page.hosts_block = block;
 	page_hosts_fill();
 	kl_field_set(&page.host_new, "");
-	kl_ui_set_focus(page.ui, PAGE_ID_HOST_FIELD + 1U, 0U);
+	kl_ui_set_focus(page.ui, PAGE_ID_HOST_FIELD + PAGE_HOST_ADDRESS, 0U);
 	(void)snprintf(text, sizeof(text), "Host %s was added at line %u. Fill in its address and the rest, then Save.", names, page.hosts.lines[page.hosts.blocks[block].first].number);
 	page_say(&page.hosts_message, 0, text);
 }
@@ -2518,7 +2571,7 @@ page_hosts_save(void)
 		same = page_hosts_saved();
 		if (same) {
 			if (pw_changed)
-				page_say(&page.hosts_message, 0, "RDP password saved.");
+				page_say(&page.hosts_message, 0, "Password saved.");
 			else
 				page_say(&page.hosts_message, 0, "Nothing changed.");
 			return;
@@ -4037,7 +4090,8 @@ page_host_switch_row(
 	int width,
 	const char *label,
 	uint32_t id,
-	struct kl_field *field)
+	struct kl_field *field,
+	int inverted)
 {
 	const struct kl_theme *theme;
 	int value_x;
@@ -4046,11 +4100,11 @@ page_host_switch_row(
 
 	theme = page.style.theme;
 	value_x = page_label(top, left, width, label, 1);
-	on = (strcmp(field->text, "yes") == 0);
+	on = inverted ? (strcmp(field->text, "no") == 0) : (strcmp(field->text, "yes") == 0);
 	changed = kl_switch(page.ui, &page.style, id, value_x, top + (PAGE_ROW - theme->switch_height) / 2, &on, 0U);
 	page_row_text(value_x + theme->switch_width + PAGE_AFTER_GAP, top, left + width - PAGE_INSET, on ? "Yes" : "No");
 	if (changed)
-		kl_field_set(field, on ? "yes" : "no");
+		kl_field_set(field, inverted ? (on ? "no" : "yes") : (on ? "yes" : "no"));
 	return top + PAGE_ROW;
 }
 
@@ -4090,9 +4144,12 @@ page_host_root_slider_row(
 	cw = page_control_width(left, width, value_x);
 	right = left + width - PAGE_INSET;
 
-	/* Maps the current field text to the nearest preset index (0 = Off). */
-	best = 0U;
-	if (field->text[0] != '\0' && strcmp(field->text, "off") != 0) {
+	/* Maps the current field text to the nearest preset index (0 = Off, default = 3 = 1280x720). */
+	if (field->text[0] == '\0') {
+		best = 3U;
+	} else if (strcmp(field->text, "off") == 0 || strcmp(field->text, "no") == 0) {
+		best = 0U;
+	} else {
 		w = atoi(field->text);
 		if (w <= 0) {
 			best = 3U;
@@ -4123,7 +4180,12 @@ page_host_root_slider_row(
 		kl_field_set(field, presets[idx]);
 	}
 
-	shown = (field->text[0] == '\0' || strcmp(field->text, "off") == 0) ? "Off" : field->text;
+	if (field->text[0] == '\0')
+		shown = presets[3];
+	else if (strcmp(field->text, "off") == 0 || strcmp(field->text, "no") == 0)
+		shown = "Off";
+	else
+		shown = field->text;
 	page_row_text(slider.x + slider.width + PAGE_AFTER_GAP, top, right, shown);
 	return top + PAGE_ROW;
 }

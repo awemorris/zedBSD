@@ -2533,6 +2533,14 @@ kwl_output_absolute(
  * closed, the mirror mode chosen) to the anchor, at the same share of the
  * way across.
  */
+void
+kwl_heads_evacuate_slot(
+	struct kwl_server *server,
+	unsigned slot)
+{
+	heads_evacuate(server, slot);
+}
+
 static void
 heads_evacuate(
 	struct kwl_server *server,

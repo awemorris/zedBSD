@@ -766,9 +766,13 @@ ssh_config_defaults(
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_HOST_NAME)) == 0)
 		config->host_name[0] = '\0';
 
-	/* The standard port. */
-	if ((config->set_mask & ((uint32_t)1U << SSH_KW_PORT)) == 0)
-		config->port = 22;
+	/* The standard port (3389 for RDP, 22 for SSH; legacy RDPPort if Port is unset). */
+	if ((config->set_mask & ((uint32_t)1U << SSH_KW_PORT)) == 0) {
+		if (config->use_rdp && (config->set_mask & ((uint32_t)1U << SSH_KW_RDP_PORT)) != 0)
+			config->port = config->rdp_port;
+		else
+			config->port = config->use_rdp ? 3389 : 22;
+	}
 
 	/* The one default identity file, only when no IdentityFile line gave one. */
 	if (config->identity_count == 0) {
@@ -826,21 +830,21 @@ ssh_config_defaults(
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_PROXY_COMMAND)) == 0)
 		config->proxy_command[0] = '\0';
 
-	/* The remote X windows each a window of the system's, no root window. */
+	/* Default X11 root window size: 1280x720 (off or no sets both to 0). */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_X11_ROOT_WINDOW)) == 0) {
-		config->x11_root_width = 0;
-		config->x11_root_height = 0;
+		config->x11_root_width = 1280U;
+		config->x11_root_height = 720U;
 	}
 
-	/* The remote X windows not in tabs. */
+	/* The remote X windows in tabs by default (no: independent windows). */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_X11_WINDOW_TABIFY)) == 0)
-		config->x11_window_tabify = 0;
+		config->x11_window_tabify = 1;
 
-	/* RDP is off by default, and its default port is 3389. */
+	/* RDP is off by default, and its port defaults to Port (or 3389). */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_USE_RDP)) == 0)
 		config->use_rdp = 0;
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_RDP_PORT)) == 0)
-		config->rdp_port = 3389;
+		config->rdp_port = ((config->set_mask & ((uint32_t)1U << SSH_KW_PORT)) != 0) ? config->port : 3389;
 
 	/* Forwarded ports listen on the loopback, a failed forwarding does not end the connection, and a session is opened. */
 	if ((config->set_mask & ((uint32_t)1U << SSH_KW_GATEWAY_PORTS)) == 0)
@@ -2455,8 +2459,9 @@ ssh_value_root(
 		return status;
 	token = &parsed->tokens[0];
 
-	/* off: no root window. */
-	off = config_text_equal(token->text, token->size, "off");
+	/* off or no: no root window. */
+	off = config_text_equal(token->text, token->size, "off") ||
+	    config_text_equal(token->text, token->size, "no");
 	if (off) {
 		target->x11_root_width = 0;
 		target->x11_root_height = 0;
