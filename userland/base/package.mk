@@ -205,38 +205,34 @@ STANDALONE_PROGRAM_CFLAGS = \
 	$(STANDALONE_ARCH_CFLAGS) \
 	-nostdinc -isystem "$(STANDALONE_SYSROOT)/usr/include" \
 	-I"$(REPO_ROOT)/include" -I"$(REPO_ROOT)/src" -I"$(REPO_ROOT)" -I. \
-	-ffreestanding -fno-stack-protector $(STANDALONE_PROGRAM_PIC) $(STANDALONE_OPT_CFLAGS) \
+	-ffreestanding -fno-stack-protector $(STANDALONE_OPT_CFLAGS) \
 	-Wall -Wextra -Werror
 
 # A statically linked program: position-dependent, started by crt0.o, and
 # linked with the C library's archives; no run-time loader.
-ifeq ($(STANDALONE_STATIC),y)
-STANDALONE_PROGRAM_PIC = -fno-pic -fno-pie
-STANDALONE_PROGRAM_LDFLAGS = \
+STANDALONE_STATIC_PROGRAM_PIC = -fno-pic -fno-pie
+STANDALONE_STATIC_PROGRAM_LDFLAGS = \
 	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
 	$(STANDALONE_ARCH_CFLAGS) \
 	-nostdlib -static -Wl,--gc-sections \
 	-Wl,-z,separate-code,-z,stack-size=0x100000
-STANDALONE_PROGRAM_CRT = $(STANDALONE_SYSROOT)/usr/lib/crt0.o
-STANDALONE_PROGRAM_LIBS = \
+STANDALONE_STATIC_PROGRAM_CRT = $(STANDALONE_SYSROOT)/usr/lib/crt0.o
+STANDALONE_STATIC_PROGRAM_LIBS = \
 	-L"$(STANDALONE_LIB_DIR)" -L"$(STANDALONE_SYSROOT)/usr/lib" -Wl,--start-group \
 	-l:libm.a -l:libc.a -l:libzedbsd-compiler-rt.a -l:libclang_rt.builtins.a \
 	-Wl,--end-group
-endif
 
 # A dynamically linked program: a PIE that loads /lib/libc.so through /lib/ld.so.
-ifneq ($(STANDALONE_STATIC),y)
-STANDALONE_PROGRAM_PIC = -fPIC
-STANDALONE_PROGRAM_LDFLAGS = \
+STANDALONE_DYNAMIC_PROGRAM_PIC = -fPIC
+STANDALONE_DYNAMIC_PROGRAM_LDFLAGS = \
 	--target=$(STANDALONE_TARGET_TRIPLE) --sysroot="$(STANDALONE_SYSROOT)" \
 	$(STANDALONE_ARCH_CFLAGS) \
 	-nostdlib -pie -Wl,--no-relax -Wl,--gc-sections \
 	-Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
 	-Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
 	-Wl,--dynamic-linker=/lib/ld.so
-STANDALONE_PROGRAM_CRT = $(STANDALONE_SYSROOT)/usr/lib/crt1.o
-STANDALONE_PROGRAM_LIBS = -l:libc.so
-endif
+STANDALONE_DYNAMIC_PROGRAM_CRT = $(STANDALONE_SYSROOT)/usr/lib/crt1.o
+STANDALONE_DYNAMIC_PROGRAM_LIBS = -l:libc.so
 
 # A shared library's objects.
 STANDALONE_SHLIB_CFLAGS = \
@@ -358,9 +354,24 @@ STANDALONE_SOURCES_$(1) := $(4) $(if $(filter program,$(7)),$(call standalone_ex
 STANDALONE_OBJECTS_$(1) = $$(foreach src,$$(STANDALONE_SOURCES_$(1)),$$(STANDALONE_OBJ_DIR_$(1))/$$(if $$(filter /%,$$(src)),_abs)$$(src:.c=.o))
 STANDALONE_SO_LIST_$(1) := $(foreach req,$(5),$(call standalone_required_so,$(req)))
 
-# The object compile flags of the type.
+# The object compile and link settings of the type (a static class program is
+# linked statically even in a dynamic userland build).
+STANDALONE_IS_STATIC_$(1) := $(if $(or $(filter y,$(STANDALONE_STATIC)),$(filter static,$(3))),y)
 ifeq ($(7),program)
-STANDALONE_CFLAGS_$(1) = $$(STANDALONE_PROGRAM_CFLAGS) $(call standalone_extra_cflags,$(1),,$(5))$(if $(call standalone_in_single,$(7),$(6)), $$(STANDALONE_SINGLE_CFLAGS))
+ifeq ($$(STANDALONE_IS_STATIC_$(1)),y)
+STANDALONE_PIC_$(1) = $$(STANDALONE_STATIC_PROGRAM_PIC)
+STANDALONE_LDFLAGS_$(1) = $$(STANDALONE_STATIC_PROGRAM_LDFLAGS)
+STANDALONE_CRT_$(1) = $$(STANDALONE_STATIC_PROGRAM_CRT)
+STANDALONE_LIBS_$(1) = $$(STANDALONE_STATIC_PROGRAM_LIBS)
+STANDALONE_REQ_LIBS_$(1) = $(call standalone_required_archives,$$(STANDALONE_SO_LIST_$(1)))
+else
+STANDALONE_PIC_$(1) = $$(STANDALONE_DYNAMIC_PROGRAM_PIC)
+STANDALONE_LDFLAGS_$(1) = $$(STANDALONE_DYNAMIC_PROGRAM_LDFLAGS)
+STANDALONE_CRT_$(1) = $$(STANDALONE_DYNAMIC_PROGRAM_CRT)
+STANDALONE_LIBS_$(1) = $$(STANDALONE_DYNAMIC_PROGRAM_LIBS)
+STANDALONE_REQ_LIBS_$(1) = $(call standalone_required_libs,$$(STANDALONE_SO_LIST_$(1)))
+endif
+STANDALONE_CFLAGS_$(1) = $$(STANDALONE_PROGRAM_CFLAGS) $$(STANDALONE_PIC_$(1)) $(call standalone_extra_cflags,$(1),,$(5))$(if $(call standalone_in_single,$(7),$(6)), $$(STANDALONE_SINGLE_CFLAGS))
 else ifeq ($(7),shared-library)
 STANDALONE_CFLAGS_$(1) = $$(STANDALONE_SHLIB_CFLAGS)
 else
@@ -409,7 +420,7 @@ STANDALONE_OUTPUT_$(1) = $$(STANDALONE_BUILD_DIR)/$(10)/$(1)
 $$(STANDALONE_OUTPUT_$(1)): $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_OBJECTS_STAMP_$(1)) $$(STANDALONE_LINK_OBJECTS_$(1)) | $$(addprefix $$(STANDALONE_DYNAMIC_DIR)/,$(call standalone_makeable_so,$(5)))
 	$$(call standalone_log,LD,$(10)/$(1))
 	$$(Q)mkdir -p "$$(@D)" "$$(STANDALONE_WORK_DIR_$(1))"
-	$$(Q)$$(CC) $$(STANDALONE_PROGRAM_LDFLAGS) $$(STANDALONE_LINK_FLAGS_$(1)) "$$(STANDALONE_PROGRAM_CRT)" $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_LINK_OBJECTS_$(1)) -L"$$(STANDALONE_DYNAMIC_DIR)" -Wl,-rpath-link,"$$(STANDALONE_DYNAMIC_DIR)" $(call standalone_program_required_libs,$$(STANDALONE_SO_LIST_$(1))) $$(STANDALONE_PROGRAM_LIBS) -o $$@
+	$$(Q)$$(CC) $$(STANDALONE_LDFLAGS_$(1)) $$(STANDALONE_LINK_FLAGS_$(1)) "$$(STANDALONE_CRT_$(1))" $$(STANDALONE_OBJECTS_$(1)) $$(STANDALONE_LINK_OBJECTS_$(1)) -L"$$(STANDALONE_DYNAMIC_DIR)" -Wl,-rpath-link,"$$(STANDALONE_DYNAMIC_DIR)" $$(STANDALONE_REQ_LIBS_$(1)) $$(STANDALONE_LIBS_$(1)) -o $$@
 	$$(Q)printf '%s %s\n' "/$(10)/$(1)" "$(6)" > "$$(STANDALONE_WORK_DIR_$(1))/mode"
 endif
 

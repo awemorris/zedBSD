@@ -22,6 +22,7 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* Android MediaCodecInfo.CodecCapabilities YUV420 color format constants. */
 #define MC_COLOR_YUV420_PLANAR			19
@@ -38,7 +39,7 @@
 
 /* Dequeue timeouts in microseconds for low-latency RDP frames. */
 #define MC_IN_TIMEOUT_US			5000
-#define MC_OUT_TIMEOUT_US			12000
+#define MC_OUT_TIMEOUT_US			100000
 
 /*
  * Per-stream AMediaCodec H.264 decoder wrapper with h264sw fallback.
@@ -70,6 +71,7 @@ static int mediacodec_configure_start(struct rdp_mediacodec_ctx *m, int32_t widt
 static void mediacodec_read_output_format(struct rdp_mediacodec_ctx *m, AMediaFormat *fmt);
 static int mediacodec_has_vcl_nal(const uint8_t *data, size_t len);
 static uint8_t clamp_u8(int32_t v);
+static int64_t mediacodec_now_us(void);
 static void mediacodec_yuv_to_argb(const struct rdp_mediacodec_ctx *m, const uint8_t *buf, size_t buf_size, uint32_t *out_pixels, uint32_t out_w, uint32_t out_h);
 
 /* AMediaCodec H.264 decoder operations table. */
@@ -164,6 +166,9 @@ mediacodec_decode(
 	ssize_t last_idx;
 	AMediaCodecBufferInfo last_info;
 	int64_t timeout_us;
+	int64_t queued_pts;
+	int64_t deadline_us;
+	int got_current;
 	uint8_t *out_buf;
 	size_t out_size;
 	uint32_t fw;
@@ -200,8 +205,9 @@ mediacodec_decode(
 
 	memcpy(in_buf, data, len);
 	flags = mediacodec_has_vcl_nal(data, len) ? 0U : AMEDIACODEC_BUFFER_FLAG_CODEC_CONFIG;
+	queued_pts = m->pts_us;
 	st = AMediaCodec_queueInputBuffer(m->codec, (size_t)in_idx, 0U, len,
-					  (uint64_t)m->pts_us, flags);
+					  (uint64_t)queued_pts, flags);
 	m->pts_us += 16667;
 	if (st != AMEDIA_OK) {
 		__android_log_print(ANDROID_LOG_WARN, "mikuterm-rdp",
@@ -216,8 +222,15 @@ mediacodec_decode(
 
 	last_idx = -1;
 	memset(&last_info, 0, sizeof(last_info));
-	timeout_us = (flags == 0U) ? MC_OUT_TIMEOUT_US : 0;
+	got_current = 0;
+	deadline_us = (flags == 0U) ? (mediacodec_now_us() + MC_OUT_TIMEOUT_US) : 0;
 	for (;;) {
+		if (flags == 0U && got_current == 0) {
+			int64_t rem = deadline_us - mediacodec_now_us();
+			timeout_us = rem > 0 ? rem : 0;
+		} else {
+			timeout_us = 0;
+		}
 		memset(&info, 0, sizeof(info));
 		out_idx = AMediaCodec_dequeueOutputBuffer(m->codec, &info, timeout_us);
 		if (out_idx == AMEDIACODEC_INFO_OUTPUT_FORMAT_CHANGED) {
@@ -248,7 +261,8 @@ mediacodec_decode(
 			(void)AMediaCodec_releaseOutputBuffer(m->codec, (size_t)last_idx, false);
 		last_idx = out_idx;
 		last_info = info;
-		timeout_us = 0;
+		if (info.presentationTimeUs >= queued_pts)
+			got_current = 1;
 	}
 
 	if (last_idx < 0)
@@ -326,15 +340,22 @@ mediacodec_configure_start(
 
 	st = AMEDIA_ERROR_UNKNOWN;
 	for (i = 0U; i < sizeof(color_fmts) / sizeof(color_fmts[0]); i++) {
-		fmt = AMediaFormat_new();
-		if (fmt == NULL)
-			return ENOMEM;
-		AMediaFormat_setString(fmt, AMEDIAFORMAT_KEY_MIME, "video/avc");
-		AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, width);
-		AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, height);
-		AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_COLOR_FORMAT, color_fmts[i]);
-		st = AMediaCodec_configure(m->codec, fmt, NULL, NULL, 0U);
-		AMediaFormat_delete(fmt);
+		int low_latency;
+		for (low_latency = 1; low_latency >= 0; low_latency--) {
+			fmt = AMediaFormat_new();
+			if (fmt == NULL)
+				return ENOMEM;
+			AMediaFormat_setString(fmt, AMEDIAFORMAT_KEY_MIME, "video/avc");
+			AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_WIDTH, width);
+			AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_HEIGHT, height);
+			AMediaFormat_setInt32(fmt, AMEDIAFORMAT_KEY_COLOR_FORMAT, color_fmts[i]);
+			if (low_latency != 0)
+				AMediaFormat_setInt32(fmt, "low-latency", 1);
+			st = AMediaCodec_configure(m->codec, fmt, NULL, NULL, 0U);
+			AMediaFormat_delete(fmt);
+			if (st == AMEDIA_OK)
+				break;
+		}
 		if (st == AMEDIA_OK)
 			break;
 	}
@@ -428,6 +449,16 @@ clamp_u8(
 	if (v > 255)
 		return 255U;
 	return (uint8_t)v;
+}
+
+/* Returns monotonic clock time in microseconds. */
+static int64_t
+mediacodec_now_us(void)
+{
+	struct timespec now;
+
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+	return (int64_t)now.tv_sec * 1000000 + (int64_t)(now.tv_nsec / 1000);
 }
 
 /* Converts AMediaCodec YUV420 (I420 or NV12) output planes to 0xAARRGGBB scaled to out_w x out_h. */
