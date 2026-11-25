@@ -49,6 +49,7 @@ struct rdp_worker {
 	uint32_t height;
 	uint32_t *frame_buf;
 	size_t frame_cap;
+	int connected;
 	int disconnected;
 };
 
@@ -384,6 +385,7 @@ worker_on_connected(
 {
 	struct rdp_worker *w;
 	w = (struct rdp_worker *)user;
+	w->connected = 1;
 	w->width = width;
 	w->height = height;
 	rdp_tab_set_status(w->tab, "Connected");
@@ -449,9 +451,8 @@ worker_on_disconnect(
 {
 	struct rdp_worker *w;
 
-	UNUSED_PARAMETER(error_info);
 	w = (struct rdp_worker *)user;
-	if (rdp_client_is_connected(w->client) == 0)
+	if (w->connected == 0 && error_info != 0U)
 		mikuterm_rdp_password_forget(w->target.host_name, w->target.port, w->target.user);
 	w->disconnected = 1;
 }

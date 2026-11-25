@@ -970,7 +970,7 @@ thread_launch_rdp_target(
 	}
 
 	if (target->password[0] == '\0') {
-		error = thread_ask(choice->session, "Password: ",
+		error = thread_ask(choice->session, "\r\nPassword: ",
 				   SESSION_ASK_SECRET, target->password,
 				   sizeof(target->password));
 		if (error == EPIPE)

@@ -302,9 +302,13 @@ mikuterm_rdp_password_keep(
 	credential.Comment = L"RDP password saved by mikuterm";
 	credential.CredentialBlobSize = (DWORD)length;
 	credential.CredentialBlob = (LPBYTE)password;
-	credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+	credential.Persist = CRED_PERSIST_ENTERPRISE;
 	credential.UserName = (LPWSTR)CREDENTIAL_USER;
 	written = CredWriteW(&credential, 0U);
+	if (!written) {
+		credential.Persist = CRED_PERSIST_SESSION;
+		written = CredWriteW(&credential, 0U);
+	}
 	free(name);
 	if (!written)
 		return EIO;

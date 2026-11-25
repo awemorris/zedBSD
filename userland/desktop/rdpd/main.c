@@ -137,9 +137,6 @@ cb_on_connected(
 		ctx->height = height;
 	if (!ctx->authed)
 		return;
-	rc = rdpd_hid_open(&ctx->hid, ctx->width, ctx->height);
-	if (rc != 0)
-		return;
 	rc = rdpd_session_start(&ctx->sess, ctx->uid, ctx->gid, ctx->user,
 				ctx->home, ctx->shell,
 				ctx->width, ctx->height);
@@ -147,7 +144,7 @@ cb_on_connected(
 		ctx->session_started = 1;
 }
 
-/* Propagates client RDPEDISP resize requests to HID and Wayland. */
+/* Propagates client RDPEDISP resize requests to Wayland. */
 static void
 cb_on_resize(
 	void *user,
@@ -159,12 +156,11 @@ cb_on_resize(
 	kwl_rdp_clamp_size(&width, &height);
 	ctx->width = width;
 	ctx->height = height;
-	rdpd_hid_set_size(&ctx->hid, width, height);
 	rdpd_session_resize(&ctx->sess, width, height);
 	(void)rdp_server_resize(ctx->srv, width, height);
 }
 
-/* Forwards client keyboard scancodes into /dev/input/bridge. */
+/* Forwards client keyboard scancodes directly to headless Wayland. */
 static void
 cb_on_input_key(
 	void *user,
@@ -173,10 +169,10 @@ cb_on_input_key(
 {
 	struct rdpd_client_ctx *ctx;
 	ctx = (struct rdpd_client_ctx *)user;
-	rdpd_hid_key(&ctx->hid, scancode, flags);
+	rdpd_session_key(&ctx->sess, scancode, flags);
 }
 
-/* Forwards client mouse events into /dev/input/bridge. */
+/* Forwards client mouse events directly to headless Wayland. */
 static void
 cb_on_input_mouse(
 	void *user,
@@ -186,7 +182,7 @@ cb_on_input_mouse(
 {
 	struct rdpd_client_ctx *ctx;
 	ctx = (struct rdpd_client_ctx *)user;
-	rdpd_hid_mouse(&ctx->hid, flags, x, y);
+	rdpd_session_mouse(&ctx->sess, flags, x, y);
 }
 
 /* Stops the client loop upon RDP disconnect. */

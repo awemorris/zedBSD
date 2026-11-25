@@ -295,6 +295,37 @@ rdpd_session_force_key(
 	(void)write(sess->rdp_fd, msg, sizeof(msg));
 }
 
+/* Sends a MOUSE input event directly to the headless compositor. */
+void
+rdpd_session_mouse(
+	struct rdpd_session *sess,
+	uint16_t flags,
+	uint16_t x,
+	uint16_t y)
+{
+	uint8_t msg[KWL_RDP_CTRL_HDR_SIZE];
+	if (sess == NULL || sess->rdp_fd < 0)
+		return;
+	kwl_rdp_pack_ctrl(msg, KWL_RDP_MSG_MOUSE, (uint32_t)flags,
+			  ((uint32_t)x << 16) | (uint32_t)y);
+	(void)write(sess->rdp_fd, msg, sizeof(msg));
+}
+
+/* Sends a KEY input event directly to the headless compositor. */
+void
+rdpd_session_key(
+	struct rdpd_session *sess,
+	uint16_t scancode,
+	uint16_t flags)
+{
+	uint8_t msg[KWL_RDP_CTRL_HDR_SIZE];
+	if (sess == NULL || sess->rdp_fd < 0)
+		return;
+	kwl_rdp_pack_ctrl(msg, KWL_RDP_MSG_KEY,
+			  ((uint32_t)flags << 16) | (uint32_t)scancode, 0U);
+	(void)write(sess->rdp_fd, msg, sizeof(msg));
+}
+
 /* Terminates the headless compositor and session processes. */
 void
 rdpd_session_stop(

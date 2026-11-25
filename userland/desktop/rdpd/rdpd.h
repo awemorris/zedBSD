@@ -90,6 +90,12 @@ void rdpd_session_resize(struct rdpd_session *sess, uint32_t width, uint32_t hei
 /* Sends a FORCE_KEY control message to the headless compositor. */
 void rdpd_session_force_key(struct rdpd_session *sess);
 
+/* Sends a MOUSE input event to the headless compositor. */
+void rdpd_session_mouse(struct rdpd_session *sess, uint16_t flags, uint16_t x, uint16_t y);
+
+/* Sends a KEY input event to the headless compositor. */
+void rdpd_session_key(struct rdpd_session *sess, uint16_t scancode, uint16_t flags);
+
 /* Terminates the headless compositor and session processes. */
 void rdpd_session_stop(struct rdpd_session *sess);
 
