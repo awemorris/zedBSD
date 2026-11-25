@@ -325,7 +325,7 @@ sessiond_session_run(
 			/* A session that closed its end says nothing more, and its attempt ends. */
 			if ((entry[0].revents & (POLLHUP | POLLERR)) != 0 && (entry[0].revents & POLLIN) == 0) {
 				sessiond_exchange_stop(&exchange);
-				sessiond_admin_end();
+				sessiond_admin_end(control);
 				sessiond_sleep_forget(control);
 				(void)close(control);
 				control = -1;
@@ -358,7 +358,7 @@ sessiond_session_run(
 
 	/* The session has ended: what is left of it goes, and the record says so. */
 	sessiond_exchange_stop(&exchange);
-	sessiond_admin_end();
+	sessiond_admin_end(control);
 	sessiond_sleep_forget(control);
 	sessiond_extend_forget(control);
 	if (control >= 0)
@@ -467,7 +467,7 @@ session_request(
 	}
 
 	/* The secret line after an ADMIN PASSWORD, erased unread. */
-	match = sessiond_admin_secret(line);
+	match = sessiond_admin_secret(control, line);
 	if (match) {
 		sessiond_fds_close(&fds);
 		return 0;
@@ -484,7 +484,7 @@ session_request(
 	/* An admin action, which alone may take descriptors. */
 	match = strncmp(line, "ADMIN ", 6);
 	if (match == 0) {
-		sessiond_admin_request(line + 6, cut, &fds);
+		sessiond_admin_request(control, line + 6, cut, &fds);
 		return 0;
 	}
 
@@ -537,14 +537,14 @@ session_request(
 	match = strcmp(line, "LOCKED");
 	if (match == 0) {
 		daemon->session_locked = 1;
-		sessiond_admin_lock(1);
+		sessiond_admin_lock(control, 1);
 		sessiond_log("SESSIOND SESSION locked user=%s", account->passwd.pw_name);
 		return 0;
 	}
 	match = strcmp(line, "UNLOCKED");
 	if (match == 0) {
 		daemon->session_locked = 0;
-		sessiond_admin_lock(0);
+		sessiond_admin_lock(control, 0);
 		sessiond_log("SESSIOND SESSION unlocked user=%s", account->passwd.pw_name);
 		return 0;
 	}

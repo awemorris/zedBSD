@@ -380,6 +380,57 @@ session_claim_seat(
 	*out_owner_fd = fd;
 }
 
+/* Claims an isolated session control socket from sessiond for admin actions. */
+static void
+session_claim_control(
+	uid_t uid,
+	int *out_control_fd)
+{
+	char req[32];
+	char resp[32];
+	union {
+		struct cmsghdr header;
+		char space[CMSG_SPACE(sizeof(int))];
+	} control;
+	struct msghdr msg;
+	struct iovec vec;
+	struct cmsghdr *cmsg;
+	ssize_t n;
+	int fd;
+
+	*out_control_fd = -1;
+	fd = rdp_sock_connect();
+	if (fd < 0)
+		return;
+	(void)snprintf(req, sizeof(req), "RDP_CONTROL %lu\n", (unsigned long)uid);
+	if (write_str_fd(fd, req, strlen(req)) != 0) {
+		close(fd);
+		return;
+	}
+	memset(&msg, 0, sizeof(msg));
+	memset(&control, 0, sizeof(control));
+	vec.iov_base = resp;
+	vec.iov_len = sizeof(resp) - 1U;
+	msg.msg_iov = &vec;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control.space;
+	msg.msg_controllen = sizeof(control.space);
+	n = recvmsg(fd, &msg, 0);
+	close(fd);
+	if (n <= 0)
+		return;
+	resp[n] = '\0';
+	if (strncmp(resp, "OK", 2U) != 0)
+		return;
+	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+		if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS &&
+		    cmsg->cmsg_len >= CMSG_LEN(sizeof(int))) {
+			memcpy(out_control_fd, CMSG_DATA(cmsg), sizeof(int));
+			break;
+		}
+	}
+}
+
 /* Launches headless wayland (--headless --rdp-fd=N --seat-fd=4) via sessiond seat isolation. */
 int
 rdpd_session_start(
@@ -395,6 +446,7 @@ rdpd_session_start(
 {
 	int sv[2];
 	int seat_fd;
+	int control_fd;
 	char user_run[64];
 	char runtime_dir[96];
 	char opt_width[32];
@@ -402,7 +454,8 @@ rdpd_session_start(
 	char opt_fd[32];
 	char opt_sock[160];
 	char opt_seat[24];
-	char *comp_argv[12];
+	char opt_ctrl[24];
+	char *comp_argv[16];
 	int argc;
 	pid_t comp_pid;
 	int rc;
@@ -426,8 +479,11 @@ rdpd_session_start(
 	(void)mkdir(runtime_dir, 0700);
 	(void)chown(runtime_dir, uid, gid);
 	session_claim_seat(event_dev, &sess->sessiond_fd, &seat_fd);
+	session_claim_control(uid, &control_fd);
 	rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
 	if (rc != 0) {
+		if (control_fd >= 0)
+			close(control_fd);
 		if (seat_fd >= 0)
 			close(seat_fd);
 		if (sess->sessiond_fd >= 0) {
@@ -444,11 +500,14 @@ rdpd_session_start(
 	(void)snprintf(opt_sock, sizeof(opt_sock), "--socket=%s",
 		       sess->wayland_socket);
 	(void)snprintf(opt_seat, sizeof(opt_seat), "--seat-fd=%d", 4);
+	(void)snprintf(opt_ctrl, sizeof(opt_ctrl), "--control-fd=%d", 3);
 	comp_pid = fork();
 	if (comp_pid < 0) {
 		err = errno;
 		close(sv[0]);
 		close(sv[1]);
+		if (control_fd >= 0)
+			close(control_fd);
 		if (seat_fd >= 0)
 			close(seat_fd);
 		if (sess->sessiond_fd >= 0) {
@@ -463,7 +522,7 @@ rdpd_session_start(
 		close(sv[0]);
 		if (sess->sessiond_fd >= 0)
 			close(sess->sessiond_fd);
-		if (sv[1] == 4) {
+		if (sv[1] == 3 || sv[1] == 4) {
 			int moved = fcntl(sv[1], F_DUPFD, 5);
 			if (moved >= 0) {
 				close(sv[1]);
@@ -472,6 +531,20 @@ rdpd_session_start(
 			}
 		}
 		(void)fcntl(sv[1], F_SETFD, 0);
+		if (control_fd >= 0) {
+			if (control_fd == 4 && seat_fd >= 0) {
+				int moved = fcntl(control_fd, F_DUPFD, 5);
+				if (moved >= 0) {
+					close(control_fd);
+					control_fd = moved;
+				}
+			}
+			if (control_fd != 3) {
+				(void)dup2(control_fd, 3);
+				close(control_fd);
+			}
+			(void)fcntl(3, F_SETFD, 0);
+		}
 		if (seat_fd >= 0) {
 			if (seat_fd != 4) {
 				(void)dup2(seat_fd, 4);
@@ -487,6 +560,8 @@ rdpd_session_start(
 		comp_argv[argc++] = opt_height;
 		comp_argv[argc++] = opt_fd;
 		comp_argv[argc++] = opt_sock;
+		if (control_fd >= 0)
+			comp_argv[argc++] = opt_ctrl;
 		if (seat_fd >= 0)
 			comp_argv[argc++] = opt_seat;
 		comp_argv[argc++] = (char *)"--session";
@@ -500,6 +575,8 @@ rdpd_session_start(
 
 	/* Records compositor state without spawning a duplicate compositor. */
 	close(sv[1]);
+	if (control_fd >= 0)
+		close(control_fd);
 	if (seat_fd >= 0)
 		close(seat_fd);
 	sess->compositor_pid = comp_pid;

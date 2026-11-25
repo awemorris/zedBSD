@@ -39,7 +39,7 @@
  * Out starts while the session still shows).
  */
 #define SESSIOND_SEAT_FD	4
-#define SESSIOND_SEAT_SOCKETS	16U
+#define SESSIOND_SEAT_SOCKETS	48U
 #define SESSIOND_RDP_SOCKET	"/run/sessiond-rdp.sock"
 
 /* The longest line of the greeter's protocol, and the longest user name. */
@@ -194,11 +194,11 @@ void sessiond_extend_forget(int control);
  * session; lock follows its lock screen; tick runs out what waits.
  */
 void sessiond_admin_begin(int control, const struct sessiond_account *account, int locked);
-int sessiond_admin_secret(char *line);
-void sessiond_admin_request(const char *arguments, int cut, struct sessiond_fds *fds);
-void sessiond_admin_lock(int locked);
+int sessiond_admin_secret(int control, char *line);
+void sessiond_admin_request(int control, const char *arguments, int cut, struct sessiond_fds *fds);
+void sessiond_admin_lock(int control, int locked);
 void sessiond_admin_tick(void);
-void sessiond_admin_end(void);
+void sessiond_admin_end(int control);
 int sessiond_admin_greeter_reply(const char *arguments, char *reply, size_t size);
 
 #endif

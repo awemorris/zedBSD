@@ -149,6 +149,62 @@ rdpd_ps2_to_hid_usage(
 	return 0x00U;
 }
 
+/* Maps a Unicode codepoint to a US-ASCII PS/2 Set 1 scancode and Shift flag. */
+int
+rdpd_unicode_to_ps2(
+	uint16_t codepoint,
+	uint16_t *scancode,
+	int *need_shift)
+{
+	static const struct {
+		uint8_t scan;
+		uint8_t shift;
+	} ascii_to_ps2[95] = {
+		{ 0x39U, 0U }, { 0x02U, 1U }, { 0x28U, 1U }, { 0x04U, 1U }, /* ' ' '!' '"' '#' */
+		{ 0x05U, 1U }, { 0x06U, 1U }, { 0x08U, 1U }, { 0x28U, 0U }, /* '$' '%' '&' '\'' */
+		{ 0x0AU, 1U }, { 0x0BU, 1U }, { 0x09U, 1U }, { 0x0DU, 1U }, /* '(' ')' '*' '+' */
+		{ 0x33U, 0U }, { 0x0CU, 0U }, { 0x34U, 0U }, { 0x35U, 0U }, /* ',' '-' '.' '/' */
+		{ 0x0BU, 0U }, { 0x02U, 0U }, { 0x03U, 0U }, { 0x04U, 0U }, /* '0' '1' '2' '3' */
+		{ 0x05U, 0U }, { 0x06U, 0U }, { 0x07U, 0U }, { 0x08U, 0U }, /* '4' '5' '6' '7' */
+		{ 0x09U, 0U }, { 0x0AU, 0U }, { 0x27U, 1U }, { 0x27U, 0U }, /* '8' '9' ':' ';' */
+		{ 0x33U, 1U }, { 0x0DU, 0U }, { 0x34U, 1U }, { 0x35U, 1U }, /* '<' '=' '>' '?' */
+		{ 0x03U, 1U }, { 0x1EU, 1U }, { 0x30U, 1U }, { 0x2EU, 1U }, /* '@' 'A' 'B' 'C' */
+		{ 0x20U, 1U }, { 0x12U, 1U }, { 0x21U, 1U }, { 0x22U, 1U }, /* 'D' 'E' 'F' 'G' */
+		{ 0x23U, 1U }, { 0x17U, 1U }, { 0x24U, 1U }, { 0x25U, 1U }, /* 'H' 'I' 'J' 'K' */
+		{ 0x26U, 1U }, { 0x32U, 1U }, { 0x31U, 1U }, { 0x18U, 1U }, /* 'L' 'M' 'N' 'O' */
+		{ 0x19U, 1U }, { 0x10U, 1U }, { 0x13U, 1U }, { 0x1FU, 1U }, /* 'P' 'Q' 'R' 'S' */
+		{ 0x14U, 1U }, { 0x16U, 1U }, { 0x2FU, 1U }, { 0x11U, 1U }, /* 'T' 'U' 'V' 'W' */
+		{ 0x2DU, 1U }, { 0x15U, 1U }, { 0x2CU, 1U }, { 0x1AU, 0U }, /* 'X' 'Y' 'Z' '[' */
+		{ 0x2BU, 0U }, { 0x1BU, 0U }, { 0x07U, 1U }, { 0x0CU, 1U }, /* '\' ']' '^' '_' */
+		{ 0x29U, 0U }, { 0x1EU, 0U }, { 0x30U, 0U }, { 0x2EU, 0U }, /* '`' 'a' 'b' 'c' */
+		{ 0x20U, 0U }, { 0x12U, 0U }, { 0x21U, 0U }, { 0x22U, 0U }, /* 'd' 'e' 'f' 'g' */
+		{ 0x23U, 0U }, { 0x17U, 0U }, { 0x24U, 0U }, { 0x25U, 0U }, /* 'h' 'i' 'j' 'k' */
+		{ 0x26U, 0U }, { 0x32U, 0U }, { 0x31U, 0U }, { 0x18U, 0U }, /* 'l' 'm' 'n' 'o' */
+		{ 0x19U, 0U }, { 0x10U, 0U }, { 0x13U, 0U }, { 0x1FU, 0U }, /* 'p' 'q' 'r' 's' */
+		{ 0x14U, 0U }, { 0x16U, 0U }, { 0x2FU, 0U }, { 0x11U, 0U }, /* 't' 'u' 'v' 'w' */
+		{ 0x2DU, 0U }, { 0x15U, 0U }, { 0x2CU, 0U }, { 0x1AU, 1U }, /* 'x' 'y' 'z' '{' */
+		{ 0x2BU, 1U }, { 0x1BU, 1U }, { 0x29U, 1U }                  /* '|' '}' '~' */
+	};
+
+	if (scancode == NULL || need_shift == NULL)
+		return EINVAL;
+	*need_shift = 0;
+	if (codepoint >= 0x20U && codepoint <= 0x7EU) {
+		*scancode = ascii_to_ps2[codepoint - 0x20U].scan;
+		*need_shift = (int)ascii_to_ps2[codepoint - 0x20U].shift;
+		return 0;
+	}
+	switch (codepoint) {
+	case 0x08U: *scancode = 0x0EU; return 0; /* Backspace */
+	case 0x09U: *scancode = 0x0FU; return 0; /* Tab */
+	case 0x0AU:
+	case 0x0DU: *scancode = 0x1CU; return 0; /* Enter */
+	case 0x1BU: *scancode = 0x01U; return 0; /* Escape */
+	default:
+		return EINVAL;
+	}
+}
+
 /* Formats a 9-byte keyboard HID report (Report ID 1) into report[9]. */
 int
 rdpd_hid_format_key(

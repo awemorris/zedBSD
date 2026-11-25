@@ -252,6 +252,15 @@ test_rdpd_hid(
 
 	assert(rdpd_ps2_to_hid_usage(0x1EU, 0U) == 0x04U);
 	assert(rdpd_ps2_to_hid_usage(0x48U, RDP_KBD_FLAG_EXTENDED) == 0x52U);
+	{
+		uint16_t scan = 0U;
+		int shift = 0;
+		assert(rdpd_unicode_to_ps2('a', &scan, &shift) == 0 && scan == 0x1EU && shift == 0);
+		assert(rdpd_unicode_to_ps2('A', &scan, &shift) == 0 && scan == 0x1EU && shift == 1);
+		assert(rdpd_unicode_to_ps2('!', &scan, &shift) == 0 && scan == 0x02U && shift == 1);
+		assert(rdpd_unicode_to_ps2('\n', &scan, &shift) == 0 && scan == 0x1CU && shift == 0);
+		assert(rdpd_unicode_to_ps2(0x3042U, &scan, &shift) != 0);
+	}
 	memset(&hid, 0, sizeof(hid));
 	hid.fd = -1;
 	hid.width = 1280U;

@@ -155,12 +155,14 @@ struct admin_pending {
 };
 
 /*
- * The running session as the admin actions see it: its compositor's
- * socket (-1 when there is none), its user, its generation, whether its
- * lock screen shows, whether the next line is a secret to erase unread,
- * the permissions kept for its clients, and the request that waits.
+ * A running session as the admin actions see it: whether the slot is
+ * active, its compositor's socket (-1 when there is none), its user, its
+ * generation, whether its lock screen shows, whether the next line is a
+ * secret to erase unread, the permissions kept for its clients, and the
+ * request that waits.
  */
 struct admin_session {
+	int active;
 	int control;
 	const struct sessiond_account *account;
 	unsigned long long generation;
@@ -186,13 +188,14 @@ struct admin_launch {
 	char action[SESSIOND_ADMIN_NAME_MAX + 1U];
 };
 
+#define ADMIN_SESSIONS_MAX	(1U + SESSIOND_SEAT_SOCKETS)
+
 /*
- * The running session's admin state.  sessiond_admin_begin fills it when
- * a session starts and sessiond_admin_end empties it; one session runs
- * at a time, on sessiond's one thread.  Its account is NULL while no
- * session runs, and then nothing is answered.
+ * The running sessions' admin states (console and headless RDP sessions).
+ * sessiond_admin_begin fills a slot when a session starts and
+ * sessiond_admin_end empties it; sessiond's one thread uses them.
  */
-static struct admin_session admin_session;
+static struct admin_session admin_sessions[ADMIN_SESSIONS_MAX];
 
 /*
  * The generation of the last session begun.  It only grows, so that a
@@ -204,25 +207,42 @@ static unsigned long long admin_generation;
 /* The place definitions and programs are opened from. */
 static const struct sessiond_admin_place admin_place = { SESSIOND_ADMIN_ROOT, (uid_t)SESSIOND_ADMIN_OWNER };
 
-static void admin_ask(const char *arguments);
-static void admin_allow(const char *arguments, struct sessiond_fds *fds);
-static void admin_password(const char *arguments);
-static void admin_cancel(const char *arguments);
-static void admin_forget(const char *arguments);
-static void admin_cut(const char *arguments);
-static void admin_show(void);
-static void admin_start(int display);
-static int admin_prepare(struct admin_launch *launch);
+static struct admin_session *admin_find(int control);
+static void admin_ask(struct admin_session *session, const char *arguments);
+static void admin_allow(struct admin_session *session, const char *arguments, struct sessiond_fds *fds);
+static void admin_password(struct admin_session *session, const char *arguments);
+static void admin_cancel(struct admin_session *session, const char *arguments);
+static void admin_forget(struct admin_session *session, const char *arguments);
+static void admin_cut(struct admin_session *session, const char *arguments);
+static void admin_show(struct admin_session *session);
+static void admin_start(struct admin_session *session, int display);
+static int admin_prepare(const struct admin_session *session, struct admin_launch *launch);
 static int admin_environment_add(struct admin_launch *launch, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void admin_middle(const int *table, struct admin_launch *launch) __attribute__((noreturn));
 static void admin_runner(struct admin_launch *launch, int display) __attribute__((noreturn));
 static void admin_helper(struct admin_launch *launch) __attribute__((noreturn));
-static int admin_send_started(unsigned long id, unsigned bits, const int *descriptors, unsigned count);
-static void admin_pending_clear(void);
-static void admin_reply(const char *format, ...) __attribute__((format(printf, 1, 2)));
+static int admin_send_started(const struct admin_session *session, unsigned long id, unsigned bits, const int *descriptors, unsigned count);
+static void admin_pending_clear(struct admin_session *session);
+static void admin_reply(const struct admin_session *session, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void admin_close_pair(int *pair);
 static const char *admin_verb(const char *arguments, const char *verb);
 static void admin_fds_take(struct sessiond_fds *fds, struct msghdr *header);
+
+/* Finds the active admin session for control, or NULL. */
+static struct admin_session *
+admin_find(
+	int control)
+{
+	unsigned index;
+
+	if (control < 0)
+		return NULL;
+	for (index = 0U; index < ADMIN_SESSIONS_MAX; index++) {
+		if (admin_sessions[index].active && admin_sessions[index].control == control)
+			return &admin_sessions[index];
+	}
+	return NULL;
+}
 
 /*
  * Begins the admin actions of a session: its compositor's socket, its
@@ -235,17 +255,38 @@ sessiond_admin_begin(
 	const struct sessiond_account *account,
 	int locked)
 {
-	/* What an earlier session left goes. */
-	sessiond_admin_end();
+	struct admin_session *session;
+	unsigned index;
+
+	if (control < 0 || account == NULL)
+		return;
+
+	/* What an earlier session on this descriptor left goes. */
+	sessiond_admin_end(control);
+
+	session = NULL;
+	for (index = 0U; index < ADMIN_SESSIONS_MAX; index++) {
+		if (!admin_sessions[index].active) {
+			session = &admin_sessions[index];
+			break;
+		}
+	}
+	if (session == NULL) {
+		sessiond_log("SESSIOND ADMIN no free session slot control=%d", control);
+		return;
+	}
 
 	/* A new generation: no permission kept before reaches this session. */
 	admin_generation++;
-	admin_session.control = control;
-	admin_session.account = account;
-	admin_session.generation = admin_generation;
-	admin_session.locked = locked;
-	admin_session.skip_secret = 0;
-	sessiond_admin_keep_clear(&admin_session.keep);
+	memset(session, 0, sizeof(*session));
+	session->active = 1;
+	session->control = control;
+	session->account = account;
+	session->generation = admin_generation;
+	session->locked = locked;
+	session->skip_secret = 0;
+	session->pending.program = -1;
+	sessiond_admin_keep_clear(&session->keep);
 }
 
 /*
@@ -254,14 +295,20 @@ sessiond_admin_begin(
  */
 int
 sessiond_admin_secret(
+	int control,
 	char *line)
 {
+	struct admin_session *session;
 	size_t length;
 
-	/* Only the line right after a PASSWORD. */
-	if (!admin_session.skip_secret)
+	session = admin_find(control);
+	if (session == NULL)
 		return 0;
-	admin_session.skip_secret = 0;
+
+	/* Only the line right after a PASSWORD. */
+	if (!session->skip_secret)
+		return 0;
+	session->skip_secret = 0;
 
 	/* Erased where it lies. */
 	length = strlen(line);
@@ -277,16 +324,24 @@ sessiond_admin_secret(
  */
 void
 sessiond_admin_request(
+	int control,
 	const char *arguments,
 	int cut,
 	struct sessiond_fds *fds)
 {
+	struct admin_session *session;
 	const char *rest;
+
+	session = admin_find(control);
+	if (session == NULL) {
+		sessiond_fds_close(fds);
+		return;
+	}
 
 	/* A line cut short is never carried out, but a request waiting for an answer gets one. */
 	if (cut) {
 		sessiond_fds_close(fds);
-		admin_cut(arguments);
+		admin_cut(session, arguments);
 		return;
 	}
 
@@ -294,14 +349,14 @@ sessiond_admin_request(
 	rest = admin_verb(arguments, "ASK");
 	if (rest != NULL) {
 		sessiond_fds_close(fds);
-		admin_ask(rest);
+		admin_ask(session, rest);
 		return;
 	}
 
 	/* The person allowed it, or the connection came. */
 	rest = admin_verb(arguments, "ALLOW");
 	if (rest != NULL) {
-		admin_allow(rest, fds);
+		admin_allow(session, rest, fds);
 		sessiond_fds_close(fds);
 		return;
 	}
@@ -310,7 +365,7 @@ sessiond_admin_request(
 	rest = admin_verb(arguments, "PASSWORD");
 	if (rest != NULL) {
 		sessiond_fds_close(fds);
-		admin_password(rest);
+		admin_password(session, rest);
 		return;
 	}
 
@@ -318,7 +373,7 @@ sessiond_admin_request(
 	rest = admin_verb(arguments, "CANCEL");
 	if (rest != NULL) {
 		sessiond_fds_close(fds);
-		admin_cancel(rest);
+		admin_cancel(session, rest);
 		return;
 	}
 
@@ -326,14 +381,14 @@ sessiond_admin_request(
 	rest = admin_verb(arguments, "FORGET");
 	if (rest != NULL) {
 		sessiond_fds_close(fds);
-		admin_forget(rest);
+		admin_forget(session, rest);
 		return;
 	}
 
 	/* Anything else is not a request. */
 	sessiond_fds_close(fds);
 	sessiond_log("SESSIOND ADMIN unknown request");
-	admin_reply("ERROR");
+	admin_reply(session, "ERROR");
 }
 
 /*
@@ -343,16 +398,23 @@ sessiond_admin_request(
  */
 void
 sessiond_admin_lock(
+	int control,
 	int locked)
 {
+	struct admin_session *session;
+
+	session = admin_find(control);
+	if (session == NULL)
+		return;
+
 	/* What was allowed before the lock is not allowed after it. */
-	admin_session.locked = locked;
+	session->locked = locked;
 	if (!locked)
 		return;
-	sessiond_admin_keep_clear(&admin_session.keep);
-	if (admin_session.pending.active)
-		sessiond_log("SESSIOND ADMIN locked id=%lu", admin_session.pending.id);
-	admin_pending_clear();
+	sessiond_admin_keep_clear(&session->keep);
+	if (session->pending.active)
+		sessiond_log("SESSIOND ADMIN locked id=%lu", session->pending.id);
+	admin_pending_clear(session);
 }
 
 /*
@@ -365,18 +427,25 @@ sessiond_admin_tick(
 	void)
 {
 	long long now_ms;
+	unsigned index;
 
 	/* The time now. */
 	now_ms = sessiond_milliseconds();
 
-	/* The request that waited too long. */
-	if (admin_session.pending.active && now_ms >= admin_session.pending.deadline_ms) {
-		sessiond_log("SESSIOND ADMIN expired id=%lu", admin_session.pending.id);
-		admin_pending_clear();
-	}
+	for (index = 0U; index < ADMIN_SESSIONS_MAX; index++) {
+		struct admin_session *session = &admin_sessions[index];
+		if (!session->active)
+			continue;
 
-	/* The permissions whose time is over. */
-	sessiond_admin_keep_expire(&admin_session.keep, now_ms);
+		/* The request that waited too long. */
+		if (session->pending.active && now_ms >= session->pending.deadline_ms) {
+			sessiond_log("SESSIOND ADMIN expired id=%lu", session->pending.id);
+			admin_pending_clear(session);
+		}
+
+		/* The permissions whose time is over. */
+		sessiond_admin_keep_expire(&session->keep, now_ms);
+	}
 }
 
 /*
@@ -385,15 +454,22 @@ sessiond_admin_tick(
  */
 void
 sessiond_admin_end(
-	void)
+	int control)
 {
+	struct admin_session *session;
+
+	session = admin_find(control);
+	if (session == NULL)
+		return;
+
 	/* Nothing of the session is left. */
-	admin_pending_clear();
-	sessiond_admin_keep_clear(&admin_session.keep);
-	admin_session.control = -1;
-	admin_session.account = NULL;
-	admin_session.locked = 0;
-	admin_session.skip_secret = 0;
+	admin_pending_clear(session);
+	sessiond_admin_keep_clear(&session->keep);
+	session->active = 0;
+	session->control = -1;
+	session->account = NULL;
+	session->locked = 0;
+	session->skip_secret = 0;
 }
 
 /*
@@ -558,6 +634,7 @@ sessiond_fds_close(
 /* Answers an ADMIN ASK: refused, started on a kept permission, or the dialog. */
 static void
 admin_ask(
+	struct admin_session *session,
 	const char *arguments)
 {
 	struct sessiond_admin_ask ask;
@@ -572,13 +649,13 @@ admin_ask(
 	int error;
 
 	/* The request, refused by its number when it can be read but not understood. */
-	pending = &admin_session.pending;
-	account = admin_session.account;
+	pending = &session->pending;
+	account = session->account;
 	error = sessiond_admin_parse_ask(arguments, &ask);
 	if (error != 0) {
 		sessiond_log("SESSIOND ADMIN refused id=%lu reason=invalid", ask.id);
 		if (ask.id != 0UL)
-			admin_reply("ADMIN REFUSED %lu invalid", ask.id);
+			admin_reply(session, "ADMIN REFUSED %lu invalid", ask.id);
 		return;
 	}
 	syslog(LOG_NOTICE, "admin action %s asked by %s (uid %u) for client %lu", ask.action, account->passwd.pw_name, (unsigned)account->passwd.pw_uid, ask.client);
@@ -586,14 +663,14 @@ admin_ask(
 	/* One request waits at a time. */
 	if (pending->active) {
 		sessiond_log("SESSIOND ADMIN refused id=%lu reason=busy waiting=%lu", ask.id, pending->id);
-		admin_reply("ADMIN REFUSED %lu busy", ask.id);
+		admin_reply(session, "ADMIN REFUSED %lu busy", ask.id);
 		return;
 	}
 
 	/* Nothing is asked while the lock screen shows. */
-	if (admin_session.locked) {
+	if (session->locked) {
 		sessiond_log("SESSIOND ADMIN refused id=%lu reason=locked", ask.id);
-		admin_reply("ADMIN REFUSED %lu locked", ask.id);
+		admin_reply(session, "ADMIN REFUSED %lu locked", ask.id);
 		return;
 	}
 
@@ -602,7 +679,7 @@ admin_ask(
 	if (error != 0) {
 		sessiond_log("SESSIOND ADMIN refused id=%lu action=%s reason=unknown errno=%d", ask.id, ask.action, error);
 		syslog(LOG_WARNING, "admin action %s refused: no usable definition (errno %d)", ask.action, error);
-		admin_reply("ADMIN REFUSED %lu unknown", ask.id);
+		admin_reply(session, "ADMIN REFUSED %lu unknown", ask.id);
 		return;
 	}
 
@@ -611,7 +688,7 @@ admin_ask(
 	if (error != 0) {
 		sessiond_log("SESSIOND ADMIN refused id=%lu action=%s reason=unknown words=%u", ask.id, ask.action, ask.words.count);
 		syslog(LOG_WARNING, "admin action %s refused: words it does not list", ask.action);
-		admin_reply("ADMIN REFUSED %lu unknown", ask.id);
+		admin_reply(session, "ADMIN REFUSED %lu unknown", ask.id);
 		return;
 	}
 
@@ -619,7 +696,7 @@ admin_ask(
 	extra = ask.streams & ~(pending->definition.streams | SESSIOND_ADMIN_INPUT);
 	if (extra != 0U) {
 		sessiond_log("SESSIOND ADMIN refused id=%lu action=%s reason=invalid streams=%x", ask.id, ask.action, ask.streams);
-		admin_reply("ADMIN REFUSED %lu invalid", ask.id);
+		admin_reply(session, "ADMIN REFUSED %lu invalid", ask.id);
 		return;
 	}
 
@@ -629,14 +706,14 @@ admin_ask(
 	if (verdict == SESSIOND_ADMIN_VERDICT_NOT_ALLOWED) {
 		sessiond_log("SESSIOND ADMIN refused id=%lu action=%s reason=not-allowed wheel=%d", ask.id, ask.action, in_wheel);
 		syslog(LOG_WARNING, "admin action %s refused for %s: not allowed", ask.action, account->passwd.pw_name);
-		admin_reply("ADMIN REFUSED %lu not-allowed", ask.id);
+		admin_reply(session, "ADMIN REFUSED %lu not-allowed", ask.id);
 		return;
 	}
 
 	/* The passwords are not made yet: never a looser way in their place. */
 	if (verdict != SESSIOND_ADMIN_VERDICT_CONSENT) {
 		sessiond_log("SESSIOND ADMIN refused id=%lu action=%s reason=method", ask.id, ask.action);
-		admin_reply("ADMIN REFUSED %lu method", ask.id);
+		admin_reply(session, "ADMIN REFUSED %lu method", ask.id);
 		return;
 	}
 
@@ -645,7 +722,7 @@ admin_ask(
 	if (error != 0) {
 		sessiond_log("SESSIOND ADMIN failed id=%lu action=%s program=%s errno=%d", ask.id, ask.action, pending->definition.program, error);
 		syslog(LOG_WARNING, "admin action %s: its program %s cannot be used (errno %d)", ask.action, pending->definition.program, error);
-		admin_reply("ADMIN FAILED %lu %d", ask.id, error);
+		admin_reply(session, "ADMIN FAILED %lu %d", ask.id, error);
 		return;
 	}
 
@@ -661,7 +738,7 @@ admin_ask(
 	pending->identity = identity;
 
 	/* A permission kept for the client: no dialog. */
-	kept = sessiond_admin_keep_find(&admin_session.keep, admin_session.generation, ask.client, ask.action, &identity, sessiond_milliseconds());
+	kept = sessiond_admin_keep_find(&session->keep, session->generation, ask.client, ask.action, &identity, sessiond_milliseconds());
 	pending->kept = kept;
 	if (kept) {
 		syslog(LOG_NOTICE, "admin action %s allowed for %s: kept", ask.action, account->passwd.pw_name);
@@ -670,24 +747,25 @@ admin_ask(
 		if (pending->definition.display) {
 			pending->wait = ADMIN_WAIT_CONNECTION;
 			sessiond_log("SESSIOND ADMIN connect id=%lu action=%s via=keep", ask.id, ask.action);
-			admin_reply("ADMIN CONNECT %lu", ask.id);
+			admin_reply(session, "ADMIN CONNECT %lu", ask.id);
 			return;
 		}
 
 		/* Any other starts now. */
 		sessiond_log("SESSIOND ADMIN allow id=%lu action=%s via=keep", ask.id, ask.action);
-		admin_start(-1);
+		admin_start(session, -1);
 		return;
 	}
 
 	/* The dialog asks the person. */
 	pending->wait = ADMIN_WAIT_CONSENT;
-	admin_show();
+	admin_show(session);
 }
 
 /* Answers an ADMIN ALLOW: the waiting request starts, with the connection it is lent. */
 static void
 admin_allow(
+	struct admin_session *session,
 	const char *arguments,
 	struct sessiond_fds *fds)
 {
@@ -698,7 +776,7 @@ admin_allow(
 	int error;
 
 	/* The request's number, alone on the line. */
-	pending = &admin_session.pending;
+	pending = &session->pending;
 	error = sessiond_admin_parse_id(arguments, &id, &rest);
 	if (error != 0 || *rest != '\0') {
 		sessiond_log("SESSIOND ADMIN allow unreadable");
@@ -708,7 +786,7 @@ admin_allow(
 	/* Only the request that waits: never a program started twice, or after it was forgotten. */
 	if (!pending->active || pending->id != id) {
 		sessiond_log("SESSIOND ADMIN failed id=%lu reason=stale", id);
-		admin_reply("ADMIN FAILED %lu %d", id, ESTALE);
+		admin_reply(session, "ADMIN FAILED %lu %d", id, ESTALE);
 		return;
 	}
 
@@ -717,16 +795,16 @@ admin_allow(
 	if (pending->definition.display) {
 		if (fds->count != 1U || fds->lost) {
 			sessiond_log("SESSIOND ADMIN failed id=%lu reason=connection count=%u lost=%d", id, fds->count, fds->lost);
-			admin_reply("ADMIN FAILED %lu %d", id, EINVAL);
-			admin_pending_clear();
+			admin_reply(session, "ADMIN FAILED %lu %d", id, EINVAL);
+			admin_pending_clear(session);
 			return;
 		}
 		display = fds->descriptors[0];
 		fds->descriptors[0] = -1;
 	} else if (fds->count != 0U || fds->lost) {
 		sessiond_log("SESSIOND ADMIN failed id=%lu reason=descriptors count=%u", id, fds->count);
-		admin_reply("ADMIN FAILED %lu %d", id, EINVAL);
-		admin_pending_clear();
+		admin_reply(session, "ADMIN FAILED %lu %d", id, EINVAL);
+		admin_pending_clear(session);
 		return;
 	}
 
@@ -735,9 +813,9 @@ admin_allow(
 		sessiond_log("SESSIOND ADMIN allow id=%lu action=%s via=keep", id, pending->definition.name);
 	} else {
 		sessiond_log("SESSIOND ADMIN allow id=%lu action=%s via=dialog", id, pending->definition.name);
-		syslog(LOG_NOTICE, "admin action %s allowed by %s", pending->definition.name, admin_session.account->passwd.pw_name);
+		syslog(LOG_NOTICE, "admin action %s allowed by %s", pending->definition.name, session->account->passwd.pw_name);
 	}
-	admin_start(display);
+	admin_start(session, display);
 	if (display >= 0)
 		(void)close(display);
 }
@@ -745,6 +823,7 @@ admin_allow(
 /* Answers an ADMIN PASSWORD: no action asks for a password yet; its secret line is erased unread. */
 static void
 admin_password(
+	struct admin_session *session,
 	const char *arguments)
 {
 	const char *rest;
@@ -752,7 +831,7 @@ admin_password(
 	int error;
 
 	/* The secret's line comes next, whatever this one says. */
-	admin_session.skip_secret = 1;
+	session->skip_secret = 1;
 
 	/* Failed by its number. */
 	error = sessiond_admin_parse_id(arguments, &id, &rest);
@@ -761,12 +840,13 @@ admin_password(
 		return;
 	}
 	sessiond_log("SESSIOND ADMIN failed id=%lu reason=password", id);
-	admin_reply("ADMIN FAILED %lu %d", id, EPERM);
+	admin_reply(session, "ADMIN FAILED %lu %d", id, EPERM);
 }
 
 /* Answers an ADMIN CANCEL: the waiting request with the number is forgotten. */
 static void
 admin_cancel(
+	struct admin_session *session,
 	const char *arguments)
 {
 	const char *rest;
@@ -781,17 +861,18 @@ admin_cancel(
 	}
 
 	/* Only the one that waits. */
-	if (!admin_session.pending.active || admin_session.pending.id != id) {
+	if (!session->pending.active || session->pending.id != id) {
 		sessiond_log("SESSIOND ADMIN cancel id=%lu not-waiting", id);
 		return;
 	}
-	sessiond_log("SESSIOND ADMIN cancel id=%lu action=%s", id, admin_session.pending.definition.name);
-	admin_pending_clear();
+	sessiond_log("SESSIOND ADMIN cancel id=%lu action=%s", id, session->pending.definition.name);
+	admin_pending_clear(session);
 }
 
 /* Answers an ADMIN FORGET: a client went, with what it was allowed and what it asked. */
 static void
 admin_forget(
+	struct admin_session *session,
 	const char *arguments)
 {
 	unsigned long client;
@@ -808,15 +889,16 @@ admin_forget(
 	}
 
 	/* Its permissions, and its request if it waits. */
-	sessiond_admin_keep_forget(&admin_session.keep, client);
-	if (admin_session.pending.active && admin_session.pending.client == client)
-		admin_pending_clear();
+	sessiond_admin_keep_forget(&session->keep, client);
+	if (session->pending.active && session->pending.client == client)
+		admin_pending_clear(session);
 	sessiond_log("SESSIOND ADMIN forget client=%lu", client);
 }
 
 /* Answers a request whose line was cut: an ASK is refused by its number, if it can be read. */
 static void
 admin_cut(
+	struct admin_session *session,
 	const char *arguments)
 {
 	const char *rest;
@@ -826,7 +908,7 @@ admin_cut(
 	/* A PASSWORD's secret still follows. */
 	rest = admin_verb(arguments, "PASSWORD");
 	if (rest != NULL)
-		admin_session.skip_secret = 1;
+		session->skip_secret = 1;
 
 	/* An ASK: refused as invalid. */
 	rest = admin_verb(arguments, "ASK");
@@ -834,7 +916,7 @@ admin_cut(
 		error = sessiond_admin_parse_id(rest, &id, &rest);
 		if (error == 0 && *rest == ' ') {
 			sessiond_log("SESSIOND ADMIN refused id=%lu reason=invalid cut", id);
-			admin_reply("ADMIN REFUSED %lu invalid", id);
+			admin_reply(session, "ADMIN REFUSED %lu invalid", id);
 			return;
 		}
 	}
@@ -846,7 +928,7 @@ admin_cut(
 /* Sends the dialog: the title, the message, and SHOW last, in one write. */
 static void
 admin_show(
-	void)
+	struct admin_session *session)
 {
 	char lines[ADMIN_DIALOG_MAX];
 	struct admin_pending *pending;
@@ -857,7 +939,7 @@ admin_show(
 	int length;
 
 	/* The texts in the desktop's language. */
-	pending = &admin_session.pending;
+	pending = &session->pending;
 	title = sessiond_admin_text(pending->definition.titles, pending->definition.title_count, pending->locale);
 	message = sessiond_admin_text(pending->definition.messages, pending->definition.message_count, pending->locale);
 	display = "";
@@ -869,13 +951,13 @@ admin_show(
 	    pending->id, title, pending->id, message, pending->id, display);
 	if (length < 0 || (size_t)length >= sizeof(lines)) {
 		sessiond_log("SESSIOND ADMIN failed id=%lu reason=dialog", pending->id);
-		admin_reply("ADMIN FAILED %lu %d", pending->id, EOVERFLOW);
-		admin_pending_clear();
+		admin_reply(session, "ADMIN FAILED %lu %d", pending->id, EOVERFLOW);
+		admin_pending_clear(session);
 		return;
 	}
 
 	/* Written whole. */
-	written = write(admin_session.control, lines, (size_t)length);
+	written = write(session->control, lines, (size_t)length);
 	if (written != (ssize_t)length)
 		sessiond_log("SESSIOND ADMIN show lost id=%lu errno=%d", pending->id, errno);
 	sessiond_log("SESSIOND ADMIN show id=%lu action=%s how=consent display=%d", pending->id, pending->definition.name, pending->definition.display);
@@ -890,6 +972,7 @@ admin_show(
  */
 static void
 admin_start(
+	struct admin_session *session,
 	int display)
 {
 	struct admin_launch launch;
@@ -909,11 +992,11 @@ admin_start(
 	int error;
 
 	/* The program's arguments and environment, before any process is made. */
-	pending = &admin_session.pending;
-	error = admin_prepare(&launch);
+	pending = &session->pending;
+	error = admin_prepare(session, &launch);
 	if (error != 0) {
-		admin_reply("ADMIN FAILED %lu %d", pending->id, error);
-		admin_pending_clear();
+		admin_reply(session, "ADMIN FAILED %lu %d", pending->id, error);
+		admin_pending_clear(session);
 		return;
 	}
 
@@ -932,8 +1015,8 @@ admin_start(
 		admin_close_pair(output);
 		admin_close_pair(error_pipe);
 		admin_close_pair(status_pipe);
-		admin_reply("ADMIN FAILED %lu %d", pending->id, error);
-		admin_pending_clear();
+		admin_reply(session, "ADMIN FAILED %lu %d", pending->id, error);
+		admin_pending_clear(session);
 		return;
 	}
 
@@ -989,8 +1072,8 @@ admin_start(
 		admin_close_pair(output);
 		admin_close_pair(error_pipe);
 		admin_close_pair(status_pipe);
-		admin_reply("ADMIN FAILED %lu %d", pending->id, EAGAIN);
-		admin_pending_clear();
+		admin_reply(session, "ADMIN FAILED %lu %d", pending->id, EAGAIN);
+		admin_pending_clear(session);
 		return;
 	}
 
@@ -1011,9 +1094,9 @@ admin_start(
 	bits |= SESSIOND_ADMIN_STATUS;
 
 	/* Sent; a compositor that does not take them leaves the program to see its input end. */
-	error = admin_send_started(pending->id, bits, sent, count);
+	error = admin_send_started(session, pending->id, bits, sent, count);
 	sessiond_log("SESSIOND ADMIN started id=%lu action=%s bits=%x sent=%d", pending->id, launch.action, bits, error == 0);
-	syslog(LOG_NOTICE, "admin action %s started for %s", launch.action, admin_session.account->passwd.pw_name);
+	syslog(LOG_NOTICE, "admin action %s started for %s", launch.action, session->account->passwd.pw_name);
 	admin_close_pair(input);
 	admin_close_pair(output);
 	admin_close_pair(error_pipe);
@@ -1021,10 +1104,10 @@ admin_start(
 
 	/* A permission the dialog gave is kept for the client as the definition says. */
 	if (!pending->kept) {
-		sessiond_admin_keep_add(&admin_session.keep, admin_session.generation, pending->client, &pending->definition,
+		sessiond_admin_keep_add(&session->keep, session->generation, pending->client, &pending->definition,
 		    &pending->identity, sessiond_milliseconds());
 	}
-	admin_pending_clear();
+	admin_pending_clear(session);
 }
 
 /*
@@ -1033,6 +1116,7 @@ admin_start(
  */
 static int
 admin_prepare(
+	const struct admin_session *session,
 	struct admin_launch *launch)
 {
 	const struct admin_pending *pending;
@@ -1041,8 +1125,8 @@ admin_prepare(
 	int error;
 
 	/* The program's path first, then the words, then the end. */
-	pending = &admin_session.pending;
-	account = admin_session.account;
+	pending = &session->pending;
+	account = session->account;
 	memset(launch, 0, sizeof(*launch));
 	(void)snprintf(launch->program, sizeof(launch->program), "%s", pending->definition.program);
 	(void)snprintf(launch->action, sizeof(launch->action), "%s", pending->definition.name);
@@ -1293,6 +1377,7 @@ admin_helper(
 /* Sends ADMIN STARTED with the descriptors in one message, never waiting; returns 0 or an errno value. */
 static int
 admin_send_started(
+	const struct admin_session *session,
 	unsigned long id,
 	unsigned bits,
 	const int *descriptors,
@@ -1330,7 +1415,7 @@ admin_send_started(
 	memcpy(CMSG_DATA(message), descriptors, sizeof(int) * count);
 
 	/* Sent whole, or not at all: a compositor that does not read is not waited for. */
-	sent = sendmsg(admin_session.control, &header, MSG_DONTWAIT | MSG_NOSIGNAL);
+	sent = sendmsg(session->control, &header, MSG_DONTWAIT | MSG_NOSIGNAL);
 	if (sent != (ssize_t)length) {
 		sessiond_log("SESSIOND ADMIN started lost id=%lu errno=%d", id, errno);
 		return EIO;
@@ -1343,20 +1428,21 @@ admin_send_started(
 /* Forgets the waiting request, closing the program it opened. */
 static void
 admin_pending_clear(
-	void)
+	struct admin_session *session)
 {
 	/* The program's file is not needed any more. */
-	if (admin_session.pending.active && admin_session.pending.program >= 0)
-		(void)close(admin_session.pending.program);
+	if (session->pending.active && session->pending.program >= 0)
+		(void)close(session->pending.program);
 
 	/* Nothing waits; -1 is no program. */
-	memset(&admin_session.pending, 0, sizeof(admin_session.pending));
-	admin_session.pending.program = -1;
+	memset(&session->pending, 0, sizeof(session->pending));
+	session->pending.program = -1;
 }
 
 /* Writes one answer line to the session's compositor. */
 static void
 admin_reply(
+	const struct admin_session *session,
 	const char *format,
 	...)
 {
@@ -1366,7 +1452,7 @@ admin_reply(
 	int length;
 
 	/* No session's compositor to answer. */
-	if (admin_session.account == NULL)
+	if (session == NULL || session->account == NULL || session->control < 0)
 		return;
 
 	/* The answer and its line end. */
@@ -1379,7 +1465,7 @@ admin_reply(
 	length++;
 
 	/* In one write. */
-	written = write(admin_session.control, line, (size_t)length);
+	written = write(session->control, line, (size_t)length);
 	if (written != (ssize_t)length)
 		sessiond_log("SESSIOND ADMIN reply lost errno=%d", errno);
 }

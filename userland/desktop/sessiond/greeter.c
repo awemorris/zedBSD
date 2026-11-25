@@ -218,6 +218,7 @@ sessiond_greeter_run(
 		/* The input devices asked for are opened for the compositor that holds the seat. */
 		if (ready > 0)
 			sessiond_seat_poll_done(poll_entry + sockets_first, sockets);
+		sessiond_admin_tick();
 
 		/* The attempt moves on; a login passkey granted takes the account. */
 		sessiond_exchange_tick(&greeter.exchange);

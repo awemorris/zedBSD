@@ -146,6 +146,16 @@ static int seat_rdp_listen = -1;
  */
 static struct seat_socket seat_sockets[SESSIOND_SEAT_SOCKETS];
 
+#define SEAT_RDP_CONTROLS_MAX	16U
+
+struct rdp_control_slot {
+	int live;
+	int control;
+	struct sessiond_account account;
+};
+
+static struct rdp_control_slot seat_rdp_controls[SEAT_RDP_CONTROLS_MAX];
+
 /*
  * sessiond's end of the seat socket of the compositor that holds the seat
  * now, whose OPEN requests are granted; -1 while none does (the seat is
@@ -164,6 +174,7 @@ static int seat_node_open(const char *name, int *descriptor);
 static void seat_answer(int socket, int error, int descriptor);
 static void seat_rdp_listen_open(void);
 static void seat_rdp_accept(void);
+static void seat_rdp_control_read(struct rdp_control_slot *slot);
 static int seat_event_index(const char *name);
 static int seat_is_rdp_event(int event_index);
 static int seat_is_rdp_virtual_device(int descriptor);
@@ -459,6 +470,14 @@ sessiond_seat_poll_fill(
 			count++;
 		}
 	}
+	for (index = 0U; index < SEAT_RDP_CONTROLS_MAX && count < room; index++) {
+		if (!seat_rdp_controls[index].live || seat_rdp_controls[index].control < 0)
+			continue;
+		entries[count].fd = seat_rdp_controls[index].control;
+		entries[count].events = POLLIN;
+		entries[count].revents = 0;
+		count++;
+	}
 
 	/* Succeeded: the entries filled. */
 	return count;
@@ -499,6 +518,13 @@ sessiond_seat_poll_done(
 					seat_socket_close(&seat_sockets[index]);
 				else if (n == 0)
 					seat_socket_close(&seat_sockets[index]);
+				break;
+			}
+		}
+		for (index = 0U; index < SEAT_RDP_CONTROLS_MAX; index++) {
+			if (seat_rdp_controls[index].live &&
+			    seat_rdp_controls[index].control == entries[entry].fd) {
+				seat_rdp_control_read(&seat_rdp_controls[index]);
 				break;
 			}
 		}
@@ -1009,6 +1035,55 @@ seat_rdp_accept(
 		(void)close(client_fd);
 		return;
 	}
+	if (strncmp(buf, "RDP_CONTROL ", 12U) == 0) {
+		char *endptr = NULL;
+		unsigned long uid_val;
+		struct rdp_control_slot *cslot;
+		struct passwd *pw_res;
+
+		errno = 0;
+		uid_val = strtoul(buf + 12U, &endptr, 10);
+		if (errno != 0 || endptr == buf + 12U || *endptr != '\0') {
+			seat_answer(client_fd, EINVAL, -1);
+			(void)close(client_fd);
+			return;
+		}
+		cslot = NULL;
+		for (index = 0U; index < SEAT_RDP_CONTROLS_MAX; index++) {
+			if (!seat_rdp_controls[index].live) {
+				cslot = &seat_rdp_controls[index];
+				break;
+			}
+		}
+		if (cslot == NULL) {
+			seat_answer(client_fd, EMFILE, -1);
+			(void)close(client_fd);
+			return;
+		}
+		memset(cslot, 0, sizeof(*cslot));
+		cslot->control = -1;
+		pw_res = NULL;
+		if (getpwuid_r((uid_t)uid_val, &cslot->account.passwd, cslot->account.buffer,
+			       sizeof(cslot->account.buffer), &pw_res) != 0 || pw_res == NULL) {
+			seat_answer(client_fd, ENOENT, -1);
+			(void)close(client_fd);
+			return;
+		}
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) {
+			seat_answer(client_fd, errno, -1);
+			(void)close(client_fd);
+			return;
+		}
+		(void)fcntl(pair[0], F_SETFD, FD_CLOEXEC);
+		cslot->live = 1;
+		cslot->control = pair[0];
+		sessiond_admin_begin(pair[0], &cslot->account, 0);
+		seat_answer(client_fd, 0, pair[1]);
+		(void)close(pair[1]);
+		(void)close(client_fd);
+		sessiond_log("SESSIOND RDP control uid=%lu socket=%d", uid_val, pair[0]);
+		return;
+	}
 	if (strncmp(buf, "RDP_SEAT ", 9U) != 0) {
 		seat_answer(client_fd, EINVAL, -1);
 		(void)close(client_fd);
@@ -1043,6 +1118,68 @@ seat_rdp_accept(
 	seat_answer(client_fd, 0, pair[1]);
 	(void)close(pair[1]);
 	sessiond_log("SESSIOND SEAT rdp claimed event=%d socket=%d", ev_idx, pair[0]);
+}
+
+/* Handles one request line on a headless RDP compositor's control socket. */
+static void
+seat_rdp_control_read(
+	struct rdp_control_slot *slot)
+{
+	char line[SESSIOND_LINE_MAX];
+	struct sessiond_fds fds;
+	int got;
+	int cut;
+	int ctrl;
+
+	ctrl = slot->control;
+	got = sessiond_read_request(ctrl, line, sizeof(line), 500, &fds, &cut);
+	if (got <= 0) {
+		sessiond_fds_close(&fds);
+		sessiond_admin_end(ctrl);
+		sessiond_sleep_forget(ctrl);
+		(void)close(ctrl);
+		slot->live = 0;
+		slot->control = -1;
+		return;
+	}
+	if (sessiond_admin_secret(ctrl, line)) {
+		sessiond_fds_close(&fds);
+		return;
+	}
+	if (strncmp(line, "ADMIN ", 6) == 0) {
+		sessiond_admin_request(ctrl, line + 6, cut, &fds);
+		return;
+	}
+	sessiond_fds_close(&fds);
+	if (strncmp(line, "SERVICE ", 8) == 0) {
+		sessiond_service(&slot->account, ctrl, line + 8);
+		return;
+	}
+	if (strncmp(line, "RDPUSER ", 8) == 0) {
+		sessiond_rdp_user(&slot->account, ctrl, line + 8);
+		return;
+	}
+	if (strncmp(line, "POWER ", 6) == 0) {
+		sessiond_power_session(&slot->account, ctrl, line + 6);
+		return;
+	}
+	if (strcmp(line, "LOCKED") == 0) {
+		sessiond_admin_lock(ctrl, 1);
+		return;
+	}
+	if (strcmp(line, "UNLOCKED") == 0) {
+		sessiond_admin_lock(ctrl, 0);
+		return;
+	}
+	if (strcmp(line, "READY") == 0) {
+		(void)write(ctrl, "GO\n", 3U);
+		return;
+	}
+	if (strcmp(line, "LOGOUT") == 0) {
+		(void)write(ctrl, "QUIT\n", 5U);
+		return;
+	}
+	(void)write(ctrl, "ERROR\n", 6U);
 }
 
 static uint32_t

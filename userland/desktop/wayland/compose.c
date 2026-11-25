@@ -694,7 +694,12 @@ kwl_compose_headless_resize(
 	compose->mode_height = height;
 	(void)compose_targets(compose);
 	kwl_layers_open(server);
-	server->dirty = 1;
+
+	/* Fits glass, windows, arranged layouts, pointer, and notifies clients of the new output size. */
+	kwl_output_fit(server, 1U);
+	kwl_outputs_changed(server);
+	kwl_window_bounds_refresh(server);
+	kwl_input_geometry(server);
 }
 
 /*

@@ -57,6 +57,7 @@ static void cb_on_auth_request(void *user, const char *domain, const char *user_
 static void cb_on_connected(void *user, uint32_t width, uint32_t height);
 static void cb_on_resize(void *user, uint32_t width, uint32_t height);
 static void cb_on_input_key(void *user, uint16_t scancode, uint16_t flags);
+static void cb_on_input_unicode(void *user, uint16_t codepoint, uint16_t flags);
 static void cb_on_input_mouse(void *user, uint16_t flags, uint16_t x, uint16_t y);
 static void cb_on_disconnect(void *user, uint32_t error_info);
 static int read_exact_fd(int fd, uint8_t *buf, size_t len);
@@ -328,6 +329,31 @@ cb_on_input_key(
 	rdpd_hid_key(&ctx->hid, scancode, flags);
 }
 
+/* Translates client Fast-Path Unicode events into PS/2 scancode key presses/releases. */
+static void
+cb_on_input_unicode(
+	void *user,
+	uint16_t codepoint,
+	uint16_t flags)
+{
+	uint16_t scancode;
+	int need_shift;
+	int release;
+
+	if (rdpd_unicode_to_ps2(codepoint, &scancode, &need_shift) != 0)
+		return;
+	release = (flags & RDP_KBD_FLAG_RELEASE) != 0U;
+	if (!release) {
+		if (need_shift)
+			cb_on_input_key(user, 0x2AU, 0U);
+		cb_on_input_key(user, scancode, 0U);
+	} else {
+		cb_on_input_key(user, scancode, RDP_KBD_FLAG_RELEASE);
+		if (need_shift)
+			cb_on_input_key(user, 0x2AU, RDP_KBD_FLAG_RELEASE);
+	}
+}
+
 /* Forwards client mouse events into /dev/input/bridge or extended rdp_fd. */
 static void
 cb_on_input_mouse(
@@ -440,6 +466,7 @@ handle_client(
 	cb.on_connected = cb_on_connected;
 	cb.on_resize = cb_on_resize;
 	cb.on_input_key = cb_on_input_key;
+	cb.on_input_unicode = cb_on_input_unicode;
 	cb.on_input_mouse = cb_on_input_mouse;
 	cb.on_disconnect = cb_on_disconnect;
 	memset(&cfg, 0, sizeof(cfg));

@@ -61,6 +61,9 @@ size_t rdpd_hid_descriptor(uint8_t *out, size_t cap);
 /* Maps a PS/2 Set 1 scancode + RDP_KEY_* flags to a USB HID Usage ID (0x07). */
 uint8_t rdpd_ps2_to_hid_usage(uint16_t scancode, uint16_t flags);
 
+/* Maps a Unicode codepoint to a PS/2 Set 1 scancode and Shift flag (0 on success). */
+int rdpd_unicode_to_ps2(uint16_t codepoint, uint16_t *scancode, int *need_shift);
+
 /* Formats a 9-byte keyboard HID report (Report ID 1) into report[9]. */
 int rdpd_hid_format_key(struct rdpd_hid *hid, uint16_t scancode, uint16_t flags, uint8_t report[9]);
 
