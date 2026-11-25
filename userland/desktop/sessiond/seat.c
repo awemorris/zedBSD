@@ -69,6 +69,7 @@
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <unistd.h>
 #include <uapi/gpu.h>
 #include <uapi/system.h>
@@ -118,6 +119,9 @@
 struct seat_socket {
 	unsigned live;
 	int descriptor;
+	int rdp_only;
+	int rdp_event_index;
+	int rdp_owner_fd;
 	char line[SEAT_REQUEST_MAX];
 	size_t used;
 };
@@ -130,6 +134,7 @@ struct seat_socket {
  * sessiond's one thread uses it.
  */
 static int seat_events = -1;
+static int seat_rdp_listen = -1;
 
 /*
  * The seat sockets of the compositors sessiond started and that have not
@@ -156,6 +161,10 @@ static void seat_socket_close(struct seat_socket *socket);
 static void seat_request(struct seat_socket *socket, const char *line);
 static int seat_node_open(const char *name, int *descriptor);
 static void seat_answer(int socket, int error, int descriptor);
+static void seat_rdp_listen_open(void);
+static void seat_rdp_accept(void);
+static int seat_event_index(const char *name);
+static int seat_is_rdp_event(int event_index);
 
 /*
  * Gives the displays and the backlights to a user, for that user only, and
@@ -275,6 +284,7 @@ sessiond_seat_events_open(
 	/* Succeeded: a device that comes is heard from now on. */
 	seat_events = descriptor;
 	sessiond_log("SESSIOND SEAT events subscribed classes=0x%x", (unsigned)SEAT_EVENT_CLASSES);
+	seat_rdp_listen_open();
 }
 
 /* Reports the descriptor the seat's events come on, -1 for none (the loops poll it). */
@@ -427,6 +437,12 @@ sessiond_seat_poll_fill(
 
 	/* Each live socket, readable when a request or its end comes. */
 	count = 0;
+	if (seat_rdp_listen >= 0 && count < room) {
+		entries[count].fd = seat_rdp_listen;
+		entries[count].events = POLLIN;
+		entries[count].revents = 0;
+		count++;
+	}
 	for (index = 0U; index < SESSIOND_SEAT_SOCKETS && count < room; index++) {
 		if (!seat_sockets[index].live)
 			continue;
@@ -434,6 +450,12 @@ sessiond_seat_poll_fill(
 		entries[count].events = POLLIN;
 		entries[count].revents = 0;
 		count++;
+		if (seat_sockets[index].rdp_only && seat_sockets[index].rdp_owner_fd >= 0 && count < room) {
+			entries[count].fd = seat_sockets[index].rdp_owner_fd;
+			entries[count].events = POLLIN;
+			entries[count].revents = 0;
+			count++;
+		}
 	}
 
 	/* Succeeded: the entries filled. */
@@ -456,11 +478,27 @@ sessiond_seat_poll_done(
 	for (entry = 0; entry < count; entry++) {
 		if (entries[entry].revents == 0)
 			continue;
+		if (seat_rdp_listen >= 0 && entries[entry].fd == seat_rdp_listen) {
+			seat_rdp_accept();
+			continue;
+		}
 		for (index = 0U; index < SESSIOND_SEAT_SOCKETS; index++) {
-			if (!seat_sockets[index].live || seat_sockets[index].descriptor != entries[entry].fd)
+			if (!seat_sockets[index].live)
 				continue;
-			seat_socket_read(&seat_sockets[index]);
-			break;
+			if (seat_sockets[index].descriptor == entries[entry].fd) {
+				seat_socket_read(&seat_sockets[index]);
+				break;
+			}
+			if (seat_sockets[index].rdp_only && seat_sockets[index].rdp_owner_fd == entries[entry].fd) {
+				char drain[16];
+				ssize_t n;
+				n = read(seat_sockets[index].rdp_owner_fd, drain, sizeof(drain));
+				if (n <= 0 && errno != EAGAIN && errno != EINTR)
+					seat_socket_close(&seat_sockets[index]);
+				else if (n == 0)
+					seat_socket_close(&seat_sockets[index]);
+				break;
+			}
 		}
 	}
 }
@@ -619,8 +657,13 @@ seat_socket_close(
 	if (seat_holder == socket->descriptor)
 		seat_holder = -1;
 	(void)close(socket->descriptor);
+	if (socket->rdp_only && socket->rdp_owner_fd >= 0)
+		(void)close(socket->rdp_owner_fd);
 	socket->live = 0U;
 	socket->descriptor = -1;
+	socket->rdp_only = 0;
+	socket->rdp_event_index = -1;
+	socket->rdp_owner_fd = -1;
 	socket->used = 0U;
 }
 
@@ -645,11 +688,25 @@ seat_request(
 	/* The node's name follows the word. */
 	name = line + 5;
 
-	/* A compositor that does not hold the seat gets nothing of it. */
-	if (socket->descriptor != seat_holder) {
-		sessiond_log("SESSIOND SEAT open node=%.16s error=%d holder=0", name, EPERM);
-		seat_answer(socket->descriptor, EPERM, -1);
-		return;
+	/* RDP-isolated seat: only its assigned /dev/input/eventN is permitted. */
+	if (socket->rdp_only) {
+		int ev_idx = seat_event_index(name);
+		if (ev_idx < 0 || ev_idx != socket->rdp_event_index) {
+			seat_answer(socket->descriptor, EPERM, -1);
+			return;
+		}
+	} else {
+		/* A compositor that does not hold the seat gets nothing of it. */
+		if (socket->descriptor != seat_holder) {
+			sessiond_log("SESSIOND SEAT open node=%.16s error=%d holder=0", name, EPERM);
+			seat_answer(socket->descriptor, EPERM, -1);
+			return;
+		}
+		if (seat_is_rdp_event(seat_event_index(name))) {
+			sessiond_log("SESSIOND SEAT open node=%.16s error=%d rdp_reserved=1", name, EPERM);
+			seat_answer(socket->descriptor, EPERM, -1);
+			return;
+		}
 	}
 
 	/* The node, opened as root (it stays root's). */
@@ -764,4 +821,130 @@ seat_answer(
 	sent = sendmsg(socket, &header, MSG_NOSIGNAL);
 	if (sent != (ssize_t)vector.iov_len)
 		sessiond_log("SESSIOND SEAT answer lost errno=%d", errno);
+}
+
+/* Parses N from "eventN"; returns -1 if invalid. */
+static int
+seat_event_index(
+	const char *name)
+{
+	char *end;
+	long val;
+
+	if (name == NULL || strncmp(name, "event", 5U) != 0 || name[5] < '0' || name[5] > '9')
+		return -1;
+	val = strtol(name + 5, &end, 10);
+	if (*end != '\0' || val < 0L || val > 65535L)
+		return -1;
+	return (int)val;
+}
+
+/* Returns 1 if event_index is currently reserved for an active RDP session. */
+static int
+seat_is_rdp_event(
+	int event_index)
+{
+	unsigned index;
+
+	if (event_index < 0)
+		return 0;
+	for (index = 0U; index < SESSIOND_SEAT_SOCKETS; index++) {
+		if (seat_sockets[index].live && seat_sockets[index].rdp_only &&
+		    seat_sockets[index].rdp_event_index == event_index)
+			return 1;
+	}
+	return 0;
+}
+
+/* Opens the root-only Unix socket on which rdpd claims isolated RDP seats. */
+static void
+seat_rdp_listen_open(
+	void)
+{
+	struct sockaddr_un addr;
+	int fd;
+
+	if (seat_rdp_listen >= 0)
+		return;
+	fd = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
+	if (fd < 0)
+		return;
+	(void)unlink(SESSIOND_RDP_SOCKET);
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	snprintf(addr.sun_path, sizeof(addr.sun_path), "%s", SESSIOND_RDP_SOCKET);
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0 ||
+	    listen(fd, 8) != 0) {
+		(void)close(fd);
+		return;
+	}
+	(void)chmod(SESSIOND_RDP_SOCKET, 0600);
+	seat_rdp_listen = fd;
+}
+
+/* Accepts one RDP seat claim ("RDP_SEAT <event_index>\n") from rdpd. */
+static void
+seat_rdp_accept(
+	void)
+{
+	int client_fd;
+	char buf[64];
+	ssize_t n;
+	int ev_idx;
+	struct seat_socket *slot;
+	unsigned index;
+	int pair[2];
+	struct pollfd pfd;
+
+	client_fd = accept(seat_rdp_listen, NULL, NULL);
+	if (client_fd < 0)
+		return;
+	(void)fcntl(client_fd, F_SETFD, FD_CLOEXEC);
+	pfd.fd = client_fd;
+	pfd.events = POLLIN;
+	pfd.revents = 0;
+	if (poll(&pfd, 1, 200) <= 0) {
+		(void)close(client_fd);
+		return;
+	}
+	n = read(client_fd, buf, sizeof(buf) - 1U);
+	if (n <= 0) {
+		(void)close(client_fd);
+		return;
+	}
+	buf[n] = '\0';
+	if (strncmp(buf, "RDP_SEAT ", 9U) != 0) {
+		seat_answer(client_fd, EINVAL, -1);
+		(void)close(client_fd);
+		return;
+	}
+	ev_idx = (int)strtol(buf + 9U, NULL, 10);
+	if (ev_idx < 0) {
+		seat_answer(client_fd, EINVAL, -1);
+		(void)close(client_fd);
+		return;
+	}
+	slot = NULL;
+	for (index = 0U; index < SESSIOND_SEAT_SOCKETS; index++) {
+		if (!seat_sockets[index].live) {
+			slot = &seat_sockets[index];
+			break;
+		}
+	}
+	if (slot == NULL || socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) {
+		seat_answer(client_fd, EMFILE, -1);
+		(void)close(client_fd);
+		return;
+	}
+	(void)fcntl(pair[0], F_SETFD, FD_CLOEXEC);
+	(void)fcntl(client_fd, F_SETFL, O_NONBLOCK);
+	memset(slot, 0, sizeof(*slot));
+	slot->live = 1U;
+	slot->descriptor = pair[0];
+	slot->rdp_only = 1;
+	slot->rdp_event_index = ev_idx;
+	slot->rdp_owner_fd = client_fd;
+	seat_answer(client_fd, 0, pair[1]);
+	(void)close(pair[1]);
+	sessiond_log("SESSIOND SEAT rdp claimed event=%d socket=%d", ev_idx, pair[0]);
 }

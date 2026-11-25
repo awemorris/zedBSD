@@ -24,8 +24,6 @@ extern "C" {
 #define KWL_RDP_MSG_FRAME	1U
 #define KWL_RDP_MSG_RESIZE	2U
 #define KWL_RDP_MSG_FORCE_KEY	3U
-#define KWL_RDP_MSG_MOUSE	4U
-#define KWL_RDP_MSG_KEY		5U
 
 /* Frame flags in KWL_RDP_MSG_FRAME header. */
 #define KWL_RDP_FRAME_KEY	1U

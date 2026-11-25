@@ -46,6 +46,7 @@ struct rdpd_session {
 	pid_t compositor_pid;
 	pid_t session_pid;
 	int rdp_fd;
+	int sessiond_fd;
 	uint32_t width;
 	uint32_t height;
 	char wayland_socket[128];
@@ -81,20 +82,14 @@ void rdpd_hid_close(struct rdpd_hid *hid);
 /* Authenticates user/password via /sbin/passkey and returns account info. */
 int rdpd_auth_user(const char *user, const char *password, uid_t *out_uid, gid_t *out_gid, char *out_home, size_t home_cap, char *out_shell, size_t shell_cap);
 
-/* Launches headless wayland (--headless --rdp-fd=N) and /etc/keiland/session. */
-int rdpd_session_start(struct rdpd_session *sess, uid_t uid, gid_t gid, const char *user, const char *home, const char *shell, uint32_t width, uint32_t height);
+/* Launches headless wayland (--headless --rdp-fd=N --seat-fd=4) via sessiond seat isolation. */
+int rdpd_session_start(struct rdpd_session *sess, uid_t uid, gid_t gid, const char *user, const char *home, const char *shell, uint32_t width, uint32_t height, uint32_t event_dev);
 
 /* Sends a RESIZE control message to the headless compositor. */
 void rdpd_session_resize(struct rdpd_session *sess, uint32_t width, uint32_t height);
 
 /* Sends a FORCE_KEY control message to the headless compositor. */
 void rdpd_session_force_key(struct rdpd_session *sess);
-
-/* Sends a MOUSE input event to the headless compositor. */
-void rdpd_session_mouse(struct rdpd_session *sess, uint16_t flags, uint16_t x, uint16_t y);
-
-/* Sends a KEY input event to the headless compositor. */
-void rdpd_session_key(struct rdpd_session *sess, uint16_t scancode, uint16_t flags);
 
 /* Terminates the headless compositor and session processes. */
 void rdpd_session_stop(struct rdpd_session *sess);

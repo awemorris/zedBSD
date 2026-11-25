@@ -39,7 +39,8 @@
  * Out starts while the session still shows).
  */
 #define SESSIOND_SEAT_FD	4
-#define SESSIOND_SEAT_SOCKETS	4U
+#define SESSIOND_SEAT_SOCKETS	16U
+#define SESSIOND_RDP_SOCKET	"/run/sessiond-rdp.sock"
 
 /* The longest line of the greeter's protocol, and the longest user name. */
 #define SESSIOND_LINE_MAX	512U

@@ -303,9 +303,7 @@ kwl_rdp_open(
 		return err;
 	}
 
-	/* Publishes the headless state and virtual pointer/keyboard capabilities. */
-	server->capabilities = 3U;
-	kwl_seat_capabilities(server);
+	/* Publishes the headless state on the compositor server. */
 	server->rdp = rdp;
 	if (out_image != NULL)
 		*out_image = (void *)rdp->image;
@@ -610,38 +608,7 @@ kwl_rdp_encode_and_send(
 	return err;
 }
 
-/* Maps an RDP PS/2 Set 1 scancode + flags to a Linux evdev keycode. */
-static uint32_t
-rdp_ps2_to_evdev(
-	uint16_t scancode,
-	uint16_t flags)
-{
-	if ((flags & 0x0100U) == 0U)
-		return (uint32_t)(scancode & 0xFFU);
-	switch (scancode & 0xFFU) {
-	case 0x1CU: return 96U;
-	case 0x1DU: return 97U;
-	case 0x35U: return 98U;
-	case 0x37U: return 99U;
-	case 0x38U: return 100U;
-	case 0x47U: return 102U;
-	case 0x48U: return 103U;
-	case 0x49U: return 104U;
-	case 0x4BU: return 105U;
-	case 0x4DU: return 106U;
-	case 0x4FU: return 107U;
-	case 0x50U: return 108U;
-	case 0x51U: return 109U;
-	case 0x52U: return 110U;
-	case 0x53U: return 111U;
-	case 0x5BU: return 125U;
-	case 0x5CU: return 126U;
-	case 0x5DU: return 127U;
-	default: return 0U;
-	}
-}
-
-/* Polls rdp_fd for RESIZE / FORCE_KEY / MOUSE / KEY control messages from rdpd. */
+/* Polls rdp_fd for RESIZE / FORCE_KEY control messages from rdpd. */
 void
 kwl_rdp_poll(
 	struct kwl_server *server)
@@ -679,49 +646,10 @@ kwl_rdp_poll(
 		if (rdp->ctrl_used == sizeof(rdp->ctrl_buf)) {
 			kwl_rdp_unpack_ctrl(rdp->ctrl_buf, &type, &arg1, &arg2);
 			rdp->ctrl_used = 0U;
-			if (type == KWL_RDP_MSG_RESIZE) {
+			if (type == KWL_RDP_MSG_RESIZE)
 				kwl_compose_headless_resize(server, arg1, arg2);
-			} else if (type == KWL_RDP_MSG_FORCE_KEY) {
+			else if (type == KWL_RDP_MSG_FORCE_KEY)
 				rdp->force_key = 1U;
-			} else if (type == KWL_RDP_MSG_MOUSE) {
-				uint32_t now_ms;
-				int32_t mx;
-				int32_t my;
-				now_ms = (uint32_t)kwl_milliseconds();
-				mx = (int32_t)(arg2 >> 16);
-				my = (int32_t)(arg2 & 0xFFFFU);
-				if (mx < 0)
-					mx = 0;
-				if (my < 0)
-					my = 0;
-				if (server->width > 0U && mx >= (int32_t)server->width)
-					mx = (int32_t)server->width - 1;
-				if (server->height > 0U && my >= (int32_t)server->height)
-					my = (int32_t)server->height - 1;
-				if ((arg1 & 0x0800U) != 0U) {
-					server->pointer_x = (double)mx;
-					server->pointer_y = (double)my;
-					kwl_seat_motion(server, now_ms);
-				}
-				if ((arg1 & 0x1000U) != 0U)
-					kwl_seat_button(server, now_ms, 0x110U, (arg1 & 0x8000U) != 0U ? 1U : 0U);
-				if ((arg1 & 0x2000U) != 0U)
-					kwl_seat_button(server, now_ms, 0x111U, (arg1 & 0x8000U) != 0U ? 1U : 0U);
-				if ((arg1 & 0x4000U) != 0U)
-					kwl_seat_button(server, now_ms, 0x112U, (arg1 & 0x8000U) != 0U ? 1U : 0U);
-				if ((arg1 & 0x0200U) != 0U)
-					kwl_seat_axis(server, now_ms, (arg1 & 0x0100U) != 0U ? 15 : -15, 0);
-				kwl_seat_frame(server);
-			} else if (type == KWL_RDP_MSG_KEY) {
-				uint32_t evkey;
-				uint32_t state;
-				evkey = rdp_ps2_to_evdev((uint16_t)(arg1 & 0xFFFFU),
-							 (uint16_t)((arg1 >> 16) & 0xFFFFU));
-				if (evkey != 0U) {
-					state = ((arg1 >> 16) & 0x8000U) != 0U ? 0U : 1U;
-					kwl_seat_key(server, (uint32_t)kwl_milliseconds(), evkey, state);
-				}
-			}
 		}
 	}
 	if (__atomic_load_n(&rdp->pending_frame, __ATOMIC_ACQUIRE) != 0U) {

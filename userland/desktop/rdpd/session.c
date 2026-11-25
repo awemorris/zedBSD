@@ -22,6 +22,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -180,7 +181,76 @@ drop_privileges(
 	(void)setenv("XDG_RUNTIME_DIR", runtime_dir, 1);
 }
 
-/* Launches headless wayland (--headless --rdp-fd=N) and /etc/keiland/session. */
+/* Claims an isolated seat socket from sessiond for /dev/input/event<event_dev>. */
+static void
+session_claim_seat(
+	uint32_t event_dev,
+	int *out_owner_fd,
+	int *out_seat_fd)
+{
+	struct sockaddr_un addr;
+	char req[32];
+	char resp[32];
+	union {
+		struct cmsghdr header;
+		char space[CMSG_SPACE(sizeof(int))];
+	} control;
+	struct msghdr msg;
+	struct iovec vec;
+	struct cmsghdr *cmsg;
+	ssize_t n;
+	int fd;
+
+	*out_owner_fd = -1;
+	*out_seat_fd = -1;
+	fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0)
+		return;
+	memset(&addr, 0, sizeof(addr));
+	addr.sun_family = AF_UNIX;
+	(void)snprintf(addr.sun_path, sizeof(addr.sun_path), "/run/sessiond-rdp.sock");
+	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) != 0) {
+		close(fd);
+		return;
+	}
+	(void)snprintf(req, sizeof(req), "RDP_SEAT %u\n", (unsigned)event_dev);
+	if (write_str_fd(fd, req, strlen(req)) != 0) {
+		close(fd);
+		return;
+	}
+	memset(&msg, 0, sizeof(msg));
+	memset(&control, 0, sizeof(control));
+	vec.iov_base = resp;
+	vec.iov_len = sizeof(resp) - 1U;
+	msg.msg_iov = &vec;
+	msg.msg_iovlen = 1;
+	msg.msg_control = control.space;
+	msg.msg_controllen = sizeof(control.space);
+	n = recvmsg(fd, &msg, 0);
+	if (n <= 0) {
+		close(fd);
+		return;
+	}
+	resp[n] = '\0';
+	if (strncmp(resp, "OK", 2U) != 0) {
+		close(fd);
+		return;
+	}
+	for (cmsg = CMSG_FIRSTHDR(&msg); cmsg != NULL; cmsg = CMSG_NXTHDR(&msg, cmsg)) {
+		if (cmsg->cmsg_level == SOL_SOCKET && cmsg->cmsg_type == SCM_RIGHTS &&
+		    cmsg->cmsg_len >= CMSG_LEN(sizeof(int))) {
+			memcpy(out_seat_fd, CMSG_DATA(cmsg), sizeof(int));
+			break;
+		}
+	}
+	if (*out_seat_fd < 0) {
+		close(fd);
+		return;
+	}
+	*out_owner_fd = fd;
+}
+
+/* Launches headless wayland (--headless --rdp-fd=N --seat-fd=4) via sessiond seat isolation. */
 int
 rdpd_session_start(
 	struct rdpd_session *sess,
@@ -190,22 +260,26 @@ rdpd_session_start(
 	const char *home,
 	const char *shell,
 	uint32_t width,
-	uint32_t height)
+	uint32_t height,
+	uint32_t event_dev)
 {
 	int sv[2];
+	int seat_fd;
 	char user_run[64];
 	char runtime_dir[96];
 	char opt_width[32];
 	char opt_height[32];
 	char opt_fd[32];
 	char opt_sock[160];
-	char *comp_argv[10];
+	char opt_seat[24];
+	char *comp_argv[12];
 	int argc;
 	pid_t comp_pid;
 	int rc;
 	int err;
 	memset(sess, 0, sizeof(*sess));
 	sess->rdp_fd = -1;
+	sess->sessiond_fd = -1;
 	sess->width = 1280U;
 	if (width != 0U)
 		sess->width = width;
@@ -221,9 +295,17 @@ rdpd_session_start(
 		       user_run, (long)getpid());
 	(void)mkdir(runtime_dir, 0700);
 	(void)chown(runtime_dir, uid, gid);
+	session_claim_seat(event_dev, &sess->sessiond_fd, &seat_fd);
 	rc = socketpair(AF_UNIX, SOCK_STREAM, 0, sv);
-	if (rc != 0)
+	if (rc != 0) {
+		if (seat_fd >= 0)
+			close(seat_fd);
+		if (sess->sessiond_fd >= 0) {
+			close(sess->sessiond_fd);
+			sess->sessiond_fd = -1;
+		}
 		return errno;
+	}
 	(void)snprintf(sess->wayland_socket, sizeof(sess->wayland_socket),
 		       "%s/wayland-0", runtime_dir);
 	(void)snprintf(opt_width, sizeof(opt_width), "--width=%u", sess->width);
@@ -231,18 +313,42 @@ rdpd_session_start(
 	(void)snprintf(opt_fd, sizeof(opt_fd), "--rdp-fd=%d", sv[1]);
 	(void)snprintf(opt_sock, sizeof(opt_sock), "--socket=%s",
 		       sess->wayland_socket);
+	(void)snprintf(opt_seat, sizeof(opt_seat), "--seat-fd=%d", 4);
 	comp_pid = fork();
 	if (comp_pid < 0) {
 		err = errno;
 		close(sv[0]);
 		close(sv[1]);
+		if (seat_fd >= 0)
+			close(seat_fd);
+		if (sess->sessiond_fd >= 0) {
+			close(sess->sessiond_fd);
+			sess->sessiond_fd = -1;
+		}
 		return err;
 	}
 
 	/* Child drops privileges and execs headless wayland with full desktop look. */
 	if (comp_pid == 0) {
 		close(sv[0]);
+		if (sess->sessiond_fd >= 0)
+			close(sess->sessiond_fd);
+		if (sv[1] == 4) {
+			int moved = fcntl(sv[1], F_DUPFD, 5);
+			if (moved >= 0) {
+				close(sv[1]);
+				sv[1] = moved;
+				(void)snprintf(opt_fd, sizeof(opt_fd), "--rdp-fd=%d", sv[1]);
+			}
+		}
 		(void)fcntl(sv[1], F_SETFD, 0);
+		if (seat_fd >= 0) {
+			if (seat_fd != 4) {
+				(void)dup2(seat_fd, 4);
+				close(seat_fd);
+			}
+			(void)fcntl(4, F_SETFD, 0);
+		}
 		drop_privileges(uid, gid, user, home, shell, runtime_dir);
 		argc = 0;
 		comp_argv[argc++] = (char *)RDPD_WAYLAND_PATH;
@@ -251,6 +357,8 @@ rdpd_session_start(
 		comp_argv[argc++] = opt_height;
 		comp_argv[argc++] = opt_fd;
 		comp_argv[argc++] = opt_sock;
+		if (seat_fd >= 0)
+			comp_argv[argc++] = opt_seat;
 		comp_argv[argc++] = (char *)"--session";
 		comp_argv[argc++] = (char *)"--glass";
 		if (access("/usr/share/keiland/wallpaper.png", R_OK) == 0)
@@ -262,6 +370,8 @@ rdpd_session_start(
 
 	/* Records compositor state without spawning a duplicate compositor. */
 	close(sv[1]);
+	if (seat_fd >= 0)
+		close(seat_fd);
 	sess->compositor_pid = comp_pid;
 	sess->rdp_fd = sv[0];
 	return 0;
@@ -295,37 +405,6 @@ rdpd_session_force_key(
 	(void)write(sess->rdp_fd, msg, sizeof(msg));
 }
 
-/* Sends a MOUSE input event directly to the headless compositor. */
-void
-rdpd_session_mouse(
-	struct rdpd_session *sess,
-	uint16_t flags,
-	uint16_t x,
-	uint16_t y)
-{
-	uint8_t msg[KWL_RDP_CTRL_HDR_SIZE];
-	if (sess == NULL || sess->rdp_fd < 0)
-		return;
-	kwl_rdp_pack_ctrl(msg, KWL_RDP_MSG_MOUSE, (uint32_t)flags,
-			  ((uint32_t)x << 16) | (uint32_t)y);
-	(void)write(sess->rdp_fd, msg, sizeof(msg));
-}
-
-/* Sends a KEY input event directly to the headless compositor. */
-void
-rdpd_session_key(
-	struct rdpd_session *sess,
-	uint16_t scancode,
-	uint16_t flags)
-{
-	uint8_t msg[KWL_RDP_CTRL_HDR_SIZE];
-	if (sess == NULL || sess->rdp_fd < 0)
-		return;
-	kwl_rdp_pack_ctrl(msg, KWL_RDP_MSG_KEY,
-			  ((uint32_t)flags << 16) | (uint32_t)scancode, 0U);
-	(void)write(sess->rdp_fd, msg, sizeof(msg));
-}
-
 /* Terminates the headless compositor and session processes. */
 void
 rdpd_session_stop(
@@ -338,6 +417,10 @@ rdpd_session_stop(
 	if (sess->rdp_fd >= 0) {
 		close(sess->rdp_fd);
 		sess->rdp_fd = -1;
+	}
+	if (sess->sessiond_fd >= 0) {
+		close(sess->sessiond_fd);
+		sess->sessiond_fd = -1;
 	}
 
 	/* Stops the session script process. */
