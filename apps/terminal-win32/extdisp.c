@@ -356,6 +356,18 @@ cb_on_auth_request(
 }
 
 static void
+extdisp_update_connected_status(struct extdisp_session *s)
+{
+	const char *mode = (s->shm_hdr != NULL && s->shm_hdr->active != 0U) ?
+	    "virtual display active" : "standby pattern";
+
+	EnterCriticalSection(&extdisp.lock);
+	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text),
+	    "Connected to %s (%ux%u, %s).", s->target_name, s->width, s->height, mode);
+	LeaveCriticalSection(&extdisp.lock);
+}
+
+static void
 cb_on_connected(
 	void *user,
 	uint32_t width,
@@ -367,10 +379,7 @@ cb_on_connected(
 	(void)height;
 	mikuterm_log("extdisp: connected %ux%u", width, height);
 	s->connected = 1;
-	EnterCriticalSection(&extdisp.lock);
-	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text),
-	    "Connected to %s (%ux%u).", s->target_name, s->width, s->height);
-	LeaveCriticalSection(&extdisp.lock);
+	extdisp_update_connected_status(s);
 }
 
 static void
@@ -845,6 +854,8 @@ extdisp_session_thread(LPVOID param)
 			if (s->shm_hdr == NULL && (now_ms - last_shm_retry_ms) >= 1000ULL) {
 				last_shm_retry_ms = now_ms;
 				extdisp_open_driver_shm(s, 0);
+				if (s->shm_hdr != NULL && s->connected)
+					extdisp_update_connected_status(s);
 			}
 
 			if (s->shm_hdr != NULL && s->shm_hdr->active != 0U) {
