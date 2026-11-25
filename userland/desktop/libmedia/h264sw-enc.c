@@ -299,8 +299,8 @@ enc_send(
 	{
 		uint32_t saved_qp;
 		saved_qp = enc->qp;
-		if ((flags & MEDIA_ENCODE_HIGH_QUALITY) != 0U && enc->qp > 14U)
-			enc->qp = 14U;
+		if ((flags & MEDIA_ENCODE_HIGH_QUALITY) != 0U && enc->qp > 8U)
+			enc->qp = 8U;
 		error = encode_frame(enc, is_idr);
 		enc->qp = saved_qp;
 	}

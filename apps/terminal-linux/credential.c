@@ -177,6 +177,62 @@ mikuterm_passphrases_forget_all(void)
  * Returns the words of the line that says how long a passphrase is kept,
  * shown after the box that chooses whether to keep it.
  */
+static void
+rdp_credential_key(
+	const char *host,
+	uint16_t port,
+	const char *user,
+	char *key,
+	size_t size)
+{
+	uint16_t p;
+
+	p = port != 0U ? port : 3389U;
+	if (user != NULL && user[0] != '\0')
+		(void)snprintf(key, size, "rdp:%s@%s:%u", user, host != NULL ? host : "", (unsigned)p);
+	else
+		(void)snprintf(key, size, "rdp:%s:%u", host != NULL ? host : "", (unsigned)p);
+}
+
+int
+mikuterm_rdp_password_recall(
+	const char *host,
+	uint16_t port,
+	const char *user,
+	char *password,
+	size_t size)
+{
+	char key[MIKUTERM_PATH_MAX];
+
+	rdp_credential_key(host, port, user, key, sizeof(key));
+	return mikuterm_passphrase_recall(key, password, size);
+}
+
+int
+mikuterm_rdp_password_keep(
+	const char *host,
+	uint16_t port,
+	const char *user,
+	const char *password)
+{
+	char key[MIKUTERM_PATH_MAX];
+
+	rdp_credential_key(host, port, user, key, sizeof(key));
+	return mikuterm_passphrase_keep(key, password);
+}
+
+void
+mikuterm_rdp_password_forget(
+	const char *host,
+	uint16_t port,
+	const char *user)
+{
+	char key[MIKUTERM_PATH_MAX];
+
+	rdp_credential_key(host, port, user, key, sizeof(key));
+	mikuterm_passphrase_forget(key);
+}
+
 const char *
 mikuterm_passphrase_keep_text(void)
 {

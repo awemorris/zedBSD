@@ -48,6 +48,7 @@ struct kwl_rdp {
 	unsigned need_refine;
 	unsigned pending_frame;
 	uint64_t last_send_ms;
+	uint64_t last_hash;
 	int closed;
 	uint8_t ctrl_buf[KWL_RDP_CTRL_HDR_SIZE];
 	size_t ctrl_used;
@@ -57,6 +58,7 @@ static uint32_t find_mem_type(VkPhysicalDevice physical, uint32_t filter, VkMemo
 static void rdp_destroy_targets(struct kwl_rdp *rdp);
 static int rdp_create_targets(struct kwl_rdp *rdp, uint32_t width, uint32_t height);
 static void bgra_to_i420(const uint8_t *bgra, uint32_t width, uint32_t height, uint8_t *y_out, uint8_t *u_out, uint8_t *v_out);
+static uint64_t rdp_frame_hash(const uint8_t *y, size_t y_len, const uint8_t *u, const uint8_t *v, size_t uv_len);
 static int write_all_fd(int fd, const uint8_t *buf, size_t len);
 
 static uint32_t
@@ -394,6 +396,40 @@ bgra_to_i420(
 	}
 }
 
+static uint64_t
+rdp_frame_hash(
+	const uint8_t *y,
+	size_t y_len,
+	const uint8_t *u,
+	const uint8_t *v,
+	size_t uv_len)
+{
+	uint64_t h;
+	const uint64_t *p;
+	size_t n;
+	size_t i;
+
+	h = 14695981039346656037ULL;
+	p = (const uint64_t *)y;
+	n = y_len / sizeof(uint64_t);
+	for (i = 0U; i < n; i++) {
+		h ^= p[i];
+		h *= 1099511628211ULL;
+	}
+	p = (const uint64_t *)u;
+	n = uv_len / sizeof(uint64_t);
+	for (i = 0U; i < n; i++) {
+		h ^= p[i];
+		h *= 1099511628211ULL;
+	}
+	p = (const uint64_t *)v;
+	for (i = 0U; i < n; i++) {
+		h ^= p[i];
+		h *= 1099511628211ULL;
+	}
+	return h;
+}
+
 static int
 write_all_fd(
 	int fd,
@@ -545,8 +581,15 @@ kwl_rdp_encode_and_send(
 		return err;
 	if ((send_flags & MEDIA_ENCODE_HIGH_QUALITY) == 0U) {
 		unsigned was_refine;
+		uint64_t h;
+		size_t y_len;
+		size_t uv_len;
+		y_len = (size_t)width * (size_t)height;
+		uv_len = y_len / 4U;
+		h = rdp_frame_hash(rdp->y_plane, y_len, rdp->u_plane, rdp->v_plane, uv_len);
 		was_refine = __atomic_load_n(&rdp->need_refine, __ATOMIC_ACQUIRE);
-		if (was_refine == 0U || pkt.size >= 2048U) {
+		if (was_refine == 0U || h != rdp->last_hash) {
+			rdp->last_hash = h;
 			__atomic_store_n(&rdp->last_send_ms, kwl_milliseconds(), __ATOMIC_RELEASE);
 			__atomic_store_n(&rdp->need_refine, 1U, __ATOMIC_RELEASE);
 			if (was_refine == 0U && rdp->wake_fd >= 0)

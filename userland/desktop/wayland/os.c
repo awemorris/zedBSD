@@ -41,6 +41,9 @@ kwl_os_open(
 	int descriptor;
 	int error;
 
+	if (server->headless)
+		return 0;
+
 	/* The seat, where the system has one for the compositor. */
 	error = kl_backend_seat_open(server->backend);
 	if (error != 0 && error != ENOTSUP)
@@ -73,6 +76,9 @@ void
 kwl_os_close(
 	struct kwl_server *server)
 {
+	if (server->headless)
+		return;
+
 	/* The seat (the virtual terminal is restored with it on Linux). */
 	kl_backend_seat_close(server->backend);
 	server->os_paused = 0;

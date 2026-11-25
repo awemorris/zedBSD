@@ -268,6 +268,47 @@ mikuterm_passphrases_forget_all(void)
  * Returns the words of the line that says how long a passphrase is kept,
  * shown after the box that chooses whether to keep it.
  */
+int
+mikuterm_rdp_password_recall(
+	const char *host,
+	uint16_t port,
+	const char *user,
+	char *password,
+	size_t size)
+{
+	(void)host;
+	(void)port;
+	(void)user;
+	(void)password;
+	(void)size;
+	return ENOENT;
+}
+
+int
+mikuterm_rdp_password_keep(
+	const char *host,
+	uint16_t port,
+	const char *user,
+	const char *password)
+{
+	(void)host;
+	(void)port;
+	(void)user;
+	(void)password;
+	return 0;
+}
+
+void
+mikuterm_rdp_password_forget(
+	const char *host,
+	uint16_t port,
+	const char *user)
+{
+	(void)host;
+	(void)port;
+	(void)user;
+}
+
 const char *
 mikuterm_passphrase_keep_text(void)
 {

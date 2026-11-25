@@ -23,6 +23,7 @@
 #include <wincred.h>
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <wchar.h>
@@ -202,6 +203,128 @@ mikuterm_passphrases_forget_all(void)
  * Returns the words of the line that says how long a passphrase is kept,
  * shown after the box that chooses whether to keep it.
  */
+static int
+rdp_credential_name(
+	const char *host,
+	uint16_t port,
+	const char *user,
+	wchar_t **name)
+{
+	char utf8[512];
+	int units;
+	wchar_t *wide;
+	uint16_t p;
+
+	*name = NULL;
+	if (host == NULL || host[0] == '\0')
+		return EINVAL;
+	p = port != 0U ? port : 3389U;
+	if (user != NULL && user[0] != '\0')
+		(void)snprintf(utf8, sizeof(utf8), "mikuterm:rdp:%s@%s:%u", user, host, (unsigned)p);
+	else
+		(void)snprintf(utf8, sizeof(utf8), "mikuterm:rdp:%s:%u", host, (unsigned)p);
+	units = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, NULL, 0);
+	if (units <= 0)
+		return EINVAL;
+	wide = malloc((size_t)units * sizeof(*wide));
+	if (wide == NULL)
+		return ENOMEM;
+	if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, utf8, -1, wide, units) <= 0) {
+		free(wide);
+		return EINVAL;
+	}
+	*name = wide;
+	return 0;
+}
+
+int
+mikuterm_rdp_password_recall(
+	const char *host,
+	uint16_t port,
+	const char *user,
+	char *password,
+	size_t size)
+{
+	PCREDENTIALW credential;
+	wchar_t *name;
+	BOOL found;
+	DWORD error;
+	int failed;
+
+	failed = rdp_credential_name(host, port, user, &name);
+	if (failed != 0)
+		return failed;
+	credential = NULL;
+	found = CredReadW(name, CRED_TYPE_GENERIC, 0U, &credential);
+	error = GetLastError();
+	free(name);
+	if (!found) {
+		if (error == ERROR_NOT_FOUND)
+			return ENOENT;
+		return EIO;
+	}
+	if ((size_t)credential->CredentialBlobSize + 1U > size) {
+		SecureZeroMemory(credential->CredentialBlob, credential->CredentialBlobSize);
+		CredFree(credential);
+		return ENOBUFS;
+	}
+	memcpy(password, credential->CredentialBlob, credential->CredentialBlobSize);
+	password[credential->CredentialBlobSize] = '\0';
+	SecureZeroMemory(credential->CredentialBlob, credential->CredentialBlobSize);
+	CredFree(credential);
+	return 0;
+}
+
+int
+mikuterm_rdp_password_keep(
+	const char *host,
+	uint16_t port,
+	const char *user,
+	const char *password)
+{
+	CREDENTIALW credential;
+	wchar_t *name;
+	size_t length;
+	BOOL written;
+	int failed;
+
+	if (password == NULL)
+		return EINVAL;
+	length = strlen(password);
+	if (length == 0U || length > CRED_MAX_CREDENTIAL_BLOB_SIZE)
+		return EINVAL;
+	failed = rdp_credential_name(host, port, user, &name);
+	if (failed != 0)
+		return failed;
+	memset(&credential, 0, sizeof(credential));
+	credential.Type = CRED_TYPE_GENERIC;
+	credential.TargetName = name;
+	credential.Comment = L"RDP password saved by mikuterm";
+	credential.CredentialBlobSize = (DWORD)length;
+	credential.CredentialBlob = (LPBYTE)password;
+	credential.Persist = CRED_PERSIST_LOCAL_MACHINE;
+	credential.UserName = (LPWSTR)CREDENTIAL_USER;
+	written = CredWriteW(&credential, 0U);
+	free(name);
+	if (!written)
+		return EIO;
+	return 0;
+}
+
+void
+mikuterm_rdp_password_forget(
+	const char *host,
+	uint16_t port,
+	const char *user)
+{
+	wchar_t *name;
+
+	if (rdp_credential_name(host, port, user, &name) != 0)
+		return;
+	(void)CredDeleteW(name, CRED_TYPE_GENERIC, 0U);
+	free(name);
+}
+
 const char *
 mikuterm_passphrase_keep_text(void)
 {

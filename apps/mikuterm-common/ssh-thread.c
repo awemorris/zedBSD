@@ -957,7 +957,17 @@ thread_launch_rdp_target(
 	struct rdp_host_entry *target)
 {
 	struct rdp_tab *tab;
+	int recalled;
 	int error;
+
+	recalled = 0;
+	if (target->password[0] == '\0') {
+		if (mikuterm_rdp_password_recall(target->host_name, target->port,
+						 target->user, target->password,
+						 sizeof(target->password)) == 0) {
+			recalled = 1;
+		}
+	}
 
 	if (target->password[0] == '\0') {
 		error = thread_ask(choice->session, "Password: ",
@@ -967,7 +977,11 @@ thread_launch_rdp_target(
 			return EPIPE;
 		if (error != 0)
 			return EAGAIN;
+		if (target->password[0] != '\0')
+			(void)mikuterm_rdp_password_keep(target->host_name, target->port,
+							 target->user, target->password);
 	}
+	(void)recalled;
 
 	error = rdp_tab_create(target->host_name, target->width, target->height,
 			       1, choice->session->app,

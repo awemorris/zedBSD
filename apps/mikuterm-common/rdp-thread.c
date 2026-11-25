@@ -11,6 +11,7 @@
  */
 
 #include "rdp-thread.h"
+#include "mikuterm.h"
 
 #include "userland/desktop/librdp/rdp.h"
 
@@ -450,6 +451,8 @@ worker_on_disconnect(
 
 	UNUSED_PARAMETER(error_info);
 	w = (struct rdp_worker *)user;
+	if (rdp_client_is_connected(w->client) == 0)
+		mikuterm_rdp_password_forget(w->target.host_name, w->target.port, w->target.user);
 	w->disconnected = 1;
 }
 

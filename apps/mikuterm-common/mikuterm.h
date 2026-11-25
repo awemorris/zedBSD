@@ -194,6 +194,11 @@ unsigned mikuterm_passphrases_forget_all(void);
 /* The words of the line about keeping a passphrase, after the box that chooses it: how long it is kept here. */
 const char *mikuterm_passphrase_keep_text(void);
 
+/* RDP passwords kept in the system's credential store (credential.c of each system). */
+int mikuterm_rdp_password_recall(const char *host, uint16_t port, const char *user, char *password, size_t size);
+int mikuterm_rdp_password_keep(const char *host, uint16_t port, const char *user, const char *password);
+void mikuterm_rdp_password_forget(const char *host, uint16_t port, const char *user);
+
 /* The settings' tab's files and settings (page.c), and where a font named in the settings is (main.c). */
 struct terminal_page_program;
 int mikuterm_page_init(struct mikuterm_conf *conf, struct mikuterm_connector *connector, const struct terminal_page_program **program);
