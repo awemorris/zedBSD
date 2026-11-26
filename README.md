@@ -248,13 +248,13 @@ VK_ERROR_DEVICE_LOST back to the app.
 
 **Supported GPUs:**
 
-| Vendor         | IP                | Confirmed on            | Description                                  |
-|----------------|-------------------|-------------------------|----------------------------------------------|
-| Imagination    | PowerVR           | StarFive Vision Five 2  | Desktop-optimized                            |
-| Broadcom       | VideoCore VI      | Raspberry Pi 4          | Desktop-optimized                            |
-| Intel          | GEN9 to GEN12     | 6th to 12th Intel Core  | Desktop-optimized                            |
-| NVIDIA         | Turing or later   | NVIDIA GeForce RTX 2070 | Modest yet                                   |
-| AMD            | RDNA or later     | AMD Radeon RX 5600 XT   | Desktop-optimized, now optimizing for gaming |
+| Vendor         | IP                | Confirmed on            | Description                |
+|----------------|-------------------|-------------------------|----------------------------|
+| Imagination    | PowerVR           | StarFive Vision Five 2  | Desktop-optimized (60 fps) |
+| Broadcom       | VideoCore VI/VII  | Raspberry Pi 4/5        | Desktop-optimized (60 fps) |
+| Intel          | GEN9 to GEN12     | 6th to 12th Intel Core  | Desktop-optimized (60 fps) |
+| NVIDIA         | Turing or later   | NVIDIA GeForce RTX 2070 | Desktop-optimized (60 fps) |
+| AMD            | RDNA or later     | AMD Radeon RX 5600 XT   | Desktop-optimized (60 fps) |
 
 **Is in-kernel compiler dangerous?:** No.  From my point of view,
 "GPUs need heavy compilers to be fast" and "compilers must stay in
