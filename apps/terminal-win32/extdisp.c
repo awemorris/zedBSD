@@ -17,6 +17,7 @@
  */
 
 #include "extdisp.h"
+#include "extdisp-gpu.h"
 #include "apps/mikuterm-common/mikuterm.h"
 #include "netdisp-proto.h"
 
@@ -32,6 +33,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include <shellapi.h>
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -108,12 +110,17 @@ struct extdisp_session {
 	uint8_t *y_plane;
 	uint8_t *u_plane;
 	uint8_t *v_plane;
+	uint8_t *bgra_buf;
 	int force_key;
 	int authed;
 	int connected;
 	int running;
 	uint32_t frames_sent;
 	uint32_t frames_acked;
+	struct extdisp_gpu *gpu;
+	int vdd_pipe_active;
+	int gpu_recovering;
+	ULONGLONG last_gpu_retry_ms;
 };
 
 struct extdisp_state {
@@ -127,6 +134,7 @@ struct extdisp_state {
 	struct extdisp_session sess;
 	char status_text[128];
 	int wsa_started;
+	int vdd_install_declined;
 };
 
 static struct extdisp_state extdisp;
@@ -358,8 +366,16 @@ cb_on_auth_request(
 static void
 extdisp_update_connected_status(struct extdisp_session *s)
 {
-	const char *mode = (s->shm_hdr != NULL && s->shm_hdr->active != 0U) ?
-	    "virtual display active" : "standby pattern";
+	const char *mode;
+
+	if (s->gpu != NULL && s->gpu_recovering)
+		mode = "recovering display";
+	else if (s->gpu != NULL)
+		mode = extdisp_gpu_mode_name(s->gpu);
+	else if (s->shm_hdr != NULL && s->shm_hdr->active != 0U)
+		mode = "virtual display active";
+	else
+		mode = "standby pattern";
 
 	EnterCriticalSection(&extdisp.lock);
 	(void)snprintf(extdisp.status_text, sizeof(extdisp.status_text),
@@ -424,7 +440,17 @@ cb_on_input_mouse(
 	INPUT inp;
 	DWORD mflags = MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK;
 
-	extdisp_get_target_rect(s->width, s->height, &mon);
+	int ml, mt, mr, mb;
+
+	if (s->gpu != NULL &&
+	    extdisp_gpu_desktop_rect(s->gpu, &ml, &mt, &mr, &mb) == 0) {
+		mon.left = ml;
+		mon.top = mt;
+		mon.right = mr;
+		mon.bottom = mb;
+	} else {
+		extdisp_get_target_rect(s->width, s->height, &mon);
+	}
 	if (x >= s->width)
 		x = (uint16_t)(s->width > 0U ? s->width - 1U : 0U);
 	if (y >= s->height)
@@ -434,16 +460,16 @@ cb_on_input_mouse(
 	vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
 	vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
 	vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-	if (vw <= 0)
-		vw = 1;
-	if (vh <= 0)
-		vh = 1;
+	if (vw <= 1)
+		vw = 2;
+	if (vh <= 1)
+		vh = 2;
 
 	{
 		LONG px = mon.left + (LONG)(((uint64_t)x * (uint64_t)(mon.right - mon.left)) / (s->width ? s->width : 1U));
 		LONG py = mon.top + (LONG)(((uint64_t)y * (uint64_t)(mon.bottom - mon.top)) / (s->height ? s->height : 1U));
-		abs_x = (LONG)(((int64_t)(px - vx) * 65535LL) / vw);
-		abs_y = (LONG)(((int64_t)(py - vy) * 65535LL) / vh);
+		abs_x = (LONG)(((int64_t)(px - vx) * 65535LL + (vw / 2)) / (vw - 1));
+		abs_y = (LONG)(((int64_t)(py - vy) * 65535LL + (vh / 2)) / (vh - 1));
 	}
 
 	if ((flags & 0x0800U) != 0U)
@@ -459,6 +485,15 @@ cb_on_input_mouse(
 	inp.type = INPUT_MOUSE;
 	inp.mi.dx = abs_x;
 	inp.mi.dy = abs_y;
+	if ((flags & 0x0200U) != 0U) {
+		int delta = (int)(flags & 0xFFU);
+		if ((flags & 0x0100U) != 0U)
+			delta = -delta;
+		mflags |= MOUSEEVENTF_WHEEL;
+		inp.mi.mouseData = (DWORD)(delta * WHEEL_DELTA / 120);
+		if (inp.mi.mouseData == 0U && delta != 0)
+			inp.mi.mouseData = (DWORD)((delta > 0) ? WHEEL_DELTA : -WHEEL_DELTA);
+	}
 	inp.mi.dwFlags = mflags;
 	SendInput(1, &inp, sizeof(inp));
 }
@@ -476,9 +511,9 @@ cb_on_input_key(
 	inp.type = INPUT_KEYBOARD;
 	inp.ki.wScan = scancode;
 	inp.ki.dwFlags = KEYEVENTF_SCANCODE;
-	if ((flags & 0x0100U) != 0U)
+	if ((flags & 0x02U) != 0U)
 		inp.ki.dwFlags |= KEYEVENTF_EXTENDEDKEY;
-	if ((flags & 0x8000U) != 0U)
+	if ((flags & 0x01U) != 0U)
 		inp.ki.dwFlags |= KEYEVENTF_KEYUP;
 	SendInput(1, &inp, sizeof(inp));
 }
@@ -496,7 +531,7 @@ cb_on_input_unicode(
 	inp.type = INPUT_KEYBOARD;
 	inp.ki.wScan = codepoint;
 	inp.ki.dwFlags = KEYEVENTF_UNICODE;
-	if ((flags & 0x8000U) != 0U)
+	if ((flags & 0x01U) != 0U)
 		inp.ki.dwFlags |= KEYEVENTF_KEYUP;
 	SendInput(1, &inp, sizeof(inp));
 }
@@ -604,6 +639,10 @@ extdisp_close_driver_shm(struct extdisp_session *s)
 static void
 extdisp_session_cleanup(struct extdisp_session *s)
 {
+	if (s->gpu != NULL) {
+		extdisp_gpu_close(s->gpu);
+		s->gpu = NULL;
+	}
 	if (s->srv != NULL) {
 		rdp_server_destroy(s->srv);
 		s->srv = NULL;
@@ -641,12 +680,84 @@ extdisp_session_cleanup(struct extdisp_session *s)
 	free(s->y_plane);
 	free(s->u_plane);
 	free(s->v_plane);
+	free(s->bgra_buf);
 	s->y_plane = NULL;
 	s->u_plane = NULL;
 	s->v_plane = NULL;
+	s->bgra_buf = NULL;
 	s->active = 0;
 	s->connected = 0;
 	s->running = 0;
+}
+
+static int
+extdisp_resize_staging_encoder(
+	struct extdisp_session *s,
+	uint32_t new_w,
+	uint32_t new_h)
+{
+	struct media_encoder_config ecfg;
+	struct media_encoder *new_enc = NULL;
+	uint8_t *ny;
+	uint8_t *nu;
+	uint8_t *nv;
+	uint8_t *nb;
+
+	new_w &= ~1U;
+	new_h &= ~1U;
+	if (new_w < 16U || new_h < 16U)
+		return -1;
+	if (new_w == s->width && new_h == s->height && s->bgra_buf != NULL)
+		return 0;
+
+	ny = (uint8_t *)malloc((size_t)new_w * new_h);
+	nu = (uint8_t *)malloc(((size_t)new_w / 2U) * ((size_t)new_h / 2U));
+	nv = (uint8_t *)malloc(((size_t)new_w / 2U) * ((size_t)new_h / 2U));
+	nb = (uint8_t *)malloc((size_t)new_w * new_h * 4U);
+	if (ny == NULL || nu == NULL || nv == NULL || nb == NULL) {
+		free(ny);
+		free(nu);
+		free(nv);
+		free(nb);
+		return -1;
+	}
+
+	memset(&ecfg, 0, sizeof(ecfg));
+	ecfg.codec = MEDIA_CODEC_H264;
+	ecfg.profile = MEDIA_ENCODER_PROFILE_H264_CONSTRAINED_BASELINE;
+	ecfg.width = new_w;
+	ecfg.height = new_h;
+	ecfg.rate_num = 60U;
+	ecfg.rate_den = 1U;
+	ecfg.input = MEDIA_ENCODER_INPUT_I420;
+	ecfg.allow = MEDIA_ENCODER_SOFTWARE | MEDIA_ENCODER_HARDWARE;
+	ecfg.purpose = MEDIA_ENCODER_LOW_LATENCY;
+	ecfg.output = MEDIA_ENCODER_ANNEX_B;
+	ecfg.rate_control = MEDIA_ENCODER_RATE_CQP;
+	ecfg.qp = 26U;
+	if (media_encoder_create(&ecfg, &new_enc) != 0) {
+		free(ny);
+		free(nu);
+		free(nv);
+		free(nb);
+		return -1;
+	}
+
+	if (s->encoder != NULL)
+		media_encoder_close(s->encoder);
+	s->encoder = new_enc;
+	free(s->y_plane);
+	free(s->u_plane);
+	free(s->v_plane);
+	free(s->bgra_buf);
+	s->y_plane = ny;
+	s->u_plane = nu;
+	s->v_plane = nv;
+	s->bgra_buf = nb;
+	s->width = new_w;
+	s->height = new_h;
+	mikuterm_log("extdisp: resized staging encoder to %ux%u", s->width, s->height);
+	return 0;
 }
 
 static DWORD WINAPI
@@ -662,8 +773,59 @@ extdisp_session_thread(LPVOID param)
 	int accepted = 0;
 
 	(void)param;
-	extdisp_try_create_sw_device(s);
-	extdisp_open_driver_shm(s, 1);
+	if (extdisp_vdd_pipe_command("SETDISPLAYCOUNT 1\n", NULL, 0U) == 0) {
+		s->vdd_pipe_active = 1;
+		mikuterm_log("extdisp: activated Virtual-Display-Driver via pipe");
+	} else if (extdisp_vdd_package_present() && !extdisp.vdd_install_declined) {
+		int ans = MessageBoxW(NULL,
+		    L"Virtual Display Driver (MIT License) is bundled in vdd\\MttVDD.inf "
+		    L"but is not installed yet.\n\n"
+		    L"Install it now for hardware-accelerated virtual display capture? "
+		    L"Windows will request Administrator permission (UAC) and publisher confirmation.",
+		    L"mikuterm - Virtual Display Driver",
+		    MB_YESNO | MB_ICONQUESTION | MB_SETFOREGROUND);
+		if (ans == IDYES) {
+			wchar_t exe[MAX_PATH];
+			DWORD len = GetModuleFileNameW(NULL, exe, MAX_PATH);
+			if (len > 0U && len < MAX_PATH) {
+				SHELLEXECUTEINFOW sei;
+
+				memset(&sei, 0, sizeof(sei));
+				sei.cbSize = sizeof(sei);
+				sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+				sei.lpVerb = L"runas";
+				sei.lpFile = exe;
+				sei.lpParameters = L"--install-vdd";
+				sei.nShow = SW_SHOWNORMAL;
+				if (ShellExecuteExW(&sei) && sei.hProcess != NULL) {
+					DWORD exit_code = 1U;
+					WaitForSingleObject(sei.hProcess, 120000);
+					GetExitCodeProcess(sei.hProcess, &exit_code);
+					CloseHandle(sei.hProcess);
+					mikuterm_log("extdisp: --install-vdd exited with %lu", (unsigned long)exit_code);
+					if (exit_code == 0U &&
+					    extdisp_vdd_pipe_command("SETDISPLAYCOUNT 1\n", NULL, 0U) == 0) {
+						s->vdd_pipe_active = 1;
+						mikuterm_log("extdisp: activated Virtual-Display-Driver after install");
+					}
+				} else {
+					mikuterm_log("extdisp: UAC elevation canceled or failed err=%lu",
+					    (unsigned long)GetLastError());
+					extdisp.vdd_install_declined = 1;
+				}
+			}
+		} else {
+			extdisp.vdd_install_declined = 1;
+		}
+	}
+	if (extdisp_gpu_open(s->width, s->height, s->vdd_pipe_active, &s->gpu) == 0) {
+		extdisp_gpu_dimensions(s->gpu, &s->width, &s->height);
+		if (!extdisp_gpu_is_zero_copy(s->gpu))
+			s->bgra_buf = (uint8_t *)malloc((size_t)s->width * s->height * 4U);
+	} else {
+		extdisp_try_create_sw_device(s);
+		extdisp_open_driver_shm(s, 1);
+	}
 
 	start_ms = GetTickCount64();
 	while (!s->stop && !extdisp.stop && (GetTickCount64() - start_ms) < EXTDISP_ACCEPT_MS) {
@@ -851,14 +1013,128 @@ extdisp_session_thread(LPVOID param)
 				logged_gfx_ready = 1;
 			}
 
-			if (s->shm_hdr == NULL && (now_ms - last_shm_retry_ms) >= 1000ULL) {
+			if (s->gpu != NULL && s->gpu_recovering) {
+				if (now_ms - s->last_gpu_retry_ms >= 500ULL) {
+					s->last_gpu_retry_ms = now_ms;
+					if (extdisp_gpu_rebuild(s->gpu) == 0) {
+						uint32_t nw = s->width;
+						uint32_t nh = s->height;
+
+						extdisp_gpu_dimensions(s->gpu, &nw, &nh);
+						if (!extdisp_gpu_is_zero_copy(s->gpu))
+							(void)extdisp_resize_staging_encoder(s, nw, nh);
+						else {
+							s->width = nw;
+							s->height = nh;
+						}
+						s->gpu_recovering = 0;
+						s->force_key = 1;
+						if (s->connected)
+							extdisp_update_connected_status(s);
+						mikuterm_log("extdisp: GPU capture recovered (%ux%u)", s->width, s->height);
+					}
+				}
+				continue;
+			}
+
+			if (s->gpu != NULL && extdisp_gpu_is_zero_copy(s->gpu)) {
+				const uint8_t *gpu_data = NULL;
+				size_t gpu_size = 0U;
+				int gpu_key = 0;
+				int gpu_rc = extdisp_gpu_capture_encode(
+				    s->gpu, s->force_key, &gpu_data, &gpu_size, &gpu_key);
+				if (gpu_rc == EXTDISP_GPU_OK && gpu_data != NULL && gpu_size > 0U) {
+					struct rdp_avc_rect rect;
+					struct rdp_avc_quant quant;
+					struct rdp_avc_stream avc;
+					uint32_t frame_id = 0U;
+					int avc_rc;
+
+					(void)gpu_key;
+					s->force_key = 0;
+					last_frame_ms = now_ms;
+					memset(&rect, 0, sizeof(rect));
+					rect.right = (uint16_t)s->width;
+					rect.bottom = (uint16_t)s->height;
+					memset(&quant, 0, sizeof(quant));
+					quant.qp = 26U;
+					quant.quality = 100U;
+					memset(&avc, 0, sizeof(avc));
+					avc.luma.rect_count = 1U;
+					avc.luma.rects = &rect;
+					avc.luma.quants = &quant;
+					avc.luma.data = gpu_data;
+					avc.luma.data_len = gpu_size;
+					avc_rc = rdp_server_send_avc_frame(
+					    s->srv, RDP_GFX_CODEC_AVC420, &avc,
+					    (uint32_t)now_ms, &frame_id);
+					if (avc_rc != 0) {
+						mikuterm_log("extdisp: send_avc_frame rc=%d", avc_rc);
+						s->running = 0;
+						break;
+					}
+					s->frames_sent++;
+					if (!logged_first_frame) {
+						mikuterm_log("extdisp: first GPU frame sent fid=%u size=%zu", frame_id, gpu_size);
+						logged_first_frame = 1;
+					}
+					continue;
+				}
+				if (gpu_rc == EXTDISP_GPU_IDLE)
+					continue;
+				if (gpu_rc == EXTDISP_GPU_REBUILD && extdisp_gpu_rebuild(s->gpu) == 0) {
+					extdisp_gpu_dimensions(s->gpu, &s->width, &s->height);
+					s->force_key = 1;
+					if (s->connected)
+						extdisp_update_connected_status(s);
+					continue;
+				}
+				mikuterm_log("extdisp: GPU zero-copy capture recovering, will retry");
+				s->gpu_recovering = 1;
+				s->last_gpu_retry_ms = now_ms;
+				if (s->connected)
+					extdisp_update_connected_status(s);
+				continue;
+			} else if (s->gpu != NULL && s->bgra_buf != NULL) {
+				int cap_rc = extdisp_gpu_capture_bgra(
+				    s->gpu, s->bgra_buf, s->width * 4U, s->width, s->height);
+				if (cap_rc == EXTDISP_GPU_OK) {
+					bgra_to_i420(s->bgra_buf, s->width * 4U, s->width, s->height,
+					    s->y_plane, s->u_plane, s->v_plane);
+					have_frame = 1;
+				} else if (cap_rc == EXTDISP_GPU_IDLE) {
+					continue;
+				} else if (cap_rc == EXTDISP_GPU_REBUILD && extdisp_gpu_rebuild(s->gpu) == 0) {
+					uint32_t nw = s->width;
+					uint32_t nh = s->height;
+
+					extdisp_gpu_dimensions(s->gpu, &nw, &nh);
+					(void)extdisp_resize_staging_encoder(s, nw, nh);
+					s->force_key = 1;
+					if (s->connected)
+						extdisp_update_connected_status(s);
+					continue;
+				} else {
+					mikuterm_log("extdisp: DXGI staging capture recovering, will retry");
+					s->gpu_recovering = 1;
+					s->last_gpu_retry_ms = now_ms;
+					if (s->connected)
+						extdisp_update_connected_status(s);
+					continue;
+				}
+			}
+
+			if (!have_frame && s->gpu == NULL &&
+			    s->shm_hdr == NULL && (now_ms - last_shm_retry_ms) >= 1000ULL) {
 				last_shm_retry_ms = now_ms;
 				extdisp_open_driver_shm(s, 0);
 				if (s->shm_hdr != NULL && s->connected)
 					extdisp_update_connected_status(s);
 			}
 
-			if (s->shm_hdr != NULL && s->shm_hdr->active != 0U) {
+			if (s->gpu != NULL) {
+				/* Handled above. */
+			} else if (s->shm_hdr != NULL && s->shm_hdr->active != 0U) {
 				uint32_t seq = s->shm_hdr->frame_seq;
 				if (seq != s->last_frame_seq &&
 				    s->shm_hdr->width == s->width &&

@@ -265,6 +265,31 @@ rdp_app_session_copy_frame(
 	return copied;
 }
 
+/*
+ * Reports the latest decoded framebuffer dimensions.  Returns 1 if a frame is ready.
+ */
+int
+rdp_app_session_frame_size(
+	struct rdp_app_session *session,
+	uint32_t *width,
+	uint32_t *height)
+{
+	int ready = 0;
+
+	if (session == NULL)
+		return 0;
+	kl_mutex_lock(&session->lock);
+	if (session->fb != NULL && session->fb_w > 0U && session->fb_h > 0U) {
+		if (width != NULL)
+			*width = session->fb_w;
+		if (height != NULL)
+			*height = session->fb_h;
+		ready = 1;
+	}
+	kl_mutex_unlock(&session->lock);
+	return ready;
+}
+
 /* Worker thread entry point running TCP, TLS, librdp, and libmedia decode. */
 static void
 rdp_thread_entry(

@@ -29,11 +29,13 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
-#define DISPSINK_DEFAULT_W	1280U
-#define DISPSINK_DEFAULT_H	720U
+#define DISPSINK_DEFAULT_W	1920U
+#define DISPSINK_DEFAULT_H	1080U
 #define DISPSINK_POST_OFFER	0x6473706fU
+#define DISPSINK_CURSOR_HIDE_MS	1500ULL
 
 #define DISPSINK_BG		KL_RGB(0x181c20U)
 #define DISPSINK_CARD_BG	KL_RGB(0x222830U)
@@ -412,34 +414,133 @@ draw_waiting_screen(
 	(void)kl_window_present(win, canvas, (size_t)w);
 }
 
+static uint64_t
+dispsink_now_ms(void)
+{
+	struct timespec ts;
+
+	if (clock_gettime(CLOCK_MONOTONIC, &ts) != 0)
+		return 0ULL;
+	return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+}
+
+static void
+compute_letterbox(
+	uint32_t win_w,
+	uint32_t win_h,
+	uint32_t src_w,
+	uint32_t src_h,
+	uint32_t *dx,
+	uint32_t *dy,
+	uint32_t *dw,
+	uint32_t *dh)
+{
+	uint32_t w;
+	uint32_t h;
+
+	if (win_w == 0U || win_h == 0U || src_w == 0U || src_h == 0U) {
+		*dx = 0U;
+		*dy = 0U;
+		*dw = win_w;
+		*dh = win_h;
+		return;
+	}
+	if ((uint64_t)win_w * (uint64_t)src_h <= (uint64_t)win_h * (uint64_t)src_w) {
+		w = win_w;
+		h = (uint32_t)(((uint64_t)win_w * (uint64_t)src_h) / (uint64_t)src_w);
+	} else {
+		h = win_h;
+		w = (uint32_t)(((uint64_t)win_h * (uint64_t)src_w) / (uint64_t)src_h);
+	}
+	if (w == 0U)
+		w = 1U;
+	if (h == 0U)
+		h = 1U;
+	*dw = w;
+	*dh = h;
+	*dx = (win_w - w) / 2U;
+	*dy = (win_h - h) / 2U;
+}
+
 static void
 present_rdp_canvas(
 	struct kl_window *win,
 	struct rdp_app_session *session,
 	uint32_t *canvas,
 	uint32_t w,
-	uint32_t h)
+	uint32_t h,
+	uint32_t **src_buf,
+	size_t *src_cap)
 {
 	size_t i;
 	size_t total;
+	uint32_t fw = 0U;
+	uint32_t fh = 0U;
+	uint32_t dx;
+	uint32_t dy;
+	uint32_t dw;
+	uint32_t dh;
+	uint32_t y;
+	uint32_t x;
 
 	total = (size_t)w * (size_t)h;
 	for (i = 0U; i < total; i++)
-		canvas[i] = 0xFF181C20U;
-	(void)rdp_app_session_copy_frame(session, canvas, w, h);
+		canvas[i] = 0xFF000000U;
+
+	if (rdp_app_session_frame_size(session, &fw, &fh) != 0 && fw > 0U && fh > 0U) {
+		size_t need = (size_t)fw * (size_t)fh;
+		if (need > *src_cap) {
+			uint32_t *nb = (uint32_t *)realloc(*src_buf, need * sizeof(uint32_t));
+			if (nb != NULL) {
+				*src_buf = nb;
+				*src_cap = need;
+			}
+		}
+		if (*src_buf != NULL && *src_cap >= need &&
+		    rdp_app_session_copy_frame(session, *src_buf, fw, fh) != 0) {
+			compute_letterbox(w, h, fw, fh, &dx, &dy, &dw, &dh);
+			if (dw == fw && dh == fh) {
+				for (y = 0U; y < dh; y++) {
+					memcpy(canvas + (size_t)(dy + y) * w + dx,
+					       *src_buf + (size_t)y * fw,
+					       (size_t)dw * sizeof(uint32_t));
+				}
+			} else {
+				for (y = 0U; y < dh; y++) {
+					uint32_t sy = (uint32_t)(((uint64_t)y * fh) / dh);
+					const uint32_t *srow = *src_buf + (size_t)sy * fw;
+					uint32_t *drow = canvas + (size_t)(dy + y) * w + dx;
+					for (x = 0U; x < dw; x++) {
+						uint32_t sx = (uint32_t)(((uint64_t)x * fw) / dw);
+						drow[x] = srow[sx];
+					}
+				}
+			}
+		}
+	}
 	(void)kl_window_present(win, canvas, (size_t)w);
 }
 
 static void
 handle_rdp_window_event(
 	struct rdp_app_session *session,
-	const struct kl_window_event *ev)
+	const struct kl_window_event *ev,
+	uint32_t win_w,
+	uint32_t win_h)
 {
 	uint16_t scan;
 	uint16_t flags;
 	uint16_t btn_flag;
 	uint16_t px;
 	uint16_t py;
+	uint32_t fw = win_w;
+	uint32_t fh = win_h;
+	uint32_t dx;
+	uint32_t dy;
+	uint32_t dw;
+	uint32_t dh;
+	double vx;
+	double vy;
 
 	if (ev->kind == KL_WINDOW_KEY) {
 		if (rdp_evdev_to_scancode(ev->code, &scan, &flags) != 0) {
@@ -449,8 +550,24 @@ handle_rdp_window_event(
 		}
 		return;
 	}
-	px = ev->x > 0.0 ? (uint16_t)ev->x : 0U;
-	py = ev->y > 0.0 ? (uint16_t)ev->y : 0U;
+	(void)rdp_app_session_frame_size(session, &fw, &fh);
+	compute_letterbox(win_w, win_h, fw, fh, &dx, &dy, &dw, &dh);
+	vx = ev->x - (double)dx;
+	vy = ev->y - (double)dy;
+	if (vx < 0.0)
+		vx = 0.0;
+	if (vy < 0.0)
+		vy = 0.0;
+	if (dw > 0U && dh > 0U) {
+		vx = (vx * (double)fw) / (double)dw;
+		vy = (vy * (double)fh) / (double)dh;
+	}
+	if (vx >= (double)fw)
+		vx = (double)(fw > 0U ? fw - 1U : 0U);
+	if (vy >= (double)fh)
+		vy = (double)(fh > 0U ? fh - 1U : 0U);
+	px = (uint16_t)vx;
+	py = (uint16_t)vy;
 	if (ev->kind == KL_WINDOW_MOTION) {
 		rdp_app_session_send_mouse(session, RDP_PTR_FLAG_MOVE, px, py);
 	} else if (ev->kind == KL_WINDOW_BUTTON) {
@@ -537,9 +654,13 @@ main(
 	int have_text;
 	uint32_t *canvas;
 	size_t canvas_cap;
+	uint32_t *src_buf = NULL;
+	size_t src_cap = 0U;
 	struct rdp_app_session *session;
 	struct kl_app_event ev;
 	int running;
+	int cursor_hidden = 0;
+	uint64_t last_motion_ms = 0ULL;
 	int rc;
 
 	memset(&adv, 0, sizeof(adv));
@@ -617,9 +738,15 @@ main(
 	{
 		int logged_first_frame = 0;
 	while (running != 0) {
-		rc = kl_app_dispatch(app, -1);
+		int timeout_ms = (session != NULL && !cursor_hidden) ? 250 : -1;
+		rc = kl_app_dispatch(app, timeout_ms);
 		if (rc != 0)
 			break;
+		if (session != NULL && !cursor_hidden &&
+		    dispsink_now_ms() - last_motion_ms >= DISPSINK_CURSOR_HIDE_MS) {
+			kl_window_set_cursor_hidden(win, 1);
+			cursor_hidden = 1;
+		}
 		for (;;) {
 			rc = kl_app_take(app, &ev);
 			if (rc == 0)
@@ -650,15 +777,23 @@ main(
 						kl_mutex_unlock(&adv.lock);
 						if (session != NULL) {
 							rdp_app_session_request_resize(session, rw, rh);
-							present_rdp_canvas(win, session, canvas, rw, rh);
+							present_rdp_canvas(win, session, canvas, rw, rh, &src_buf, &src_cap);
 						} else {
 							draw_waiting_screen(win, &text, have_text, &adv, canvas, rw, rh);
 						}
 					}
 					continue;
 				}
-				if (session != NULL)
-					handle_rdp_window_event(session, &ev.input);
+				if (session != NULL) {
+					if (ev.input.kind == KL_WINDOW_MOTION) {
+						if (cursor_hidden) {
+							kl_window_set_cursor_hidden(win, 0);
+							cursor_hidden = 0;
+						}
+						last_motion_ms = dispsink_now_ms();
+					}
+					handle_rdp_window_event(session, &ev.input, win_w, win_h);
+				}
 			} else if (ev.kind == KL_APP_POST &&
 				   ev.code == DISPSINK_POST_OFFER) {
 				struct rdp_app_target target;
@@ -681,11 +816,14 @@ main(
 						draw_waiting_screen(win, &text, have_text, &adv, canvas, win_w, win_h);
 					else
 						running = 0;
+				} else {
+					kl_window_set_cursor_hidden(win, 1);
+					cursor_hidden = 1;
 				}
 			} else if (ev.kind == KL_APP_POST &&
 				   ev.code == RDP_APP_POST_FRAME) {
 				if (session != NULL) {
-					present_rdp_canvas(win, session, canvas, win_w, win_h);
+					present_rdp_canvas(win, session, canvas, win_w, win_h, &src_buf, &src_cap);
 					if (logged_first_frame < 3) {
 						uint32_t cx = win_w / 2U;
 						uint32_t cy = win_h / 2U;
@@ -698,6 +836,10 @@ main(
 			} else if (ev.kind == KL_APP_POST &&
 				   ev.code == RDP_APP_POST_END) {
 				dispsink_log("ui: RDP_APP_POST_END");
+				if (cursor_hidden) {
+					kl_window_set_cursor_hidden(win, 0);
+					cursor_hidden = 0;
+				}
 				if (session != NULL) {
 					rdp_app_session_stop(session);
 					session = NULL;
@@ -711,9 +853,12 @@ main(
 	}
 	}
 
+	if (cursor_hidden)
+		kl_window_set_cursor_hidden(win, 0);
 	if (session != NULL)
 		rdp_app_session_stop(session);
 	adv_stop(&adv);
+	free(src_buf);
 	free(canvas);
 	if (have_text)
 		kl_text_close(&text);

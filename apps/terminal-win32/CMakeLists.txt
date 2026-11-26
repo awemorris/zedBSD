@@ -91,6 +91,8 @@ set(MIKUTERM_SOURCES
 	${MIKUTERM_DIR}/proxy.c
 	${MIKUTERM_DIR}/credential.c
 	${MIKUTERM_DIR}/extdisp.c
+	${MIKUTERM_DIR}/extdisp-gpu.c
+	${MIKUTERM_DIR}/extdisp-d3d12.c
 	${MIKUTERM_DIR}/sftp-local-win32.c
 	${MIKUTERM_DIR}/sftp-drag-win32.c
 	${MIKUTERM_DIR}/vi-connection-win32.c
@@ -208,6 +210,7 @@ else()
 endif()
 # The X server's Vulkan files read Vulkan's headers whether libkeiland's surface is kept or not.
 set_source_files_properties(
+	${MIKUTERM_DIR}/extdisp-gpu.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/render-vulkan.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/present-vulkan.c
 	${MIKUTERM_ROOT}/userland/desktop/xserver/win32/vulkan.c
@@ -458,6 +461,30 @@ add_custom_command(OUTPUT ${MIKUTERM_DIST}/share/fonts/unifont.ttf
 	DEPENDS ${MIKUTERM_UNIFONT_FILE}
 	VERBATIM)
 list(APPEND MIKUTERM_DIST_OUTPUTS ${MIKUTERM_DIST}/share/fonts/unifont.ttf)
+# Optional pre-staged Virtual-Display-Driver package (vdd\MttVDD.inf, .cat, .dll, vdd_settings.xml, LICENSE).
+set(MIKUTERM_VDD_DIR "" CACHE PATH "Optional directory containing signed Virtual-Display-Driver files")
+if(NOT MIKUTERM_VDD_DIR)
+	if(EXISTS "${MIKUTERM_DIR}/vdd/MttVDD.inf")
+		set(MIKUTERM_VDD_DIR "${MIKUTERM_DIR}/vdd")
+	elseif(EXISTS "${MIKUTERM_DISTFILES}/vdd/MttVDD.inf")
+		set(MIKUTERM_VDD_DIR "${MIKUTERM_DISTFILES}/vdd")
+	endif()
+endif()
+if(MIKUTERM_VDD_DIR AND EXISTS "${MIKUTERM_VDD_DIR}/MttVDD.inf")
+	file(GLOB MIKUTERM_VDD_FILES CONFIGURE_DEPENDS "${MIKUTERM_VDD_DIR}/*")
+	foreach(vdd_file IN LISTS MIKUTERM_VDD_FILES)
+		if(NOT IS_DIRECTORY "${vdd_file}")
+			get_filename_component(vdd_name "${vdd_file}" NAME)
+			add_custom_command(OUTPUT ${MIKUTERM_DIST}/vdd/${vdd_name}
+				COMMAND ${CMAKE_COMMAND} -E make_directory ${MIKUTERM_DIST}/vdd
+				COMMAND ${CMAKE_COMMAND} -E copy ${vdd_file} ${MIKUTERM_DIST}/vdd/${vdd_name}
+				DEPENDS ${vdd_file}
+				VERBATIM)
+			list(APPEND MIKUTERM_DIST_OUTPUTS ${MIKUTERM_DIST}/vdd/${vdd_name})
+		endif()
+	endforeach()
+endif()
+
 add_custom_target(dist DEPENDS ${MIKUTERM_DIST_OUTPUTS})
 
 # The zip of the folder, its entries in a fixed order and time (the same files make the same zip).

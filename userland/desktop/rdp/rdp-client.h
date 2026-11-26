@@ -56,5 +56,7 @@ void rdp_app_session_request_resize(struct rdp_app_session *session,
 int rdp_app_session_copy_frame(struct rdp_app_session *session,
 			       uint32_t *pixels, uint32_t width,
 			       uint32_t height);
+int rdp_app_session_frame_size(struct rdp_app_session *session,
+			       uint32_t *width, uint32_t *height);
 
 #endif

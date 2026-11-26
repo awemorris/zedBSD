@@ -20,6 +20,7 @@
 
 #include "mikuterm.h"
 #include "extdisp.h"
+#include "extdisp-gpu.h"
 #include "session.h"
 #include "sftp-view.h"
 #include "vi-connection-win32.h"
@@ -52,6 +53,7 @@
 
 /* The command line of the X server process of an SSH connection (x11-child.c). */
 #define MAIN_X11_SWITCH		L"--x11-server"
+#define MAIN_VDD_INSTALL_SWITCH	L"--install-vdd"
 
 /* What Help > About writes on the screen. */
 #define MAIN_ABOUT		"\r\n\033[1mmikuterm\033[0m " MIKUTERM_VERSION_TEXT \
@@ -115,6 +117,8 @@ wWinMain(
 		status = mikuterm_x11_child();
 		return status;
 	}
+	if (command_line != NULL && wcscmp(command_line, MAIN_VDD_INSTALL_SWITCH) == 0)
+		return extdisp_vdd_install();
 
 	/* The folder everything is in. */
 	error = mikuterm_folder_init();

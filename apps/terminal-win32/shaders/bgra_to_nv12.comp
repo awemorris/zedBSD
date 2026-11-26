@@ -1,0 +1,51 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16, local_size_z = 1) in;
+
+layout(set = 0, binding = 0) uniform sampler2D src_tex;
+layout(set = 0, binding = 1, r8) uniform writeonly image2D dst_y;
+layout(set = 0, binding = 2, rg8) uniform writeonly image2D dst_uv;
+
+layout(push_constant) uniform PushConstants {
+	uvec2 visible_size;
+	uvec2 coded_size;
+} pc;
+
+float rgb_to_y709(vec3 rgb)
+{
+	return clamp(0.182586 * rgb.r + 0.614231 * rgb.g + 0.062007 * rgb.b + (16.0 / 255.0),
+	    16.0 / 255.0, 235.0 / 255.0);
+}
+
+vec2 rgb_to_uv709(vec3 rgb)
+{
+	float cb = -0.100644 * rgb.r - 0.338572 * rgb.g + 0.439216 * rgb.b + (128.0 / 255.0);
+	float cr =  0.439216 * rgb.r - 0.398942 * rgb.g - 0.040274 * rgb.b + (128.0 / 255.0);
+	return clamp(vec2(cb, cr), vec2(16.0 / 255.0), vec2(240.0 / 255.0));
+}
+
+vec3 fetch_clamped(ivec2 pos)
+{
+	ivec2 max_p = ivec2(pc.visible_size) - ivec2(1, 1);
+	ivec2 clamped = clamp(pos, ivec2(0, 0), max_p);
+	return texelFetch(src_tex, clamped, 0).rgb;
+}
+
+void main()
+{
+	uint gx = gl_GlobalInvocationID.x;
+	uint gy = gl_GlobalInvocationID.y;
+	if (gx >= pc.coded_size.x || gy >= pc.coded_size.y)
+		return;
+
+	vec3 c0 = fetch_clamped(ivec2(gx, gy));
+	imageStore(dst_y, ivec2(gx, gy), vec4(rgb_to_y709(c0), 0.0, 0.0, 1.0));
+
+	if ((gx & 1u) == 0u && (gy & 1u) == 0u) {
+		vec3 c1 = fetch_clamped(ivec2(gx + 1u, gy));
+		vec3 c2 = fetch_clamped(ivec2(gx, gy + 1u));
+		vec3 c3 = fetch_clamped(ivec2(gx + 1u, gy + 1u));
+		vec3 avg = 0.25 * (c0 + c1 + c2 + c3);
+		imageStore(dst_uv, ivec2(gx >> 1u, gy >> 1u), vec4(rgb_to_uv709(avg), 0.0, 1.0));
+	}
+}
