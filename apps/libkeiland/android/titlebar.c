@@ -807,6 +807,10 @@ android_titlebar_wanted(
 {
 	uint32_t height;
 
+	/* Fullscreen hides the strip so the client uses the entire screen. */
+	if (window->fullscreen)
+		return 0U;
+
 	/* A menu or tabs make a strip. */
 	if (window->bar.menu_count == 0U && window->bar.tab_count == 0U)
 		return 0U;

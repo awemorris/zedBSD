@@ -56,6 +56,7 @@ public class KeilandActivity extends NativeActivity {
 
 	/** Whether immersive fullscreen mode is active, and the pre-fullscreen legacy flags. */
 	private boolean fullscreen;
+	private boolean keyboardSuppressed;
 	private boolean hasBaseSystemUiVisibility;
 	private int baseSystemUiVisibility;
 
@@ -190,6 +191,17 @@ public class KeilandActivity extends NativeActivity {
 		applyFullscreen();
 	}
 
+	/** Suppresses or restores soft keyboard activation and hides any visible key bar. */
+	void setKeyboardSuppressed(boolean suppressed) {
+		this.keyboardSuppressed = suppressed;
+		if (inputView != null) {
+			inputView.setKeyboardSuppressed(suppressed);
+		}
+		if (suppressed && keyBarWindow != null) {
+			keyBarWindow.dismiss();
+		}
+	}
+
 	/** Applies the current fullscreen state to the Activity window. */
 	private void applyFullscreen() {
 		Window window = getWindow();
@@ -265,7 +277,7 @@ public class KeilandActivity extends NativeActivity {
 		keyboard = insets.getInsets(WindowInsets.Type.ime());
 		covered = 0;
 		/* A keyboard that covers most of the window (a full-screen input method) leaves the program nothing to be shown in, so it is not made room for. */
-		if (insets.isVisible(WindowInsets.Type.ime()) &&
+		if (!keyboardSuppressed && insets.isVisible(WindowInsets.Type.ime()) &&
 		    (inputView.getHeight() == 0 || keyboard.bottom <= inputView.getHeight() * KEYBOARD_MAX_PERCENT / 100)) {
 			if (getResources().getConfiguration().hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO) {
 				covered = keyboard.bottom;

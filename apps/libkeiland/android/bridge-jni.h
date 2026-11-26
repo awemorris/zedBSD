@@ -35,6 +35,9 @@ int keiland_java_set_title(const char *title);
 /* Enables (1) or disables (0) immersive fullscreen mode. */
 int keiland_java_set_fullscreen(int fullscreen);
 
+/* Suppresses (1) or restores (0) soft keyboard activation. */
+int keiland_java_set_keyboard_suppressed(int suppressed);
+
 /* Puts length bytes of UTF-8 text on the clipboard; NULL or length 0 empties it. */
 int keiland_java_clipboard_set(const char *text, size_t length);
 

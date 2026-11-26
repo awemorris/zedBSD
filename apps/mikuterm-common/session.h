@@ -198,6 +198,9 @@ struct mikuterm_session {
 	unsigned escape;
 	int answered;
 	int cancelled;
+
+	/* Whether DisplaySink Target Mode is currently active on this session. */
+	int target_mode;
 };
 
 /* Shared by the two sides (connection-ssh.c). */

@@ -735,9 +735,14 @@ thread_choose(
 					       choice->session->number, &tab);
 			if (error != 0) {
 				OPENSSL_cleanse(target.password, sizeof(target.password));
+				kl_mutex_lock(&choice->session->lock);
+				choice->session->target_mode = 0;
+				kl_mutex_unlock(&choice->session->lock);
+				session_post(choice->session);
 				launch_choose(&choice->screen, index);
 				continue;
 			}
+			rdp_tab_set_target_mode(tab, 1);
 #ifdef MIKUTERM_HAVE_LIBMEDIA
 			error = rdp_thread_start(tab, &target, &rdp_media_decoder_ops,
 						 choice->session->connect_timeout);
@@ -751,10 +756,18 @@ thread_choose(
 			OPENSSL_cleanse(target.password, sizeof(target.password));
 			if (error != 0) {
 				rdp_tab_release(tab);
+				kl_mutex_lock(&choice->session->lock);
+				choice->session->target_mode = 0;
+				kl_mutex_unlock(&choice->session->lock);
+				session_post(choice->session);
 				launch_choose(&choice->screen, index);
 				continue;
 			}
 			session_rdp_tab(choice->session, &tab->connection);
+			kl_mutex_lock(&choice->session->lock);
+			choice->session->target_mode = 0;
+			kl_mutex_unlock(&choice->session->lock);
+			session_post(choice->session);
 			launch_choose(&choice->screen, index);
 			continue;
 		}

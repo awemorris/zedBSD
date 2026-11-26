@@ -797,6 +797,7 @@ connection_mode(
 {
 	struct mikuterm_session *session;
 	unsigned question;
+	int target_mode;
 #if MIKUTERM_HAVE_LOGIN_SHELL
 	unsigned terminal;
 	int error;
@@ -820,12 +821,13 @@ connection_mode(
 	}
 
 #endif
-	/* The question asked now. */
+	/* The question asked now and whether DisplaySink Target Mode is active. */
 	kl_mutex_lock(&session->lock);
 
 	question = session->question;
 	if (session->answered)
 		question = SESSION_ASK_NONE;
+	target_mode = session->target_mode;
 
 	kl_mutex_unlock(&session->lock);
 
@@ -833,6 +835,8 @@ connection_mode(
 	*mode = TERMINAL_MODE_ECHO | TERMINAL_MODE_LINES;
 	if (question == SESSION_ASK_SECRET)
 		*mode = TERMINAL_MODE_LINES;
+	if (target_mode != 0)
+		*mode |= TERMINAL_MODE_TARGET_DISPLAY;
 
 	/* Succeeded. */
 	return 0;

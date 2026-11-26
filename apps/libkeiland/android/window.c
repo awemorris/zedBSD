@@ -39,6 +39,8 @@
 static atomic_uint screen_width_atomic;
 static atomic_uint screen_height_atomic;
 static atomic_uint screen_scale_atomic;
+static atomic_uint native_width_atomic;
+static atomic_uint native_height_atomic;
 
 static void window_input(struct kl_window *window, unsigned kind, int pressed);
 static void window_purge(struct kl_app *app, struct kl_window *window);
@@ -118,6 +120,8 @@ kl_app_window_create(
 		(void)keiland_java_set_title(window->title);
 	if (before != NULL && before->fullscreen)
 		(void)keiland_java_set_fullscreen(0);
+	if (before != NULL && before->keyboard_suppressed)
+		(void)keiland_java_set_keyboard_suppressed(0);
 
 	/* Succeeded: the window is shown. */
 	return window;
@@ -162,6 +166,7 @@ kl_window_close(
 		if (top->title != NULL)
 			(void)keiland_java_set_title(top->title);
 		(void)keiland_java_set_fullscreen(top->fullscreen);
+		(void)keiland_java_set_keyboard_suppressed(top->keyboard_suppressed);
 	}
 
 	/* The title, the frame kept and the state; a menu popup that was open for it is left to close itself. */
@@ -425,6 +430,15 @@ android_window_layout(
 	if (app->native == NULL)
 		return;
 
+	{
+		int32_t nw = ANativeWindow_getWidth(app->native);
+		int32_t nh = ANativeWindow_getHeight(app->native);
+		if (nw > 0)
+			atomic_store(&native_width_atomic, (unsigned)nw);
+		if (nh > 0)
+			atomic_store(&native_height_atomic, (unsigned)nh);
+	}
+
 	/* Each window: the size the native window leaves, less its strip (the strip comes or goes with the menu and the tabs). */
 	for (window = app->windows; window != NULL; window = window->next) {
 		strip = android_titlebar_wanted(window);
@@ -493,6 +507,20 @@ keiland_android_screen(
 		*height = atomic_load(&screen_height_atomic);
 	if (scale != NULL)
 		*scale = atomic_load(&screen_scale_atomic);
+}
+
+/*
+ * Reads the latest full native window size in pixels from any thread.
+ */
+void
+keiland_android_native_screen(
+	unsigned *width,
+	unsigned *height)
+{
+	if (width != NULL)
+		*width = atomic_load(&native_width_atomic);
+	if (height != NULL)
+		*height = atomic_load(&native_height_atomic);
 }
 
 /*

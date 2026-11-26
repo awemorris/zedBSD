@@ -36,6 +36,9 @@ final class InputView extends View {
 	/** Whether the keyboard was asked for before the window could show it (it has no focus yet). */
 	private boolean showPending;
 
+	/** Whether soft keyboard activation is suppressed by the active tab/mode. */
+	private boolean keyboardSuppressed;
+
 	InputView(Context context) {
 		super(context);
 		setFocusable(true);
@@ -44,11 +47,14 @@ final class InputView extends View {
 
 	@Override
 	public boolean onCheckIsTextEditor() {
-		return true;
+		return !keyboardSuppressed;
 	}
 
 	@Override
 	public InputConnection onCreateInputConnection(EditorInfo info) {
+		if (keyboardSuppressed) {
+			return null;
+		}
 		if (mode == 0) {
 			info.inputType = android.text.InputType.TYPE_CLASS_TEXT
 				| android.text.InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD
@@ -125,7 +131,7 @@ final class InputView extends View {
 		if (manager == null) {
 			return;
 		}
-		if (show) {
+		if (show && !keyboardSuppressed) {
 			requestFocus();
 			showPending = true;
 			if (hasWindowFocus()) {
@@ -137,6 +143,23 @@ final class InputView extends View {
 		}
 	}
 
+	/** Suppresses or restores soft keyboard activation for this view. */
+	void setKeyboardSuppressed(boolean suppressed) {
+		InputMethodManager manager;
+
+		keyboardSuppressed = suppressed;
+		manager = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+		if (suppressed) {
+			showPending = false;
+			if (manager != null) {
+				manager.hideSoftInputFromWindow(getWindowToken(), 0);
+			}
+		}
+		if (manager != null) {
+			manager.restartInput(this);
+		}
+	}
+
 	@Override
 	public void onWindowFocusChanged(boolean hasWindowFocus) {
 		InputMethodManager manager;
@@ -144,7 +167,13 @@ final class InputView extends View {
 		super.onWindowFocusChanged(hasWindowFocus);
 
 		/* Carries out a request that had to wait for the focus. */
-		if (hasWindowFocus && showPending) {
+		if (hasWindowFocus && keyboardSuppressed) {
+			showPending = false;
+			manager = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
+			if (manager != null) {
+				manager.hideSoftInputFromWindow(getWindowToken(), 0);
+			}
+		} else if (hasWindowFocus && showPending) {
 			manager = (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
 			if (manager != null) {
 				showPending = !manager.showSoftInput(this, 0);

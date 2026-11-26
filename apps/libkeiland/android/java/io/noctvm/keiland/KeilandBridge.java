@@ -39,6 +39,9 @@ public final class KeilandBridge {
 	/** Whether immersive fullscreen is currently requested. */
 	private static boolean currentFullscreen;
 
+	/** Whether soft keyboard suppression is currently requested. */
+	private static boolean currentKeyboardSuppressed;
+
 	private KeilandBridge() {
 	}
 
@@ -48,6 +51,9 @@ public final class KeilandBridge {
 		applicationContext = activity.getApplicationContext();
 		if (currentFullscreen) {
 			activity.setFullscreen(true);
+		}
+		if (currentKeyboardSuppressed) {
+			activity.setKeyboardSuppressed(true);
 		}
 	}
 
@@ -163,6 +169,20 @@ public final class KeilandBridge {
 				KeilandActivity activity = current.get();
 				if (activity != null) {
 					activity.setFullscreen(fullscreen);
+				}
+			}
+		});
+	}
+
+	/** Suppresses or restores soft keyboard activation on the current Activity. */
+	static void setKeyboardSuppressed(final boolean suppressed) {
+		post(new Runnable() {
+			@Override
+			public void run() {
+				currentKeyboardSuppressed = suppressed;
+				KeilandActivity activity = current.get();
+				if (activity != null) {
+					activity.setKeyboardSuppressed(suppressed);
 				}
 			}
 		});

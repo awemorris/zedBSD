@@ -23,6 +23,7 @@
 
 /* Background colour painted around or before the remote desktop surface. */
 #define RDP_TAB_BG		0xFF181C20U
+#define RDP_TAB_LETTERBOX_BG	0xFF000000U
 
 /* Evdev pointer button codes matching libkeiland. */
 #define EVDEV_BTN_LEFT		0x110U
@@ -146,6 +147,21 @@ rdp_tab_attach_waker(
 	kl_mutex_lock(&tab->lock);
 	tab->waker = waker;
 	tab->references++;
+	kl_mutex_unlock(&tab->lock);
+}
+
+/*
+ * Marks whether this RDP tab is running in DisplaySink Target Mode.
+ */
+void
+rdp_tab_set_target_mode(
+	struct rdp_tab *tab,
+	int target_mode)
+{
+	if (tab == NULL)
+		return;
+	kl_mutex_lock(&tab->lock);
+	tab->target_mode = (target_mode != 0);
 	kl_mutex_unlock(&tab->lock);
 }
 
@@ -416,14 +432,18 @@ rdp_conn_resize(
 	return 0;
 }
 
-/* Reports non-line-mode input for a view tab. */
+/* Reports non-line-mode input for a view tab, and Target Mode when active. */
 static int
 rdp_conn_mode(
 	const struct terminal_connection *conn,
 	unsigned *mode)
 {
-	UNUSED_PARAMETER(conn);
+	const struct rdp_tab *tab;
+
+	tab = (const struct rdp_tab *)conn;
 	*mode = 0U;
+	if (tab != NULL && tab->target_mode != 0)
+		*mode |= TERMINAL_MODE_TARGET_DISPLAY;
 	return 0;
 }
 
@@ -619,15 +639,17 @@ rdp_view_draw(
 	uint32_t dst_y;
 	uint32_t dst_w;
 	uint32_t dst_h;
+	uint32_t bg;
 	size_t total;
 	size_t i;
 
 	UNUSED_PARAMETER(state);
 	tab = (struct rdp_tab *)conn;
 	total = (size_t)width * (size_t)height;
-	for (i = 0U; i < total; i++)
-		pixels[i] = RDP_TAB_BG;
 	kl_mutex_lock(&tab->lock);
+	bg = (tab->target_mode != 0 || tab->has_frame != 0) ? RDP_TAB_LETTERBOX_BG : RDP_TAB_BG;
+	for (i = 0U; i < total; i++)
+		pixels[i] = bg;
 	tab->view_width = width;
 	tab->view_height = height;
 	if (tab->has_frame != 0 && tab->pixels != NULL &&

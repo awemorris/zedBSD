@@ -30,9 +30,10 @@
 /* The connection has a new tab's connection for the run to open (take gives it). */
 #define TERMINAL_READY_TAB	0x20U
 
-/* A connection's input modes: the echo is on, the input is read by the line. */
-#define TERMINAL_MODE_ECHO	0x1U
-#define TERMINAL_MODE_LINES	0x2U
+/* A connection's input modes: the echo is on, the input is read by the line, or DisplaySink target mode is active. */
+#define TERMINAL_MODE_ECHO		0x1U
+#define TERMINAL_MODE_LINES		0x2U
+#define TERMINAL_MODE_TARGET_DISPLAY	0x4U
 
 /* What a picture's connection does besides (below). */
 struct terminal_picture_ops;

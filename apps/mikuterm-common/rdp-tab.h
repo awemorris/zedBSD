@@ -68,6 +68,7 @@ struct rdp_tab {
 	int ended;
 	int refused;
 	int resize_enabled;
+	int target_mode;
 	uint32_t wanted_width;
 	uint32_t wanted_height;
 	int wanted_resize;
@@ -95,6 +96,7 @@ int rdp_tab_create(const char *host, uint32_t width, uint32_t height,
 		   int resize_enabled, struct kl_app *app, uint32_t post_id,
 		   struct rdp_tab **out);
 void rdp_tab_attach_waker(struct rdp_tab *tab, struct kl_socket_waker *waker);
+void rdp_tab_set_target_mode(struct rdp_tab *tab, int target_mode);
 void rdp_tab_release(struct rdp_tab *tab);
 void rdp_tab_set_status(struct rdp_tab *tab, const char *status);
 int rdp_tab_put_frame(struct rdp_tab *tab, const uint32_t *pixels,

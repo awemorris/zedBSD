@@ -210,6 +210,12 @@ unsigned keiland_android_scale(void);
 void keiland_android_screen(unsigned *width, unsigned *height, unsigned *scale);
 
 /*
+ * Returns the full native window size in pixels (not shrunk by IME, bars, or
+ * strip), or 0 if not yet attached.  May be called from any thread.
+ */
+void keiland_android_native_screen(unsigned *width, unsigned *height);
+
+/*
  * Returns the looper of M, for a program that waits for more than the events.
  *
  * Called on M.

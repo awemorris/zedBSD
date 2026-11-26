@@ -85,13 +85,14 @@ kl_window_suppress_keyboard(
 	if (window == NULL)
 		return;
 	window->keyboard_suppressed = (suppress != 0);
+	if (window->keyboard_suppressed)
+		ime_composing = 0;
 	if (window->app == NULL)
 		return;
 	top = android_window_top(window->app);
 	if (top != window)
 		return;
-	if (window->keyboard_suppressed)
-		(void)keiland_java_show_keyboard(0);
+	(void)keiland_java_set_keyboard_suppressed(window->keyboard_suppressed);
 }
 
 /* Takes where the caret is, in the window's pixels, and tells the input method where it is on the screen. */

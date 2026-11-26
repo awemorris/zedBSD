@@ -286,6 +286,10 @@ static int run_text_off;
  */
 static int run_copy_on_select;
 static int run_hide_x11_keyboard;
+static int run_target_display;
+#ifdef __ANDROID__
+static int run_target_saved_fullscreen;
+#endif
 
 /* The ID of the tab that was active before Shell > Settings chose the settings' tab (0: none), which the item chooses again. */
 static uint32_t run_page_from;
@@ -384,6 +388,7 @@ static void run_view_log(const char *how);
 static void run_touch_round(void);
 static void run_text_cursor(void);
 static void run_secret_follow(struct terminal_connection *connection);
+static void run_target_display_apply(int active);
 static unsigned run_font_pixels(const struct run_state *run, unsigned pixels);
 static unsigned run_padding(const struct run_state *run);
 static void run_touch_queue(unsigned kind, const struct terminal_touch_pointer *made);
@@ -1109,6 +1114,40 @@ run_read_shell(
  * password the connection cannot see being asked.
  */
 static void
+run_target_display_apply(
+	int active)
+{
+	int state;
+
+	state = (active != 0);
+	if (state == run_target_display)
+		return;
+	run_target_display = state;
+	if (state) {
+#ifdef __ANDROID__
+		run_target_saved_fullscreen = run_window.fullscreen;
+#endif
+		kl_window_suppress_keyboard(run_window.kui, 1);
+		kl_window_text_input(run_window.kui, 0);
+#ifdef __ANDROID__
+		terminal_window_set_fullscreen(&run_window, 1);
+#endif
+	} else {
+		run_x11_keyboard_follow();
+		if (!run_window.page_active) {
+			if (run_window.picture_active || run_window.view_active)
+				kl_window_text_input(run_window.kui, !run_input_method_off);
+			else
+				kl_window_text_input(run_window.kui, !run_text_off);
+		}
+#ifdef __ANDROID__
+		if (!run_target_saved_fullscreen)
+			terminal_window_set_fullscreen(&run_window, 0);
+#endif
+	}
+}
+
+static void
 run_secret_follow(
 	struct terminal_connection *connection)
 {
@@ -1116,19 +1155,30 @@ run_secret_follow(
 	int secret;
 	int changed;
 	int text_off;
+	int target_display;
 	int error;
 
-	/* The settings' page asks for the text input itself while its tab is active, and a picture's or view's tab has it as the user left it. */
-	if (run_window.page_active)
+	/* The settings' page asks for the text input itself while its tab is active. */
+	if (run_window.page_active) {
+		run_target_display_apply(0);
 		return;
+	}
+
+	mode = 0U;
+	error = ENOTSUP;
+	if (connection != NULL)
+		error = connection->ops->mode(connection, &mode);
+	target_display = (error == 0 && (mode & TERMINAL_MODE_TARGET_DISPLAY) != 0U);
+	run_target_display_apply(target_display);
+	if (target_display)
+		return;
+
+	/* A picture's or view's tab has text input as the user left it. */
 	if (run_window.picture_active || run_window.view_active)
 		return;
 
 	/* The active connection's modes; one that cannot tell them leaves the secret as it was. */
 	secret = run_secret;
-	error = ENOTSUP;
-	if (connection != NULL)
-		error = connection->ops->mode(connection, &mode);
 
 	/* A secret: no echo, on a whole line. */
 	if (error == 0) {
@@ -2058,8 +2108,16 @@ run_tab_switch(
 		if (run_window.focused)
 			run_picture_focus(index, 1);
 	} else if (run_tabs[index].view != NULL) {
+		unsigned mode = 0U;
+		int is_target = (run_tabs[index].connection->ops->mode(run_tabs[index].connection, &mode) == 0 &&
+				 (mode & TERMINAL_MODE_TARGET_DISPLAY) != 0U);
 		run_window.view_active = 1;
-		kl_window_text_input(run_window.kui, !run_input_method_off);
+		if (is_target) {
+			run_target_display_apply(1);
+		} else {
+			run_target_display_apply(0);
+			kl_window_text_input(run_window.kui, !run_input_method_off);
+		}
 		if (run_tabs[index].view->shown != NULL) {
 			run_tabs[index].view->shown(run_tabs[index].connection, &run_window, 1);
 			run_view_shown = run_tabs[index].id;
@@ -2067,8 +2125,10 @@ run_tab_switch(
 		if (run_window.focused)
 			run_view_focus(index, 1);
 	} else if (leaving_picture && !run_tabs[index].settings) {
+		run_target_display_apply(0);
 		kl_window_text_input(run_window.kui, !run_text_off);
 	}
+	run_secret_follow(run->connection);
 
 	/* The keys not yet sent belonged to the tab before; its grid is drawn, without the other tab's search. */
 	run_window.input_length = 0;
@@ -2121,6 +2181,7 @@ run_tab_close(
 
 	/* The last tab: the terminal ends (no connection is active). */
 	if (run_tab_count == 0U) {
+		run_target_display_apply(0);
 		run_screen = NULL;
 		run->connection = NULL;
 		return 1;
@@ -3439,10 +3500,11 @@ run_x11_keyboard_follow(void)
 {
 	int suppress;
 
-	suppress = (run_hide_x11_keyboard &&
-		    run_tab_count > 0U &&
-		    run_tabs[run_active].picture != NULL &&
-		    run_tabs[run_active].picture->is_x11);
+	suppress = (run_target_display ||
+		    (run_hide_x11_keyboard &&
+		     run_tab_count > 0U &&
+		     run_tabs[run_active].picture != NULL &&
+		     run_tabs[run_active].picture->is_x11));
 	kl_window_suppress_keyboard(run_window.kui, suppress);
 }
 

@@ -13,6 +13,10 @@
 #include "netdisp-tab.h"
 #include "netdisp-proto.h"
 
+#ifdef __ANDROID__
+#include "apps/libkeiland/android/keiland-android.h"
+#endif
+
 #include <compat/crypto/crypto.h>
 #include <compat/crypto/rand.h>
 
@@ -82,10 +86,20 @@ nd_wait_cancel_after_error(
 	session_say_line(session, err_msg);
 	session_say_line(session, "Press Esc or Ctrl+C to return.");
 	for (;;) {
-		if (nd_check_cancel(session, &closing))
+		if (nd_check_cancel(session, &closing)) {
+			kl_mutex_lock(&session->lock);
+			session->target_mode = 0;
+			kl_mutex_unlock(&session->lock);
+			session_post(session);
 			return ECANCELED;
-		if (closing)
+		}
+		if (closing) {
+			kl_mutex_lock(&session->lock);
+			session->target_mode = 0;
+			kl_mutex_unlock(&session->lock);
+			session_post(session);
 			return EPIPE;
+		}
 		wait.socket = NULL;
 		wait.waker = session->waker;
 		wait.events = KL_SOCKET_READABLE;
@@ -306,6 +320,11 @@ netdisp_wait_and_receive(
 	if (session == NULL || out_target == NULL)
 		return EINVAL;
 
+	kl_mutex_lock(&session->lock);
+	session->target_mode = 1;
+	kl_mutex_unlock(&session->lock);
+	session_post(session);
+
 #ifdef _WIN32
 	{
 		WSADATA wsa;
@@ -371,13 +390,18 @@ netdisp_wait_and_receive(
 	memcpy(adv.pk, pk, NETDISP_KEY_LEN);
 	adv.reply_port = reply_port;
 	{
-		unsigned sw;
-		unsigned sh;
+		unsigned sw = 0U;
+		unsigned sh = 0U;
 
-		kl_mutex_lock(&session->lock);
-		sw = session->width;
-		sh = session->height;
-		kl_mutex_unlock(&session->lock);
+#ifdef __ANDROID__
+		keiland_android_native_screen(&sw, &sh);
+#endif
+		if (sw == 0U || sh == 0U) {
+			kl_mutex_lock(&session->lock);
+			sw = session->width;
+			sh = session->height;
+			kl_mutex_unlock(&session->lock);
+		}
 
 		if (sw > 0U) {
 			if (sw < 200U)
@@ -488,5 +512,11 @@ netdisp_wait_and_receive(
 
 	nd_close_sock(sock);
 	OPENSSL_cleanse(sk, sizeof(sk));
+	if (rc != 0) {
+		kl_mutex_lock(&session->lock);
+		session->target_mode = 0;
+		kl_mutex_unlock(&session->lock);
+		session_post(session);
+	}
 	return rc;
 }
