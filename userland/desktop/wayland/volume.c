@@ -1111,16 +1111,16 @@ volume_restore_route(
 	out_id = 0U;
 	in_id = 0U;
 	out_entry = kwl_settings_store_find(server->settings, VOLUME_KEY_OUTPUT);
-	if (out_entry != NULL && out_entry->chosen && out_entry->value[0] != '\0') {
+	if (out_entry != NULL && out_entry->start_chosen && out_entry->start[0] != '\0') {
 		(void)snprintf(volume_view.kept_output, sizeof(volume_view.kept_output), "%.*s",
-		    (int)(sizeof(volume_view.kept_output) - 1U), out_entry->value);
-		out_id = volume_endpoint_id(out_entry->value, KL_BACKEND_AUDIO_KIND_OUTPUT);
+		    (int)(sizeof(volume_view.kept_output) - 1U), out_entry->start);
+		out_id = volume_endpoint_id(out_entry->start, KL_BACKEND_AUDIO_KIND_OUTPUT);
 	}
 	in_entry = kwl_settings_store_find(server->settings, VOLUME_KEY_INPUT);
-	if (in_entry != NULL && in_entry->chosen && in_entry->value[0] != '\0') {
+	if (in_entry != NULL && in_entry->start_chosen && in_entry->start[0] != '\0') {
 		(void)snprintf(volume_view.kept_input, sizeof(volume_view.kept_input), "%.*s",
-		    (int)(sizeof(volume_view.kept_input) - 1U), in_entry->value);
-		in_id = volume_endpoint_id(in_entry->value, KL_BACKEND_AUDIO_KIND_INPUT);
+		    (int)(sizeof(volume_view.kept_input) - 1U), in_entry->start);
+		in_id = volume_endpoint_id(in_entry->start, KL_BACKEND_AUDIO_KIND_INPUT);
 	}
 	if (out_id != 0U || in_id != 0U) {
 		if (out_id == 0U)

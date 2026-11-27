@@ -709,6 +709,12 @@ store_clean_value(
 		return 0;
 	}
 
+	/* Text is kept as it is. */
+	if (key->type == KL_SETTINGS_TYPE_TEXT) {
+		(void)snprintf(value, size, "%s", raw);
+		return 0;
+	}
+
 	/* A number within its range. */
 	error = kl_settings_key_number(key, raw, &number);
 	if (error != 0)

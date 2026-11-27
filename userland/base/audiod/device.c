@@ -160,7 +160,9 @@ audiod_device_switch_output(
 	/* Preserves the active volume before closing the old mixer. */
 	audiod_device_get_volume(device, &left, &right, &muted);
 
-	/* If capture was sharing the old dsp fd, reopen it on its own fd first. */
+	/* If capture was sharing the old dsp fd, reopen it on its own fd first
+	 * (unless we are switching output TO capture_unit, in which case close
+	 * capture_dsp so open_output_unit can open the device without EBUSY). */
 	old_capture_shared = (device->capture_dsp >= 0 && device->capture_dsp == device->dsp);
 	if (old_capture_shared && device->capture_unit >= 0) {
 		(void)snprintf(path, sizeof(path), "/dev/dsp%d", device->capture_unit);
@@ -173,6 +175,10 @@ audiod_device_switch_output(
 	}
 
 	close_output_unit(device);
+	if (device->capture_unit == (int)unit && device->capture_dsp >= 0) {
+		(void)close(device->capture_dsp);
+		device->capture_dsp = -1;
+	}
 	device->format = AUDIOD_FORMAT_S16_LE;
 	device->channels = 2;
 	device->rate = 48000;
