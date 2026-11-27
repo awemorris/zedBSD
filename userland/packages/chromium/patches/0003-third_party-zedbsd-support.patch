@@ -132,6 +132,17 @@
      sources += [
        "testing/fuzzed_data_provider.cc",
        "testing/fuzzed_data_provider.h",
+--- a/third_party/blink/renderer/platform/fonts/font_cache.cc
++++ b/third_party/blink/renderer/platform/fonts/font_cache.cc
+@@ -142,7 +142,7 @@
+     const FontDescription& font_description) {
+   const AtomicString& family = FontCache::SystemFontFamily();
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || \
+-    BUILDFLAG(IS_IOS)
++    BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ZEDBSD)
+   if (family.empty() || family == font_family_names::kSystemUi)
+     return nullptr;
+ #else
 --- a/third_party/blink/renderer/platform/fonts/font_platform_data.cc
 +++ b/third_party/blink/renderer/platform/fonts/font_platform_data.cc
 @@ -226,7 +226,8 @@
@@ -206,6 +217,173 @@
  
  namespace base {
  
+--- a/third_party/crashpad/crashpad/client/BUILD.gn
++++ b/third_party/crashpad/crashpad/client/BUILD.gn
+@@ -67,7 +67,8 @@
+     ]
+   }
+ 
+-  if (crashpad_is_linux || crashpad_is_android || crashpad_is_fuchsia) {
++  if (crashpad_is_linux || crashpad_is_android || crashpad_is_fuchsia ||
++      is_zedbsd) {
+     sources += [
+       "client_argv_handling.cc",
+       "client_argv_handling.h",
+@@ -148,7 +149,8 @@
+   if (crashpad_is_win) {
+     sources += [ "crash_report_database_win.cc" ]
+   }
+-  if (crashpad_is_linux || crashpad_is_android || crashpad_is_fuchsia) {
++  if (crashpad_is_linux || crashpad_is_android || crashpad_is_fuchsia ||
++      is_zedbsd) {
+     sources += [
+       "crash_report_database_generic.cc",
+       "crashpad_info_note.S",
+--- a/third_party/crashpad/crashpad/minidump/minidump_misc_info_writer.cc
++++ b/third_party/crashpad/crashpad/minidump/minidump_misc_info_writer.cc
+@@ -155,6 +155,8 @@
+   static constexpr char kOS[] = "android";
+ #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+   static constexpr char kOS[] = "linux";
++#elif BUILDFLAG(IS_ZEDBSD)
++  static constexpr char kOS[] = "zedbsd";
+ #elif BUILDFLAG(IS_WIN)
+   static constexpr char kOS[] = "win";
+ #elif BUILDFLAG(IS_FUCHSIA)
+--- a/third_party/crashpad/crashpad/util/misc/address_types.h
++++ b/third_party/crashpad/crashpad/util/misc/address_types.h
+@@ -25,7 +25,8 @@
+ #include <mach/mach_types.h>
+ #elif BUILDFLAG(IS_WIN)
+ #include "util/win/address_types.h"
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "util/linux/address_types.h"
+ #elif BUILDFLAG(IS_FUCHSIA)
+ #include <zircon/types.h>
+@@ -55,7 +56,8 @@
+ using VMAddress = WinVMAddress;
+ using VMSize = WinVMSize;
+ 
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
++    BUILDFLAG(IS_ZEDBSD)
+ 
+ using VMAddress = LinuxVMAddress;
+ using VMSize = LinuxVMSize;
+--- a/third_party/crashpad/crashpad/util/misc/capture_context.h
++++ b/third_party/crashpad/crashpad/util/misc/capture_context.h
+@@ -21,6 +21,8 @@
+ #include <mach/mach.h>
+ #elif BUILDFLAG(IS_WIN)
+ #include <windows.h>
++#elif BUILDFLAG(IS_ZEDBSD)
++#include <signal.h>
+ #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+ #include <ucontext.h>
+ #endif  // BUILDFLAG(IS_APPLE)
+@@ -35,7 +37,8 @@
+ #endif
+ #elif BUILDFLAG(IS_WIN)
+ using NativeCPUContext = CONTEXT;
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
++    BUILDFLAG(IS_ZEDBSD)
+ using NativeCPUContext = ucontext_t;
+ #endif  // BUILDFLAG(IS_APPLE)
+ 
+--- a/third_party/crashpad/crashpad/util/misc/metrics.cc
++++ b/third_party/crashpad/crashpad/util/misc/metrics.cc
+@@ -27,6 +27,8 @@
+ #define METRICS_OS_NAME "Android"
+ #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+ #define METRICS_OS_NAME "Linux"
++#elif BUILDFLAG(IS_ZEDBSD)
++#define METRICS_OS_NAME "ZedBSD"
+ #elif BUILDFLAG(IS_FUCHSIA)
+ #define METRICS_OS_NAME "Fuchsia"
+ #endif
+--- a/third_party/crashpad/crashpad/util/misc/uuid.cc
++++ b/third_party/crashpad/crashpad/util/misc/uuid.cc
+@@ -110,7 +110,7 @@
+   InitializeFromBytes(uuid);
+   return true;
+ #elif BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+   // Linux, Android, and Fuchsia do not provide a UUID generator in a
+   // widely-available system library. On Linux and Android, uuid_generate()
+   // from libuuid is not available everywhere.
+--- a/third_party/crashpad/crashpad/util/posix/close_multiple.cc
++++ b/third_party/crashpad/crashpad/util/posix/close_multiple.cc
+@@ -75,7 +75,7 @@
+ // no attempt needs to be made to close file descriptors that are not open.
+ bool CloseMultipleNowOrOnExecUsingFDDir(int min_fd,
+                                         const std::set<int>& preserve_fds) {
+-#if BUILDFLAG(IS_APPLE)
++#if BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_ZEDBSD)
+   static constexpr char kFDDir[] = "/dev/fd";
+ #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+   static constexpr char kFDDir[] = "/proc/self/fd";
+@@ -145,7 +145,7 @@
+ #endif
+ 
+ #if !(BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-      BUILDFLAG(IS_ANDROID)) ||                        \
++      BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)) || \
+     defined(OPEN_MAX)
+   // Linux does not provide OPEN_MAX. See
+   // https://git.kernel.org/cgit/linux/kernel/git/stable/linux-stable.git/commit/include/linux/limits.h?id=77293034696e3e0b6c8b8fc1f96be091104b3d2b.
+--- a/third_party/crashpad/crashpad/util/posix/drop_privileges.cc
++++ b/third_party/crashpad/crashpad/util/posix/drop_privileges.cc
+@@ -73,7 +73,8 @@
+       CHECK_EQ(setegid(egid), -1);
+     }
+   }
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
++    BUILDFLAG(IS_ZEDBSD)
+   PCHECK(setresgid(gid, gid, gid) == 0) << "setresgid";
+   PCHECK(setresuid(uid, uid, uid) == 0) << "setresuid";
+ 
+--- a/third_party/crashpad/crashpad/util/posix/signals.cc
++++ b/third_party/crashpad/crashpad/util/posix/signals.cc
+@@ -251,8 +251,12 @@
+          // remains. See 10.12.3 xnu-3789.41.3/bsd/kern/kern_sig.c
+          // psignal_internal().
+          (code > 0 &&
++#if defined(SI_ASYNCIO)
+           code != SI_ASYNCIO &&
++#endif
++#if defined(SI_MESGQ)
+           code != SI_MESGQ &&
++#endif
+           code != SI_QUEUE &&
+           code != SI_TIMER &&
+           code != SI_USER &&
+--- a/third_party/crashpad/crashpad/util/posix/symbolic_constants_posix.cc
++++ b/third_party/crashpad/crashpad/util/posix/symbolic_constants_posix.cc
+@@ -68,7 +68,8 @@
+     "INFO",
+     "USR1",
+     "USR2",
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #if defined(ARCH_CPU_MIPS_FAMILY)
+     "HUP",
+     "INT",
+@@ -139,7 +140,8 @@
+ #endif  // defined(ARCH_CPU_MIPS_FAMILY)
+ #endif
+ };
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // NSIG is 64 to account for real-time signals.
+ static_assert(std::size(kSignalNames) == 32, "kSignalNames length");
+ #else
 --- a/third_party/dawn/src/dawn/common/BUILD.gn
 +++ b/third_party/dawn/src/dawn/common/BUILD.gn
 @@ -153,7 +153,7 @@
@@ -296,6 +474,64 @@
  #define RENDERDOC_CC
  #elif defined(__APPLE__)
  #define RENDERDOC_CC
+--- a/third_party/federated_compute/src/fcp/client/opstats/pds_backed_opstats_db.cc
++++ b/third_party/federated_compute/src/fcp/client/opstats/pds_backed_opstats_db.cc
+@@ -16,6 +16,7 @@
+ #include "fcp/client/opstats/pds_backed_opstats_db.h"
+ 
+ #include <fcntl.h>
++#include <sys/stat.h>
+ #include <sys/file.h>
+ 
+ #include <algorithm>
+--- a/third_party/federated_compute/third_party/protodatastore-cpp/src/protostore/file-storage.cc
++++ b/third_party/federated_compute/third_party/protodatastore-cpp/src/protostore/file-storage.cc
+@@ -71,14 +71,16 @@
+     case EBUSY:       // Device or resource busy
+     case ECHILD:      // No child processes
+     case EISCONN:     // Socket is connected
+-#if !defined(_WIN32)
++#if !defined(_WIN32) && defined(ENOTBLK)
+     case ENOTBLK:     // Block device required
+ #endif
+     case ENOTCONN:    // The socket is not connected
+     case EPIPE:       // Broken pipe
+ #if !defined(_WIN32)
++#if defined(ESHUTDOWN)
+     case ESHUTDOWN:   // Cannot send after transport endpoint shutdown
+ #endif
++#endif
+     case ETXTBSY:     // Text file busy
+       return absl::FailedPreconditionError(message);
+       break;
+@@ -93,7 +95,7 @@
+     case ENODATA:  // No message is available on the STREAM read queue
+     case ENOMEM:   // Not enough space
+     case ENOSR:    // No STREAM resources
+-#if !defined(_WIN32)
++#if !defined(_WIN32) && defined(EUSERS)
+     case EUSERS:   // Too many users
+ #endif
+       return absl::ResourceExhaustedError(message);
+@@ -121,7 +123,7 @@
+     case ECONNABORTED:  // Connection aborted
+     case ECONNRESET:    // Connection reset
+     case EINTR:         // Interrupted function call
+-#if !defined(_WIN32)
++#if !defined(_WIN32) && defined(EHOSTDOWN)
+     case EHOSTDOWN:     // Host is down
+ #endif
+     case EHOSTUNREACH:  // Host is unreachable
+@@ -130,7 +132,8 @@
+     case ENETUNREACH:   // Network unreachable
+     case ENOLCK:        // No locks available
+     case ENOLINK:       // Link has been severed
+-#if !(defined(__APPLE__) || defined(__FreeBSD__) || defined(_WIN32))
++#if !(defined(__APPLE__) || defined(__FreeBSD__) || defined(_WIN32) || \
++      defined(__ZEDBSD__))
+     case ENONET:  // Machine is not on the network
+ #endif
+       return absl::UnavailableError(message);
 --- a/third_party/ffmpeg/BUILD.gn
 +++ b/third_party/ffmpeg/BUILD.gn
 @@ -239,6 +239,7 @@
@@ -6995,6 +7231,29 @@
 +
 +/* Define if profiling support is enabled */
 +#define WITH_PROFILER /**/
+--- a/third_party/pdfium/core/fxge/BUILD.gn
++++ b/third_party/pdfium/core/fxge/BUILD.gn
+@@ -132,7 +132,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "linux/fx_linux_impl.cpp" ]
+   }
+ 
+--- a/third_party/pdfium/core/fxge/linux/fx_linux_impl.cpp
++++ b/third_party/pdfium/core/fxge/linux/fx_linux_impl.cpp
+@@ -18,7 +18,8 @@
+ #include "core/fxge/fx_font.h"
+ #include "core/fxge/systemfontinfo_iface.h"
+ 
+-#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS) && !defined(OS_ASMJS)
++#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS) && \
++    !BUILDFLAG(IS_ZEDBSD) && !defined(OS_ASMJS)
+ #error "Included on the wrong platform"
+ #endif
+ 
 --- a/third_party/perfetto/include/perfetto/base/build_config.h
 +++ b/third_party/perfetto/include/perfetto/base/build_config.h
 @@ -148,6 +148,20 @@

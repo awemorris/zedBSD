@@ -33,6 +33,24 @@
  platform_list_cc_file = "$target_gen_dir/platform_list.cc"
  platform_list_h_file = "$target_gen_dir/platform_list.h"
  platform_list_txt_file = "$target_gen_dir/platform_list.txt"
+--- a/ui/ozone/platform/headless/headless_surface_factory.cc
++++ b/ui/ozone/platform/headless/headless_surface_factory.cc
+@@ -231,9 +231,15 @@
+ 
+ std::vector<gl::GLImplementationParts>
+ HeadlessSurfaceFactory::GetAllowedGLImplementations() {
++#if BUILDFLAG(IS_ZEDBSD)
++  return std::vector<gl::GLImplementationParts>{
++      gl::GLImplementationParts(gl::kGLImplementationDisabled),
++  };
++#else
+   return std::vector<gl::GLImplementationParts>{
+       gl::GLImplementationParts(gl::kGLImplementationEGLANGLE),
+   };
++#endif
+ }
+ 
+ GLOzone* HeadlessSurfaceFactory::GetGLOzone(
 --- /dev/null
 +++ b/ui/ozone/platform/keiland/BUILD.gn
 @@ -0,0 +1,65 @@
@@ -675,7 +693,7 @@
 +#endif  // UI_OZONE_PLATFORM_KEILAND_KEILAND_SURFACE_FACTORY_H_
 --- /dev/null
 +++ b/ui/ozone/platform/keiland/keiland_window.cc
-@@ -0,0 +1,525 @@
+@@ -0,0 +1,530 @@
 +// Copyright 2026 The Chromium Authors and zedBSD Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -787,8 +805,13 @@
 +    const PlatformWindowInitProperties& properties) {
 +  const bool presents_frames = UsesSoftwareFrames();
 +
++  const char* env_display = getenv("WAYLAND_DISPLAY");
++  std::string display_name =
++      (env_display && env_display[0]) ? env_display : "/tmp/wayland-0";
++
 +  kl_window_options options;
 +  memset(&options, 0, sizeof(options));
++  options.display = display_name.c_str();
 +  options.title = "Chromium";
 +  options.application = kApplicationId;
 +  options.width = properties.bounds.width() > 0
@@ -802,7 +825,7 @@
 +
 +  kl_window* window = kl_window_open(&options);
 +  if (!window) {
-+    PLOG(ERROR) << "kl_window_open";
++    LOG(ERROR) << "kl_window_open failed (errno=" << errno << ")";
 +    return nullptr;
 +  }
 +

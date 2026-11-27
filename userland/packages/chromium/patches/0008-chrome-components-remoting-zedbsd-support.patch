@@ -1,3 +1,186 @@
+--- a/chrome/BUILD.gn
++++ b/chrome/BUILD.gn
+@@ -292,7 +292,7 @@
+       sources += [ "app/chrome_exe_main_aura.cc" ]
+     }
+ 
+-    if (is_linux || is_chromeos) {
++    if (is_linux || is_chromeos || is_zedbsd) {
+       sources += [
+         "app/chrome_dll_resource.h",
+         "app/chrome_main.cc",
+@@ -322,14 +322,13 @@
+         "//content/public/app",
+       ]
+ 
+-      public_deps = [
++      public_deps = [ "//chrome/common:buildflags" ]
++      if (!is_zedbsd) {
+         # Needs to be public for installer to consume files from
+         # linux_cros_extra_data.
+-        ":linux_cros_extra_data",
+-        "//chrome/common:buildflags",
+-      ]
+-
+-      data_deps += [ "//components/crash/core/app:chrome_crashpad_handler" ]
++        public_deps += [ ":linux_cros_extra_data" ]
++        data_deps += [ "//components/crash/core/app:chrome_crashpad_handler" ]
++      }
+ 
+       ldflags = []
+ 
+--- a/chrome/app/chrome_main_delegate.cc
++++ b/chrome/app/chrome_main_delegate.cc
+@@ -1743,7 +1743,7 @@
+     } else {
+       base::android::InitJavaExceptionReporterForChildProcess();
+     }
+-#else
++#elif !BUILDFLAG(IS_ZEDBSD)
+     crash_reporter::InitializeCrashpad(process_type.empty(), process_type);
+     crash_reporter::SetFirstChanceExceptionHandler(
+         v8::TryHandleWebAssemblyTrapPosix);
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -682,7 +682,7 @@
+   }
+ }
+ 
+-if (is_linux) {
++if (is_linux || is_zedbsd) {
+   source_set("shell_integration_linux") {
+     public = [ "shell_integration_linux.h" ]
+     deps = [
+@@ -1933,6 +1933,16 @@
+       ]
+     }
+   }
++  if (is_zedbsd) {
++    sources += [
++      "fullscreen_linux.cc",
++      "icon_loader_auralinux.cc",
++      "memory_details_linux.cc",
++      "platform_util.cc",
++      "shell_integration_linux.cc",
++    ]
++    deps += [ "//components/os_crypt/async/browser:posix_key_provider" ]
++  }
+ 
+   if (enable_offline_pages) {
+     # Used to build test harness locally.The harness is used manually to
+@@ -3347,7 +3357,7 @@
+       "//chrome/browser/ui/webui/signin:inline_login_impl",
+     ]
+   }
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     public_deps += [
+       "//chrome/browser/ui/webui/app_home:mojo_bindings",
+       "//chrome/browser/ui/webui/on_device_translation_internals:mojo_bindings",
+@@ -3398,13 +3408,17 @@
+       "//chrome/browser/ui/webui/intro",
+       "//chrome/browser/ui/webui/on_device_translation_internals",
+       "//chrome/browser/ui/webui/signin:profile_impl",
+-      "//chrome/browser/ui/webui/updater",
+-      "//chrome/browser/ui/webui/updater:mojo_bindings",
+       "//chrome/browser/updates:impl",
+       "//chrome/browser/updates:update_metrics",
+       "//ui/views/window/vector_icons",
+     ]
+   }
++  if (is_win || is_mac || is_linux) {
++    deps += [
++      "//chrome/browser/ui/webui/updater",
++      "//chrome/browser/ui/webui/updater:mojo_bindings",
++    ]
++  }
+   if (is_chromeos) {
+     assert(enable_extensions)
+     assert(enable_supervised_users)
+@@ -3865,7 +3879,7 @@
+       "//third_party/wtl",
+     ]
+   }
+-  if (is_linux || is_mac || is_chromeos) {
++  if (is_linux || is_mac || is_chromeos || is_zedbsd) {
+     deps += [
+       ":process_singleton_posix",
+       "//ui/views",
+@@ -3885,7 +3899,7 @@
+     public_deps +=
+         [ "//chrome/browser/enterprise/connectors/analysis:sdk_manager" ]
+   }
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     deps += [
+       ":shell_integration_linux",
+       "//chrome/app/theme:chrome_unscaled_resources_grit",
+@@ -3925,7 +3939,8 @@
+       "//chrome/browser/webshare:impl",
+     ]
+   }
+-  if (is_win || is_mac || is_linux || is_chromeos || is_desktop_android) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_desktop_android ||
++      is_zedbsd) {
+     public_deps += [
+       "//chrome/browser/ui/webui/ai_overlay_dialog:mojo_bindings",
+       "//chrome/browser/ui/webui/discards:mojo_bindings",
+@@ -4215,12 +4230,12 @@
+     deps += [ "//third_party/fontconfig" ]
+   }
+   if (is_win || is_linux || is_chromeos) {
+-    deps += [
+-      "//chrome/browser/ui/views:bluetooth_dialogs",
+-      "//chrome/browser/ui/views:create_application_shortcut_view",
+-    ]
++    deps += [ "//chrome/browser/ui/views:bluetooth_dialogs" ]
++  }
++  if (is_win || is_linux || is_chromeos || is_zedbsd) {
++    deps += [ "//chrome/browser/ui/views:create_application_shortcut_view" ]
+   }
+-  if (is_win || is_linux) {
++  if (is_win || is_linux || is_zedbsd) {
+     deps += [
+       "//chrome/browser/ui/views:native_widget_factory",
+       "//chrome/browser/ui/views/frame:browser_frame_view_factory_views",
+--- a/chrome/browser/about_flags.cc
++++ b/chrome/browser/about_flags.cc
+@@ -370,7 +370,7 @@
+         // BUILDFLAG(IS_WIN)
+ 
+ #if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || \
+-    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID)
++    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/glic/suggestions/contextual_cueing_features.h"  // nogncheck
+ #include "chrome/browser/ui/webui/new_tab_page/composebox/variations/composebox_fieldtrial.h"  // nogncheck
+ #endif  // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) ||
+@@ -1428,7 +1428,7 @@
+          kContextManagementEnableSingleTabMenuItemParams, nullptr}};
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
+-    BUILDFLAG(IS_WIN)
++    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ZEDBSD)
+ 
+ // A limited number of combinations of the rich autocompletion params.
+ const FeatureEntry::FeatureParam kOmniboxRichAutocompletionAggressive1[] = {
+@@ -1657,7 +1657,7 @@
+         // BUILDFLAG(IS_WIN)
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
+-    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID)
++    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ 
+ const FeatureEntry::FeatureParam kNtpNextAllowDisablement[] = {
+     {"NtpNextDisablementContextMenuParam", "true"},
+@@ -3612,7 +3612,7 @@
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ const FeatureEntry::FeatureParam kContextualCueingEnabledNoEngagementCap[] = {
+     {"BackoffTime", "0h"},
+     {"BackoffMultiplierBase", "0.0"},
 --- a/chrome/browser/ai/BUILD.gn
 +++ b/chrome/browser/ai/BUILD.gn
 @@ -7,7 +7,7 @@
@@ -9,6 +192,17 @@
  
  source_set("ai") {
    sources = [
+--- a/chrome/browser/browser_switcher/BUILD.gn
++++ b/chrome/browser/browser_switcher/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//testing/libfuzzer/fuzzer_test.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || is_linux || is_zedbsd)
+ 
+ source_set("browser_switcher") {
+   public = []
 --- a/chrome/browser/chooser_controller/BUILD.gn
 +++ b/chrome/browser/chooser_controller/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -20,6 +214,57 @@
  
  source_set("chooser_controller") {
    sources = [
+--- a/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
++++ b/chrome/browser/chrome_browser_interface_binders_webui_parts_desktop.cc
+@@ -145,7 +145,8 @@
+ #include "ui/webui/resources/js/batch_upload_promo/batch_upload_promo.mojom.h"
+ #include "ui/webui/resources/js/browser_command/browser_command.mojom.h"
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/ui/webui/app_home/app_home.mojom.h"
+ #include "chrome/browser/ui/webui/app_home/app_home_ui.h"
+ #include "chrome/browser/ui/webui/app_settings/web_app_settings_ui.h"
+@@ -162,8 +163,10 @@
+ #include "chrome/browser/ui/webui/signin/history_sync_optin/history_sync_optin_ui.h"
+ #include "chrome/browser/ui/webui/signin/profile_customization_ui.h"
+ #include "chrome/browser/ui/webui/signin/profile_picker_ui.h"
++#if !BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/ui/webui/updater/updater_ui.h"
+ #include "chrome/browser/ui/webui/updater/updater_ui.mojom.h"
++#endif
+ #include "chrome/browser/ui/webui/whats_new/whats_new_ui.h"
+ #endif
+ 
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -369,6 +369,7 @@
+ #include "content/public/browser/child_process_security_policy.h"
+ #include "content/public/browser/client_certificate_delegate.h"
+ #include "content/public/browser/digital_identity_provider.h"
++#include "components/webapps/isolated_web_apps/scheme.h"
+ #include "content/public/browser/file_url_loader.h"
+ #include "content/public/browser/global_routing_id.h"
+ #include "content/public/browser/internal_webui_config.h"
+@@ -932,7 +933,7 @@
+ }
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ bool IsIsolatedWebAppUrl(const GURL& url) {
+   return url.SchemeIs(webapps::kIsolatedAppScheme);
+ }
+@@ -3105,7 +3106,7 @@
+                                     client_info->client_id);
+   }
+ #elif BUILDFLAG(IS_POSIX)
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+   pid_t pid;
+   if (crash_reporter::GetHandlerSocket(nullptr, &pid)) {
+     command_line->AppendSwitchASCII(
 --- a/chrome/browser/commerce/BUILD.gn
 +++ b/chrome/browser/commerce/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -53,6 +298,17 @@
  
  source_set("content_settings") {
    sources = [
+--- a/chrome/browser/download/BUILD.gn
++++ b/chrome/browser/download/BUILD.gn
+@@ -366,7 +366,7 @@
+     deps += [ "//chrome/browser/ui/cocoa" ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     sources += [ "download_status_updater_linux.cc" ]
+   }
+ 
 --- a/chrome/browser/download/bubble/BUILD.gn
 +++ b/chrome/browser/download/bubble/BUILD.gn
 @@ -3,7 +3,7 @@
@@ -64,6 +320,155 @@
  
  source_set("bubble") {
    public = [
+--- a/chrome/browser/download/download_commands.cc
++++ b/chrome/browser/download/download_commands.cc
+@@ -27,7 +27,7 @@
+ #include "ui/base/clipboard/scoped_clipboard_writer.h"
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-    BUILDFLAG(IS_MAC)
++    BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/ui/scoped_tabbed_browser_displayer.h"
+ #endif
+ 
+@@ -172,7 +172,7 @@
+ }
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ 
+ BrowserWindowInterface* DownloadCommands::GetBrowser() const {
+   if (!model_)
+--- a/chrome/browser/download/download_commands.h
++++ b/chrome/browser/download/download_commands.h
+@@ -69,7 +69,7 @@
+   void ExecuteCommand(Command command);
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-    BUILDFLAG(IS_MAC)
++    BUILDFLAG(IS_MAC) || BUILDFLAG(IS_ZEDBSD)
+   bool IsDownloadPdf() const;
+   bool CanOpenPdfInSystemViewer() const;
+   BrowserWindowInterface* GetBrowser() const;
+--- a/chrome/browser/enterprise/BUILD.gn
++++ b/chrome/browser/enterprise/BUILD.gn
+@@ -282,7 +282,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if (is_linux || is_win || is_mac || is_zedbsd) {
+     public += [
+       "connectors/device_trust/browser/signing_key_policy_observer.h",
+       "connectors/device_trust/signals/decorators/browser/browser_signals_decorator.h",
+@@ -379,7 +379,7 @@
+ static_library("browser_launch_reporting") {
+   sources = []
+   deps = []
+-  if (is_linux || is_win || is_mac) {
++  if (is_linux || is_win || is_mac || is_zedbsd) {
+     sources += [
+       "reporting/browser_launch/browser_launch_data_collector_desktop.cc",
+       "reporting/browser_launch/browser_launch_data_collector_desktop.h",
+@@ -762,7 +762,7 @@
+         [ "//chrome/browser/enterprise/connectors/analysis:sdk_manager" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos || is_android) {
++  if (is_linux || is_win || is_mac || is_chromeos || is_android || is_zedbsd) {
+     sources += [
+       "reporting/realtime_event_upload_helper.cc",
+       "reporting/saas_usage/navigation_handle_data_delegate.cc",
+@@ -777,7 +777,7 @@
+     deps += [ "//components/enterprise/device_trust/core:device_trust_service" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac) {
++  if (is_linux || is_win || is_mac || is_zedbsd) {
+     sources += [
+       "connectors/device_trust/browser/signing_key_policy_observer.cc",
+       "connectors/device_trust/signals/decorators/browser/browser_signals_decorator.cc",
+--- a/chrome/browser/enterprise/connectors/reporting/BUILD.gn
++++ b/chrome/browser/enterprise/connectors/reporting/BUILD.gn
+@@ -38,6 +38,7 @@
+     "//components/keyed_service/content",
+     "//components/safe_browsing/core/common/proto:csd_proto",
+     "//content/public/browser",
++    "//third_party/crashpad/crashpad/client",
+   ]
+ 
+   deps = [
+@@ -45,7 +46,6 @@
+     "//components/device_signals/core/browser",
+     "//components/enterprise",
+     "//components/policy/core/common",
+-    "//third_party/crashpad/crashpad/client",
+   ]
+ 
+   if (enterprise_cloud_content_analysis && enable_extensions_core) {
+--- a/chrome/browser/enterprise/signin/enterprise_signin_service.h
++++ b/chrome/browser/enterprise/signin/enterprise_signin_service.h
+@@ -9,7 +9,8 @@
+ 
+ #include "build/build_config.h"
+ 
+-#if !(BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN))
++#if !(BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++      BUILDFLAG(IS_ZEDBSD))
+ #error EnterpriseSigninService should only be built on desktop platforms.
+ #endif  // !(BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN))
+ 
+--- a/chrome/browser/extensions/api/image_writer_private/removable_storage_provider.cc
++++ b/chrome/browser/extensions/api/image_writer_private/removable_storage_provider.cc
+@@ -46,4 +46,12 @@
+   g_test_device_list.Get() = nullptr;
+ }
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++// static
++scoped_refptr<StorageDeviceList>
++RemovableStorageProvider::PopulateDeviceList() {
++  return base::MakeRefCounted<StorageDeviceList>();
++}
++#endif
++
+ }  // namespace extensions
+--- a/chrome/browser/extensions/api/settings_private/prefs_util.cc
++++ b/chrome/browser/extensions/api/settings_private/prefs_util.cc
+@@ -300,7 +300,7 @@
+   (*s_allowlist)[tab_groups::prefs::kAutoPinNewTabGroups] =
+       settings_api::PrefType::kBoolean;
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   (*s_allowlist)[::prefs::kUseCustomChromeFrame] =
+       settings_api::PrefType::kBoolean;
+ #endif
+--- a/chrome/browser/extensions/chrome_app_deprecation.cc
++++ b/chrome/browser/extensions/chrome_app_deprecation.cc
+@@ -16,7 +16,8 @@
+ bool g_enable_chrome_apps_for_testing = false;
+ }  // namespace testing
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ bool IsExtensionUnsupportedDeprecatedApp(content::BrowserContext* context,
+                                          const std::string& extension_id) {
+   if (testing::g_enable_chrome_apps_for_testing) {
+--- a/chrome/browser/extensions/chrome_app_deprecation.h
++++ b/chrome/browser/extensions/chrome_app_deprecation.h
+@@ -24,7 +24,8 @@
+ extern bool g_enable_chrome_apps_for_testing;
+ }  // namespace testing
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Returns whether the extension with `extension_id` is an unsupported
+ // deprecated app (hosted app, legacy packaged app, or platform app) on
+ // Windows/Mac/Linux.
 --- a/chrome/browser/feedback/BUILD.gn
 +++ b/chrome/browser/feedback/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -86,6 +491,254 @@
  
  source_set("file_system_access") {
    sources = [
+--- a/chrome/browser/first_run/BUILD.gn
++++ b/chrome/browser/first_run/BUILD.gn
+@@ -28,7 +28,7 @@
+       public += [ "upgrade_util.h" ]
+     }
+ 
+-    if (is_linux) {
++    if (is_linux || is_zedbsd) {
+       public += [ "upgrade_util_linux.h" ]
+     }
+ 
+@@ -114,7 +114,7 @@
+       deps += [ "//chrome/browser/mac" ]
+     }
+ 
+-    if (is_linux) {
++    if (is_linux || is_zedbsd) {
+       sources += [
+         "first_run_internal_linux.cc",
+         "upgrade_util_linux.cc",
+@@ -122,7 +122,7 @@
+       deps += [ "//chrome/browser/ui/views:eula_dialog_linux" ]
+     }
+ 
+-    if (is_linux || is_mac) {
++    if (is_linux || is_mac || is_zedbsd) {
+       sources += [ "first_run_internal_posix.cc" ]
+     }
+   }
+--- a/chrome/browser/first_run/first_run.cc
++++ b/chrome/browser/first_run/first_run.cc
+@@ -317,7 +317,8 @@
+ 
+ // -- Platform-specific functions --
+ 
+-#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_BSD)
++#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_BSD) && \
++    !BUILDFLAG(IS_ZEDBSD)
+ bool IsOrganicFirstRun() {
+   std::string brand;
+   google_brand::GetBrand(&brand);
+--- a/chrome/browser/first_run/first_run_dialog.h
++++ b/chrome/browser/first_run/first_run_dialog.h
+@@ -9,7 +9,7 @@
+ #include "build/build_config.h"
+ 
+ // Hide this function on platforms where the dialog does not exist.
+-#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ 
+ namespace first_run {
+ 
+--- a/chrome/browser/first_run/first_run_internal_posix.cc
++++ b/chrome/browser/first_run/first_run_internal_posix.cc
+@@ -92,7 +92,9 @@
+   if (GetBeforeShowFirstRunDialogHookForTesting())
+     std::move(GetBeforeShowFirstRunDialogHookForTesting()).Run();
+ 
++#if !BUILDFLAG(IS_ZEDBSD)
+   ShowFirstRunDialog();
++#endif
+   startup_metric_utils::GetBrowser().SetNonBrowserUIDisplayed();
+ }
+ 
+--- a/chrome/browser/first_run/upgrade_util_linux.cc
++++ b/chrome/browser/first_run/upgrade_util_linux.cc
+@@ -23,8 +23,10 @@
+ 
+ bool RelaunchChromeBrowserImpl(const base::CommandLine& command_line) {
+   base::LaunchOptions options;
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+   // Don't set NO_NEW_PRIVS on the relaunched browser process.
+   options.allow_new_privs = true;
++#endif
+   return base::LaunchProcess(command_line, options).IsValid();
+ }
+ 
+--- a/chrome/browser/global_features.cc
++++ b/chrome/browser/global_features.cc
+@@ -44,7 +44,8 @@
+ #include "chrome/browser/ui/tabs/tab_drag_api/desktop_tab_drag_impl/tab_drag_session_desktop_injector.h"
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/default_browser/default_browser_manager.h"
+ #include "chrome/browser/ui/startup/default_browser_prompt/default_browser_prompt_manager.h"
+ #include "chrome/browser/ui/webui/whats_new/whats_new_registrar.h"
+@@ -56,7 +57,8 @@
+ #include "chrome/browser/win/installer_downloader/installer_downloader_infobar_delegate.h"
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/lifetime/scheduled_restart_manager.h"
+ #endif
+ 
+@@ -68,7 +70,8 @@
+ #include "chrome/common/chrome_features.h"
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/lifetime/scheduled_restart_manager.h"
+ #include "chrome/browser/ui/views/scheduled_restart/scheduled_restart_bubble_controller.h"
+ #endif
+@@ -191,7 +194,8 @@
+   }
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   default_browser_manager_ =
+       GetUserDataFactory()
+           .CreateInstance<default_browser::DefaultBrowserManager>(
+@@ -224,7 +228,8 @@
+   }
+ #endif
+   system_permissions_platform_handle_ = CreateSystemPermissionsPlatformHandle();
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   // TODO(crbug.com/463742800): Migrate WhatsNewRegistry (and other non-core
+   // features) to Init().
+   whats_new_registry_ = CreateWhatsNewRegistry();
+@@ -298,7 +303,8 @@
+   profile_launch_observer_.reset();
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   scheduled_restart_bubble_controller_.reset();
+   scheduled_restart_manager_.reset();
+ #endif
+@@ -330,7 +336,8 @@
+ #endif
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   DefaultBrowserPromptManager::GetInstance()->CloseAllPrompts(
+       DefaultBrowserPromptManager::CloseReason::kDismiss);
+   default_browser_manager_.reset();
+@@ -350,7 +357,8 @@
+   return system_permission_settings::PlatformHandle::Create();
+ }
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ std::unique_ptr<whats_new::WhatsNewRegistry>
+ GlobalFeatures::CreateWhatsNewRegistry() {
+   return whats_new::CreateWhatsNewRegistry();
+@@ -362,7 +370,8 @@
+   return std::make_unique<GlobalBrowserCollection>();
+ }
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ std::unique_ptr<scheduled_restart::ScheduledRestartManager>
+ GlobalFeatures::CreateScheduledRestartManager() {
+   return std::make_unique<scheduled_restart::ScheduledRestartManager>(
+--- a/chrome/browser/global_features.h
++++ b/chrome/browser/global_features.h
+@@ -26,7 +26,8 @@
+ namespace system_permission_settings {
+ class PlatformHandle;
+ }  // namespace system_permission_settings
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ namespace whats_new {
+ class WhatsNewRegistry;
+ }  // namespace whats_new
+@@ -90,7 +91,8 @@
+ class OnDeviceTranslationInstaller;
+ }
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ namespace scheduled_restart {
+ class ScheduledRestartBubbleController;
+ class ScheduledRestartManager;
+@@ -170,7 +172,8 @@
+   system_permissions_platform_handle() {
+     return system_permissions_platform_handle_.get();
+   }
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   whats_new::WhatsNewRegistry* whats_new_registry() {
+     return whats_new_registry_.get();
+   }
+@@ -243,7 +246,8 @@
+   }
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   scheduled_restart::ScheduledRestartBubbleController*
+   scheduled_restart_bubble_controller() {
+     return scheduled_restart_bubble_controller_.get();
+@@ -279,12 +283,14 @@
+ 
+   virtual std::unique_ptr<system_permission_settings::PlatformHandle>
+   CreateSystemPermissionsPlatformHandle();
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   virtual std::unique_ptr<whats_new::WhatsNewRegistry> CreateWhatsNewRegistry();
+ #endif
+   virtual std::unique_ptr<GlobalBrowserCollection>
+   CreateGlobalBrowserCollection();
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   virtual std::unique_ptr<scheduled_restart::ScheduledRestartManager>
+   CreateScheduledRestartManager();
+ #endif
+@@ -307,7 +313,8 @@
+ 
+   std::unique_ptr<system_permission_settings::PlatformHandle>
+       system_permissions_platform_handle_;
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   std::unique_ptr<whats_new::WhatsNewRegistry> whats_new_registry_;
+ 
+   std::unique_ptr<default_browser::DefaultBrowserManager>
+@@ -372,7 +379,8 @@
+   std::unique_ptr<smart_restart::SmartRestartManager> smart_restart_manager_;
+ #endif  // !BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   std::unique_ptr<scheduled_restart::ScheduledRestartBubbleController>
+       scheduled_restart_bubble_controller_;
+   std::unique_ptr<scheduled_restart::ScheduledRestartManager>
 --- a/chrome/browser/hid/BUILD.gn
 +++ b/chrome/browser/hid/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -119,6 +772,17 @@
  
  source_set("importer") {
    sources = [
+--- a/chrome/browser/intranet_redirect_detector.h
++++ b/chrome/browser/intranet_redirect_detector.h
+@@ -26,7 +26,7 @@
+ class PrefRegistrySimple;
+ 
+ #if !(BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || \
+-      BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID))
++      BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD))
+ #error \
+     "IntranetRedirectDetector should only be built on Desktop platforms " \
+     "and Android."
 --- a/chrome/browser/lifetime/BUILD.gn
 +++ b/chrome/browser/lifetime/BUILD.gn
 @@ -47,7 +47,7 @@
@@ -170,6 +834,78 @@
  
  source_set("manta") {
    public = [ "manta_service_factory.h" ]
+--- a/chrome/browser/media/router/discovery/discovery_network_list_posix.cc
++++ b/chrome/browser/media/router/discovery/discovery_network_list_posix.cc
+@@ -6,7 +6,9 @@
+ 
+ #include <ifaddrs.h>
+ #include <net/if.h>
++#if !defined(__ZEDBSD__)
+ #include <net/if_arp.h>
++#endif
+ #include <netinet/in.h>
+ #include <sys/socket.h>
+ #include <sys/types.h>
+@@ -20,7 +22,7 @@
+ #include "base/strings/string_number_conversions.h"
+ #include "build/build_config.h"
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/media/router/discovery/discovery_network_list_wifi.h"
+ #endif
+ 
+@@ -46,6 +48,7 @@
+ #define SOCKET_ADDRESS(s) (LLADDR(s))
+ #endif
+ 
++#if !defined(__ZEDBSD__)
+ base::span<const uint8_t> SocketAddressAsByteSpan(const sll* ll_addr) {
+   // SAFETY: The size of SOCKET_ADDRESS() can be reliably retrieved via
+   // SOCKET_ADDRESS_LEN().
+@@ -53,6 +56,7 @@
+       reinterpret_cast<const unsigned char*>(SOCKET_ADDRESS(ll_addr)),
+       SOCKET_ADDRESS_LEN(ll_addr)));
+ }
++#endif
+ 
+ void GetDiscoveryNetworkInfoListImpl(
+     const struct ifaddrs* if_list,
+@@ -77,6 +81,7 @@
+ 
+     // |addr| will always be sockaddr_ll/sockaddr_dl when |sa_family| ==
+     // AF_PACKET.
++#if !defined(__ZEDBSD__)
+     const auto* ll_addr = reinterpret_cast<const sll*>(addr);
+     // ARPHRD_ETHER is used to test for Ethernet, as in IEEE 802.3 MAC protocol.
+     // This spec is used by both wired Ethernet and wireless (e.g. 802.11).
+@@ -85,20 +90,25 @@
+         SOCKET_ARP_TYPE(ll_addr) != ARPHRD_IEEE802) {
+       continue;
+     }
++#endif
+ 
+-#if !BUILDFLAG(IS_ANDROID)
++#if !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_ZEDBSD)
+     if (std::optional<std::string> ssid = MaybeGetWifiSSID(name)) {
+       network_info_list->emplace_back(name, std::move(*ssid));
+       continue;
+     }
+ #endif
+ 
++#if !defined(__ZEDBSD__)
+     if (SOCKET_ADDRESS_LEN(ll_addr) == 0) {
+       continue;
+     }
+ 
+     network_info_list->push_back(
+         {name, base::HexEncode(SocketAddressAsByteSpan(ll_addr))});
++#else
++    network_info_list->push_back({name, std::string()});
++#endif
+   }
+ }
+ 
 --- a/chrome/browser/media/webrtc/BUILD.gn
 +++ b/chrome/browser/media/webrtc/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -181,6 +917,26 @@
  
  import("//build/config/ozone.gni")
  import("//build/config/ui.gni")
+@@ -302,7 +302,7 @@
+     deps += [ "//components/remote_cocoa/browser" ]
+   }
+ 
+-  if (is_linux && use_ozone) {
++  if ((is_linux || is_zedbsd) && use_ozone) {
+     sources += [ "window_icon_util_ozone.cc" ]
+     deps += [ "//ui/ozone" ]
+   }
+--- a/chrome/browser/media/webrtc/webrtc_log_uploader.cc
++++ b/chrome/browser/media/webrtc/webrtc_log_uploader.cc
+@@ -98,7 +98,7 @@
+   const char product[] = "Chrome";
+ #elif BUILDFLAG(IS_MAC)
+   const char product[] = "Chrome_Mac";
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ #if !defined(ADDRESS_SANITIZER)
+   const char product[] = "Chrome_Linux";
+ #else
 --- a/chrome/browser/memory/BUILD.gn
 +++ b/chrome/browser/memory/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -192,6 +948,18 @@
  
  source_set("memory") {
    public = [
+--- a/chrome/browser/memory_details.cc
++++ b/chrome/browser/memory_details.cc
+@@ -341,7 +341,8 @@
+           });
+     }
+ 
+-#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID)
++#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ANDROID) && \
++    !BUILDFLAG(IS_ZEDBSD)
+     if (content::ZygoteHost::GetInstance()->IsZygotePid(process.pid)) {
+       process.process_type = content::PROCESS_TYPE_ZYGOTE;
+     }
 --- a/chrome/browser/navigation_predictor/BUILD.gn
 +++ b/chrome/browser/navigation_predictor/BUILD.gn
 @@ -3,7 +3,7 @@
@@ -203,6 +971,77 @@
  
  source_set("navigation_predictor") {
    sources = [
+--- a/chrome/browser/net/profile_network_context_service.cc
++++ b/chrome/browser/net/profile_network_context_service.cc
+@@ -134,16 +134,16 @@
+ #include "net/ssl/client_cert_store_mac.h"
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+-#if BUILDFLAG(IS_ANDROID)
++#if BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ #include "net/ssl/client_cert_store_empty.h"
+-#endif  // BUILDFLAG(IS_ANDROID)
++#endif  // BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE)
+ #include "extensions/common/constants.h"
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_ANDROID)
++    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/enterprise/client_certificates/certificate_provisioning_service_factory.h"
+ #include "chrome/browser/policy/chrome_browser_policy_connector.h"
+ #include "components/enterprise/browser/controller/chrome_browser_cloud_management_controller.h"
+@@ -321,7 +321,7 @@
+ }
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_ANDROID)
++    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ std::unique_ptr<net::ClientCertStore> GetWrappedCertStore(
+     Profile* profile,
+     std::unique_ptr<net::ClientCertStore> platform_store) {
+@@ -1302,7 +1302,7 @@
+ #elif BUILDFLAG(IS_MAC)
+   return GetWrappedCertStore(profile_,
+                              std::make_unique<net::ClientCertStoreMac>());
+-#elif BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+   // On Android client we don't use a platform client cert store, but we still
+   // need to use Chrome profile and browser level stores, so we wrap the empty
+   // store to use it as a platform cert store.
+--- a/chrome/browser/notifications/notification_display_service_impl.cc
++++ b/chrome/browser/notifications/notification_display_service_impl.cc
+@@ -34,7 +34,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
+-    BUILDFLAG(IS_WIN)
++    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/sharing/sharing_notification_handler.h"
+ #endif
+ 
+--- a/chrome/browser/notifications/notification_platform_bridge.cc
++++ b/chrome/browser/notifications/notification_platform_bridge.cc
+@@ -25,3 +25,17 @@
+     const std::string& profile_id) {
+   return base::FilePath::FromUTF8Unsafe(profile_id);
+ }
++
++#if BUILDFLAG(IS_ZEDBSD)
++// static
++std::unique_ptr<NotificationPlatformBridge>
++NotificationPlatformBridge::Create() {
++  return nullptr;
++}
++
++// static
++bool NotificationPlatformBridge::CanHandleType(
++    NotificationHandler::Type notification_type) {
++  return false;
++}
++#endif
 --- a/chrome/browser/optimization_guide/BUILD.gn
 +++ b/chrome/browser/optimization_guide/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -225,6 +1064,123 @@
  
  # The window occlusion logic is currently for desktop only, and the
  # WebContentsObserver-based implementation does not work on Linux
+@@ -12,7 +12,7 @@
+ # supported on Linux.
+ use_web_contents_occlusion_helper = is_win || is_chromeos || is_mac
+ use_widget_occlusion_helper = is_linux
+-use_stub_occlusion_helper = is_android
++use_stub_occlusion_helper = is_android || is_zedbsd
+ 
+ source_set("picture_in_picture") {
+   sources = [
+--- a/chrome/browser/platform_util.cc
++++ b/chrome/browser/platform_util.cc
+@@ -80,4 +80,14 @@
+ }
+ 
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++namespace internal {
++void PlatformOpenVerifiedItem(const base::FilePath& path, OpenItemType type) {}
++}  // namespace internal
++
++void ShowItemInFolder(Profile* profile, const base::FilePath& full_path) {}
++
++void OpenExternal(const GURL& url) {}
++#endif
++
+ }  // namespace platform_util
+--- a/chrome/browser/policy/BUILD.gn
++++ b/chrome/browser/policy/BUILD.gn
+@@ -16,7 +16,7 @@
+ source_set("path_parser") {
+   public = [ "policy_path_parser.h" ]
+ 
+-  if (is_chromeos || is_linux) {
++  if (is_chromeos || is_linux || is_zedbsd) {
+     sources = [ "policy_path_parser_linux.cc" ]
+   } else if (is_mac) {
+     sources = [ "policy_path_parser_mac.mm" ]
+@@ -1171,7 +1171,7 @@
+     public += [ "browser_dm_token_storage_mac.h" ]
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if (is_linux || is_win || is_mac || is_chromeos || is_zedbsd) {
+     public += [ "battery_saver_policy_handler.h" ]
+   }
+ 
+@@ -1183,7 +1183,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     public += [ "browser_dm_token_storage_linux.h" ]
+   }
+ 
+@@ -1556,7 +1556,7 @@
+     }
+   }
+ 
+-  if (is_linux || is_win || is_mac || is_chromeos) {
++  if (is_linux || is_win || is_mac || is_chromeos || is_zedbsd) {
+     sources += [ "battery_saver_policy_handler.cc" ]
+   }
+ 
+@@ -1572,7 +1572,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "browser_dm_token_storage_linux.cc" ]
+   }
+ 
+--- a/chrome/browser/policy/chrome_browser_cloud_management_controller_desktop.cc
++++ b/chrome/browser/policy/chrome_browser_cloud_management_controller_desktop.cc
+@@ -60,16 +60,17 @@
+ #include "chrome/browser/policy/browser_dm_token_storage_mac.h"
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/policy/browser_dm_token_storage_linux.h"
+-#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ 
+ #if BUILDFLAG(IS_WIN)
+ #include "chrome/browser/policy/browser_dm_token_storage_win.h"
+ #include "chrome/install_static/install_util.h"
+ #endif  // BUILDFLAG(IS_WIN)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/enterprise/client_certificates/browser_context_delegate.h"
+ #include "chrome/browser/enterprise/client_certificates/cert_utils.h"
+ #include "chrome/browser/enterprise/connectors/device_trust/key_management/browser/device_trust_key_manager_impl.h"
+@@ -117,7 +118,7 @@
+ 
+ #if BUILDFLAG(IS_MAC)
+   storage_delegate = std::make_unique<BrowserDMTokenStorageMac>();
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   storage_delegate = std::make_unique<BrowserDMTokenStorageLinux>();
+ #elif BUILDFLAG(IS_WIN)
+   storage_delegate = std::make_unique<BrowserDMTokenStorageWin>();
+--- a/chrome/browser/policy/configuration_policy_handler_list_factory.cc
++++ b/chrome/browser/policy/configuration_policy_handler_list_factory.cc
+@@ -274,7 +274,8 @@
+ #include "components/spellcheck/browser/pref_names.h"
+ #endif  // BUILDFLAG(ENABLE_SPELLCHECK)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/browser_switcher/browser_switcher_prefs.h"
+ #include "chrome/browser/enterprise/idle/action.h"
+ #include "chrome/browser/enterprise/signin/enterprise_signin_prefs.h"
 --- a/chrome/browser/predictors/BUILD.gn
 +++ b/chrome/browser/predictors/BUILD.gn
 @@ -5,7 +5,7 @@
@@ -258,6 +1214,39 @@
  
  source_set("prefs") {
    sources = [
+--- a/chrome/browser/prefs/browser_prefs.cc
++++ b/chrome/browser/prefs/browser_prefs.cc
+@@ -352,7 +352,8 @@
+ #include "chrome/browser/devtools/devtools_window.h"
+ #endif  // BUILDFLAG(ENABLE_DEVTOOLS_FRONTEND)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/ui/webui/whats_new/whats_new_ui.h"
+ #endif
+ 
+@@ -1851,6 +1852,9 @@
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+   scheduled_restart::ScheduledRestartManager::RegisterLocalStatePrefs(registry);
++#endif
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   WhatsNewUI::RegisterLocalStatePrefs(registry);
+ #endif
+ 
+--- a/chrome/browser/prefs/pref_service_incognito_allowlist.cc
++++ b/chrome/browser/prefs/pref_service_incognito_allowlist.cc
+@@ -202,7 +202,7 @@
+     prefs::kShowFullscreenToolbar,
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+     // Toggleing custom frames affects all open windows in the profile, hence
+     // should be written to the regular profile when changed in incognito mode.
+     prefs::kUseCustomChromeFrame,
 --- a/chrome/browser/preloading/prefetch/no_state_prefetch/BUILD.gn
 +++ b/chrome/browser/preloading/prefetch/no_state_prefetch/BUILD.gn
 @@ -5,7 +5,7 @@
@@ -269,6 +1258,17 @@
  
  source_set("no_state_prefetch") {
    sources = [
+--- a/chrome/browser/printing/BUILD.gn
++++ b/chrome/browser/printing/BUILD.gn
+@@ -167,7 +167,7 @@
+       sources += [ "printer_manager_dialog_mac.cc" ]
+     }
+ 
+-    if (is_linux) {
++    if (is_linux || is_zedbsd) {
+       sources += [ "printer_manager_dialog_linux.cc" ]
+     }
+ 
 --- a/chrome/browser/privacy/BUILD.gn
 +++ b/chrome/browser/privacy/BUILD.gn
 @@ -102,7 +102,7 @@
@@ -313,6 +1313,61 @@
  
  source_set("regional_capabilities") {
    sources = [
+--- a/chrome/browser/regional_capabilities/regional_capabilities_service_factory.cc
++++ b/chrome/browser/regional_capabilities/regional_capabilities_service_factory.cc
+@@ -61,7 +61,8 @@
+   return instance.get();
+ }
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // static
+ bool RegionalCapabilitiesServiceFactory::
+     IsInSearchEngineChoiceScreenRegionForSystemProfile(Profile* profile) {
+--- a/chrome/browser/regional_capabilities/regional_capabilities_service_factory.h
++++ b/chrome/browser/regional_capabilities/regional_capabilities_service_factory.h
+@@ -31,7 +31,8 @@
+ 
+   static RegionalCapabilitiesServiceFactory* GetInstance();
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   // Returns whether the system profile is in a region where we can show a
+   // search engine choice screen. If the profile is not a system profile, this
+   // function crashes. Used for clients associated with system profiles (where
+--- a/chrome/browser/renderer_context_menu/BUILD.gn
++++ b/chrome/browser/renderer_context_menu/BUILD.gn
+@@ -226,7 +226,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos || is_win) {
++  if (is_linux || is_chromeos || is_win || is_zedbsd) {
+     public += [ "spelling_options_submenu_observer.h" ]
+     sources += [ "spelling_options_submenu_observer.cc" ]
+   }
+--- a/chrome/browser/renderer_context_menu/render_view_context_menu.cc
++++ b/chrome/browser/renderer_context_menu/render_view_context_menu.cc
+@@ -306,7 +306,7 @@
+ #include "url/url_constants.h"
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #include "components/webapps/isolated_web_apps/scheme.h"
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+         // BUILDFLAG(IS_CHROMEOS)
+@@ -6361,7 +6361,7 @@
+ }
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ bool RenderViewContextMenu::IsLinkToIsolatedWebApp() const {
+   // Using `unfiltered_link_url`, because `link_url` is being replaced with
+   // about:blank#blocked if the source is a normal site.
 --- a/chrome/browser/resources/app_home/BUILD.gn
 +++ b/chrome/browser/resources/app_home/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -324,6 +1379,69 @@
  
  build_webui("build") {
    grd_prefix = "app_home"
+--- a/chrome/browser/resources/app_settings/BUILD.gn
++++ b/chrome/browser/resources/app_settings/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//chrome/common/features.gni")
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || is_linux || is_zedbsd)
+ assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
+ 
+ build_webui("build") {
+--- a/chrome/browser/resources/browser_switch/BUILD.gn
++++ b/chrome/browser/resources/browser_switch/BUILD.gn
+@@ -5,7 +5,7 @@
+ import("//chrome/common/features.gni")
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || is_linux || is_zedbsd)
+ 
+ build_webui("build") {
+   grd_prefix = "browser_switch"
+--- a/chrome/browser/resources/certificate_manager/certificate_manager.mojom
++++ b/chrome/browser/resources/certificate_manager/certificate_manager.mojom
+@@ -59,7 +59,7 @@
+ 
+   // Enterprise provisioned client certificates. Only enabled on platforms
+   // where that feature is available.
+-  [EnableIf=is_linux|is_mac|is_win] kProvisionedClientCert,
++  [EnableIf=is_linux|is_mac|is_win|is_zedbsd] kProvisionedClientCert,
+ 
+   // Extension provided client certificates.
+   [EnableIf=is_chromeos] kExtensionsClientCert,
+--- a/chrome/browser/resources/on_device_translation_internals/BUILD.gn
++++ b/chrome/browser/resources/on_device_translation_internals/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || is_linux || is_zedbsd)
+ 
+ build_webui("build") {
+   grd_prefix = "on_device_translation_internals"
+--- a/chrome/browser/resources/settings/BUILD.gn
++++ b/chrome/browser/resources/settings/BUILD.gn
+@@ -525,14 +525,14 @@
+     ts_files += [ "ai_page/on_device_ai_browser_proxy.ts" ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     ts_files += [
+       "a11y_page/captions_page.html.ts",
+       "a11y_page/captions_page.ts",
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     ts_files += [
+       "a11y_page/ax_annotations_section.html.ts",
+       "a11y_page/ax_annotations_section.ts",
 --- a/chrome/browser/resources/signin/history_sync_optin/BUILD.gn
 +++ b/chrome/browser/resources/signin/history_sync_optin/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -346,6 +1464,28 @@
  
  build_webui("build") {
    grd_prefix = "tab_search"
+--- a/chrome/browser/resources/updater/BUILD.gn
++++ b/chrome/browser/resources/updater/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//ui/webui/resources/tools/build_webui.gni")
+ 
+-assert(is_mac || is_win || is_linux)
++assert(is_mac || is_win || is_linux || is_zedbsd)
+ 
+ build_webui("build") {
+   grd_prefix = "updater"
+--- a/chrome/browser/safe_browsing/BUILD.gn
++++ b/chrome/browser/safe_browsing/BUILD.gn
+@@ -156,7 +156,7 @@
+     allow_circular_includes_from += [ "//chrome/browser/ash/file_manager" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     public += [ "security_settings_bundle_toast_helper.h" ]
+     sources += [ "security_settings_bundle_toast_helper.cc" ]
+     deps += [
 --- a/chrome/browser/search/BUILD.gn
 +++ b/chrome/browser/search/BUILD.gn
 @@ -5,7 +5,7 @@
@@ -401,6 +1541,203 @@
  
  source_set("sharing_hub") {
    sources = [
+--- a/chrome/browser/shell_integration.h
++++ b/chrome/browser/shell_integration.h
+@@ -188,7 +188,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || \
+-    BUILDFLAG(IS_WIN)
++    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ZEDBSD)
+ // Returns the URL scheme for google-chrome:// URLs.
+ // This varies based on channel, branding, and platform to ensure that
+ // different installations do not collide. For example:
+--- a/chrome/browser/shortcuts/BUILD.gn
++++ b/chrome/browser/shortcuts/BUILD.gn
+@@ -75,7 +75,7 @@
+     ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     sources += [
+       "linux_xdg_wrapper.h",
+       "linux_xdg_wrapper_impl.cc",
+@@ -202,7 +202,7 @@
+     ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     sources += [
+       "shortcut_creation_test_support_linux_unittest.cc",
+       "shortcut_creator_linux_unittest.cc",
+--- a/chrome/browser/shortcuts/icon_badging.cc
++++ b/chrome/browser/shortcuts/icon_badging.cc
+@@ -58,7 +58,7 @@
+ constexpr ShortcutSize kSizesNeededForShortcutCreation[] = {
+     ShortcutSize::k16, ShortcutSize::k32, ShortcutSize::k128,
+     ShortcutSize::k256, ShortcutSize::k512};
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ constexpr ShortcutSize kSizesNeededForShortcutCreation[] = {ShortcutSize::k32,
+                                                             ShortcutSize::k128};
+ #elif BUILDFLAG(IS_WIN)
+--- a/chrome/browser/shutdown_signal_handlers_posix.cc
++++ b/chrome/browser/shutdown_signal_handlers_posix.cc
+@@ -5,6 +5,14 @@
+ #include "chrome/browser/shutdown_signal_handlers_posix.h"
+ 
+ #include <limits.h>
++#ifndef PIPE_BUF
++#define PIPE_BUF _POSIX_PIPE_BUF
++#endif
++
++#include <limits.h>
++#ifndef PIPE_BUF
++#define PIPE_BUF _POSIX_PIPE_BUF
++#endif
+ #include <signal.h>
+ #include <string.h>
+ #include <unistd.h>
+--- a/chrome/browser/signin/signin_util.cc
++++ b/chrome/browser/signin/signin_util.cc
+@@ -40,7 +40,8 @@
+ #include "google_apis/gaia/gaia_id.h"
+ #include "ui/base/l10n/l10n_util.h"
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/ui/dialogs/browser_dialogs.h"
+ #include "components/strings/grit/components_strings.h"
+ #include "ui/base/interaction/element_identifier.h"
+@@ -322,7 +323,8 @@
+   return true;
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ bool HasExplicitlyDisabledHistorySync(
+     const syncer::SyncService* sync_service,
+     const signin::IdentityManager* identity_manager) {
+--- a/chrome/browser/signin/signin_util.h
++++ b/chrome/browser/signin/signin_util.h
+@@ -172,7 +172,8 @@
+     const syncer::SyncService* sync_service,
+     const syncer::UserSelectableTypeSet& types);
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // True if the user has explicitly disabled syncing history, tabs or saved tab
+ // groups through the settings. The primary account must be set (this crashes
+ // otherwise).
+--- a/chrome/browser/status_icons/status_tray.cc
++++ b/chrome/browser/status_icons/status_tray.cc
+@@ -52,3 +52,10 @@
+ StatusTray::StatusIconWithType::~StatusIconWithType() = default;
+ 
+ StatusTray::StatusTray() = default;
++
++#if BUILDFLAG(IS_ZEDBSD)
++// static
++std::unique_ptr<StatusTray> StatusTray::Create() {
++  return nullptr;
++}
++#endif
+--- a/chrome/browser/supervised_user/BUILD.gn
++++ b/chrome/browser/supervised_user/BUILD.gn
+@@ -54,7 +54,7 @@
+     public += [ "desktop/supervised_user_service_platform_delegate.h" ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if (is_linux || is_mac || is_win || is_zedbsd) {
+     public += [
+       "linux_mac_windows/parent_access_dialog_result_observer.h",
+       "linux_mac_windows/parent_access_view.h",
+@@ -197,7 +197,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_mac || is_win) {
++  if (is_linux || is_mac || is_win || is_zedbsd) {
+     sources += [
+       "linux_mac_windows/parent_access_dialog_result_observer.cc",
+       "linux_mac_windows/parent_access_view.cc",
+--- a/chrome/browser/supervised_user/supervised_user_browser_utils.cc
++++ b/chrome/browser/supervised_user/supervised_user_browser_utils.cc
+@@ -35,13 +35,14 @@
+ #include "url/url_constants.h"
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
+-    BUILDFLAG(IS_ANDROID)
++    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/supervised_user/supervised_user_verification_controller_client.h"
+ #include "chrome/browser/supervised_user/supervised_user_verification_page_blocked_sites.h"
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
+         // BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/supervised_user/supervised_user_verification_page_youtube.h"
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+ 
+@@ -143,7 +144,8 @@
+   return std::string(account_info.GetGivenName().value_or(""));
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ std::string CreateReauthenticationInterstitialForYouTube(
+     content::NavigationHandle& navigation_handle) {
+   content::WebContents* web_contents = navigation_handle.GetWebContents();
+--- a/chrome/browser/supervised_user/supervised_user_browser_utils.h
++++ b/chrome/browser/supervised_user/supervised_user_browser_utils.h
+@@ -54,7 +54,8 @@
+     content::NavigationHandle& navigation_handle);
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ std::string CreateReauthenticationInterstitialForYouTube(
+     content::NavigationHandle& navigation_handle);
+ #endif
+--- a/chrome/browser/supervised_user/supervised_user_google_auth_navigation_throttle.cc
++++ b/chrome/browser/supervised_user/supervised_user_google_auth_navigation_throttle.cc
+@@ -33,13 +33,15 @@
+ #include "chrome/browser/supervised_user/child_accounts/child_account_service_android.h"
+ #include "components/signin/public/identity_manager/identity_manager.h"
+ #include "ui/android/view_android.h"
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/supervised_user/supervised_user_verification_controller_client.h"
+ #include "chrome/browser/supervised_user/supervised_user_verification_page.h"
+ #endif
+ 
+ namespace {
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ 
+ bool IsYouTubeInfrastructureSubframe(content::NavigationHandle* handle) {
+   if (handle->GetNavigatingFrameType() != content::FrameType::kSubframe) {
+@@ -173,7 +175,8 @@
+     return content::NavigationThrottle::DEFER;
+   }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+   // When an unauthenticated supervised user tries to access YouTube, we force
+   // re-authentication with an interstitial so that YouTube can be subject to
+   // content restrictions. This interstitial is only available on Desktop
 --- a/chrome/browser/sync/BUILD.gn
 +++ b/chrome/browser/sync/BUILD.gn
 @@ -7,7 +7,7 @@
@@ -523,6 +1860,50 @@
  
  source_set("bookmarks") {
    sources = [
+--- a/chrome/browser/ui/browser_actions.cc
++++ b/chrome/browser/ui/browser_actions.cc
+@@ -3944,7 +3944,8 @@
+               [](BrowserWindowInterface* bwi, actions::ActionItem* item,
+                  actions::ActionInvocationContext context) {
+                 base::RecordAction(base::UserMetricsAction("CreateShortcut"));
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+                 chrome::CreateDesktopShortcutForActiveWebContents(bwi);
+ #else
+                 web_app::CreateWebAppFromCurrentWebContents(
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -1184,7 +1184,8 @@
+       break;
+     case IDC_CREATE_SHORTCUT:
+       base::RecordAction(base::UserMetricsAction("CreateShortcut"));
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+       chrome::CreateDesktopShortcutForActiveWebContents(browser_);
+ #else
+       web_app::CreateWebAppFromCurrentWebContents(
+--- a/chrome/browser/ui/browser_view_prefs.cc
++++ b/chrome/browser/ui/browser_view_prefs.cc
+@@ -14,7 +14,7 @@
+ 
+ namespace {
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ bool GetCustomFramePrefDefault() {
+ #if BUILDFLAG(IS_OZONE)
+   return ui::OzonePlatform::GetInstance()
+@@ -30,7 +30,7 @@
+ 
+ void RegisterBrowserViewProfilePrefs(
+     user_prefs::PrefRegistrySyncable* registry) {
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   registry->RegisterBooleanPref(prefs::kUseCustomChromeFrame,
+                                 GetCustomFramePrefDefault());
+ #endif
 --- a/chrome/browser/ui/commerce/BUILD.gn
 +++ b/chrome/browser/ui/commerce/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -589,6 +1970,26 @@
  
  source_set("exclusive_access") {
    sources = [
+--- a/chrome/browser/ui/extensions/BUILD.gn
++++ b/chrome/browser/ui/extensions/BUILD.gn
+@@ -70,7 +70,7 @@
+     public_deps += [ "//components/messages/android" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "extension_install_ui_desktop.h" ]
+   }
+   public_deps += [
+@@ -225,7 +225,7 @@
+     "//ui/strings",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "extension_install_ui_desktop.cc" ]
+     deps += [
+       "//chrome/browser/prefs",
 --- a/chrome/browser/ui/file_system_access/BUILD.gn
 +++ b/chrome/browser/ui/file_system_access/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -732,6 +2133,17 @@
  
  source_set("page_info") {
    sources = [
+--- a/chrome/browser/ui/passwords/BUILD.gn
++++ b/chrome/browser/ui/passwords/BUILD.gn
+@@ -173,7 +173,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "password_cross_domain_confirmation_popup_controller_impl.cc" ]
+   }
+ }
 --- a/chrome/browser/ui/permission_bubble/BUILD.gn
 +++ b/chrome/browser/ui/permission_bubble/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -754,6 +2166,17 @@
  
  source_set("prefs") {
    sources = [
+--- a/chrome/browser/ui/profiles/BUILD.gn
++++ b/chrome/browser/ui/profiles/BUILD.gn
+@@ -89,7 +89,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     sources += [
+       "profile_customization_synced_theme_waiter.cc",
+       "profile_customization_util.cc",
 --- a/chrome/browser/ui/qrcode_generator/BUILD.gn
 +++ b/chrome/browser/ui/qrcode_generator/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -820,6 +2243,94 @@
  assert(toolkit_views)
  
  source_set("sharing_hub") {
+--- a/chrome/browser/ui/sharing_hub/sharing_hub_bubble_controller.h
++++ b/chrome/browser/ui/sharing_hub/sharing_hub_bubble_controller.h
+@@ -39,7 +39,8 @@
+   // Returns true if the omnibox icon should be shown.
+   virtual bool ShouldOfferOmniboxIcon() = 0;
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   // This method returns the set of first-party actions, which are actions
+   // internal to Chrome. Third-party actions (those outside Chrome) are
+   // currently not supported.
+--- a/chrome/browser/ui/shortcuts/BUILD.gn
++++ b/chrome/browser/ui/shortcuts/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || is_linux || is_zedbsd)
+ 
+ source_set("shortcuts") {
+   sources = [
+--- a/chrome/browser/ui/signin/signin_view_controller.cc
++++ b/chrome/browser/ui/signin/signin_view_controller.cc
+@@ -682,7 +682,8 @@
+       GetOnModalDialogClosedCallback());
+ }
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ void SigninViewController::ShowModalHistorySyncOptInDialog(
+     bool should_close_modal_dialog,
+     HistorySyncOptinHelper::FlowCompletedCallback callback) {
+--- a/chrome/browser/ui/signin/signin_view_controller.h
++++ b/chrome/browser/ui/signin/signin_view_controller.h
+@@ -196,7 +196,8 @@
+   void ShowModalSyncConfirmationDialog(bool is_signin_intercept,
+                                        bool is_sync_promo);
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   // Shows the modal history sync opt in dialog as a browser-modal dialog on top
+   // of the `browser_`'s window. Executes the provided callback when the dialog
+   // closes.
+--- a/chrome/browser/ui/signin/signin_view_controller_delegate.h
++++ b/chrome/browser/ui/signin/signin_view_controller_delegate.h
+@@ -50,7 +50,8 @@
+       SyncConfirmationStyle style,
+       bool is_sync_promo);
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   // Returns a platform-specific SigninViewControllerDelegate instance that
+   // displays the modal history sync opt in dialog. The returned object should
+   // delete itself when the window it's managing is closed.
+--- a/chrome/browser/ui/startup/BUILD.gn
++++ b/chrome/browser/ui/startup/BUILD.gn
+@@ -75,7 +75,7 @@
+     sources += [ "chrome_for_testing_infobar_delegate.h" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "web_app_startup_utils.h" ]
+     public_deps += [ "//components/services/app_service/public/cpp:app_types" ]
+   }
+@@ -332,7 +332,7 @@
+     sources += [ "chrome_for_testing_infobar_delegate.cc" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "web_app_startup_utils.cc" ]
+     deps += [
+       "//chrome/browser/lifetime:termination_notification",
+@@ -340,7 +340,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     sources += [
+       "first_run_service.cc",
+       "web_app_info_recorder_utils.cc",
 --- a/chrome/browser/ui/startup/default_browser_prompt/BUILD.gn
 +++ b/chrome/browser/ui/startup/default_browser_prompt/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -842,6 +2353,24 @@
  
  source_set("tab_contents") {
    sources = [
+@@ -14,7 +14,7 @@
+     "tab_contents_iterator.h",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [
+       "chrome_web_contents_menu_helper.h",
+       "chrome_web_contents_view_handle_drop.h",
+@@ -42,7 +42,7 @@
+     "tab_contents_iterator.cc",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [
+       "chrome_web_contents_menu_helper.cc",
+       "chrome_web_contents_view_handle_drop.cc",
 --- a/chrome/browser/ui/tabs/BUILD.gn
 +++ b/chrome/browser/ui/tabs/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -853,6 +2382,24 @@
  
  import("//chrome/common/features.gni")
  import("//components/captive_portal/core/features.gni")
+@@ -463,7 +463,7 @@
+       "vertical_tab_strip_state_controller_impl.h",
+     ]
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+       sources += [ "inactive_window_mouse_event_controller.h" ]
+     }
+ 
+@@ -539,7 +539,7 @@
+       "vertical_tab_strip_state_controller_impl.cc",
+     ]
+ 
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+       sources += [ "inactive_window_mouse_event_controller.cc" ]
+     }
+ 
 --- a/chrome/browser/ui/tabs/alert/BUILD.gn
 +++ b/chrome/browser/ui/tabs/alert/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -875,6 +2422,17 @@
  
  import("//chrome/common/features.gni")
  
+--- a/chrome/browser/ui/tabs/tab_features.cc
++++ b/chrome/browser/ui/tabs/tab_features.cc
+@@ -220,7 +220,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/contextual_tasks/contextual_tasks_tab_navigation_observer.h"
+ #include "chrome/browser/contextual_tasks/contextual_tasks_tab_visit_tracker.h"
+ #include "chrome/browser/contextual_tasks/search_journey_tab_feature.h"
 --- a/chrome/browser/ui/toasts/BUILD.gn
 +++ b/chrome/browser/ui/toasts/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -897,6 +2455,28 @@
  
  source_set("cast") {
    sources = [
+--- a/chrome/browser/ui/ui_features.cc
++++ b/chrome/browser/ui/ui_features.cc
+@@ -56,7 +56,7 @@
+ BASE_FEATURE(kKeyboardLockHeldEscExitsTabFullscreen,
+              base::FEATURE_ENABLED_BY_DEFAULT);
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ // Gives browser windows of non-default profiles their own identity for the
+ // desktop environment: the X11 WM_CLASS res_name and the Wayland app_id are set
+ // to a per-profile desktop entry ID (e.g. "google-chrome-Profile_1"), so the
+--- a/chrome/browser/ui/ui_features.h
++++ b/chrome/browser/ui/ui_features.h
+@@ -44,7 +44,7 @@
+ 
+ BASE_DECLARE_FEATURE(kKeyboardLockHeldEscExitsTabFullscreen);
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ BASE_DECLARE_FEATURE(kLinuxPerProfileAppId);
+ #endif
+ 
 --- a/chrome/browser/ui/user_education/BUILD.gn
 +++ b/chrome/browser/ui/user_education/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -919,6 +2499,34 @@
    source_set("close_bubble_on_tab_activation_helper") {
      public = [ "close_bubble_on_tab_activation_helper.h" ]
      sources = [ "close_bubble_on_tab_activation_helper.cc" ]
+@@ -725,7 +725,7 @@
+   ]
+ }
+ 
+-if (is_linux) {
++if (is_linux || is_zedbsd) {
+   source_set("window_sizer_linux") {
+     public = [ "window_sizer_linux.h" ]
+     sources = [ "window_sizer_linux.cc" ]
+@@ -744,7 +744,9 @@
+       "//ui/ozone",
+     ]
+   }
++}
+ 
++if (is_linux || is_zedbsd) {
+   source_set("eula_dialog_linux") {
+     public = [ "eula_dialog_linux.h" ]
+     sources = [ "eula_dialog_linux.cc" ]
+@@ -1239,7 +1241,7 @@
+     "//ui/display",
+     "//ui/gfx/geometry",
+   ]
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     sources += [ "chrome_views_delegate_linux.cc" ]
+     deps += [
+       "//build:branding_buildflags",
 --- a/chrome/browser/ui/views/animations/BUILD.gn
 +++ b/chrome/browser/ui/views/animations/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -941,6 +2549,17 @@
  
  import("//build/config/ui.gni")
  import("//extensions/buildflags/buildflags.gni")
+--- a/chrome/browser/ui/views/apps/BUILD.gn
++++ b/chrome/browser/ui/views/apps/BUILD.gn
+@@ -120,7 +120,7 @@
+     ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     sources += [ "chrome_app_window_client_views_aura.cc" ]
+     deps += [
+       "//chrome/browser:shell_integration_linux",
 --- a/chrome/browser/ui/views/autofill/BUILD.gn
 +++ b/chrome/browser/ui/views/autofill/BUILD.gn
 @@ -5,7 +5,7 @@
@@ -1007,6 +2626,37 @@
  
  import("//build/config/ui.gni")
  
+--- a/chrome/browser/ui/views/chrome_views_delegate.h
++++ b/chrome/browser/ui/views/chrome_views_delegate.h
+@@ -52,7 +52,7 @@
+                              base::OnceClosure callback) override;
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   bool WindowManagerProvidesTitleBar(bool maximized) override;
+   gfx::ImageSkia* GetDefaultWindowIcon() const override;
+ #endif
+--- a/chrome/browser/ui/views/chrome_views_delegate_linux.cc
++++ b/chrome/browser/ui/views/chrome_views_delegate_linux.cc
+@@ -44,7 +44,7 @@
+   return desktop_env == base::nix::DESKTOP_ENVIRONMENT_UNITY;
+ }
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ int GetWindowIconResourceId() {
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+   switch (chrome::GetChannel()) {
+@@ -102,7 +102,7 @@
+                               delegate);
+ }
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ gfx::ImageSkia* ChromeViewsDelegate::GetDefaultWindowIcon() const {
+   ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
+   return rb.GetImageSkiaNamed(GetWindowIconResourceId());
 --- a/chrome/browser/ui/views/contextual_tasks/BUILD.gn
 +++ b/chrome/browser/ui/views/contextual_tasks/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -1040,6 +2690,88 @@
  
  source_set("download") {
    sources = [
+--- a/chrome/browser/ui/views/frame/BUILD.gn
++++ b/chrome/browser/ui/views/frame/BUILD.gn
+@@ -2503,7 +2503,7 @@
+   }
+ }
+ 
+-if (is_linux) {
++if (is_linux || is_zedbsd) {
+   if (use_dbus) {
+     source_set("dbus_appmenu") {
+       public = [ "dbus_appmenu.h" ]
+--- a/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc
++++ b/chrome/browser/ui/views/frame/browser_desktop_window_tree_host_linux.cc
+@@ -102,10 +102,12 @@
+     ui::PlatformWindowInitProperties* properties) {
+   views::DesktopWindowTreeHostLinux::AddAdditionalInitProperties(params,
+                                                                  properties);
++#if !BUILDFLAG(IS_ZEDBSD)
+   auto* profile = browser_view_->browser()->GetProfile();
+   const auto* linux_ui_theme = ui::LinuxUiTheme::GetForProfile(profile);
+   properties->prefer_dark_theme =
+       linux_ui_theme && linux_ui_theme->PreferDarkTheme();
++#endif
+ }
+ 
+ views::DesktopWindowTreeHost*
+@@ -248,6 +250,7 @@
+   CHECK(browser_view_);
+   DesktopWindowTreeHostLinux::Show(show_state, restore_bounds);
+ 
++#if !BUILDFLAG(IS_ZEDBSD)
+   const std::string& startup_id =
+       BrowserInitState::From(browser_view_->browser())
+           ->create_params()
+@@ -256,6 +259,7 @@
+     platform_window()->NotifyStartupComplete(startup_id);
+     SentStartupIds().insert(startup_id);
+   }
++#endif
+ }
+ 
+ bool BrowserDesktopWindowTreeHostLinux::IsOverrideRedirect(
+--- a/chrome/browser/ui/views/frame/browser_frame_view_factory_views.cc
++++ b/chrome/browser/ui/views/frame/browser_frame_view_factory_views.cc
+@@ -16,7 +16,7 @@
+ #include "chrome/browser/ui/views/frame/picture_in_picture_browser_frame_view.h"
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/ui/views/frame/browser_frame_view_layout_linux.h"
+ #include "chrome/browser/ui/views/frame/browser_frame_view_layout_linux_native.h"
+ #include "chrome/browser/ui/views/frame/browser_frame_view_linux.h"
+@@ -31,7 +31,7 @@
+ 
+ namespace {
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ std::unique_ptr<OpaqueBrowserFrameView> CreateOpaqueBrowserFrameViewLinux(
+     BrowserWidget* widget,
+     BrowserView* browser_view) {
+--- a/chrome/browser/ui/views/frame/browser_widget.h
++++ b/chrome/browser/ui/views/frame/browser_widget.h
+@@ -65,7 +65,7 @@
+ 
+   ~BrowserWidget() override;
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   // Returns whether the frame is in a tiled state.
+   bool tiled() const { return tiled_; }
+   void set_tiled(bool tiled) { tiled_ = tiled; }
+@@ -193,7 +193,7 @@
+   // contents for smoother dragging.
+   TabDragKind tab_drag_kind_ = TabDragKind::kNone;
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   bool tiled_ = false;
+ #endif
+ };
 --- a/chrome/browser/ui/views/hats/BUILD.gn
 +++ b/chrome/browser/ui/views/hats/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -1126,6 +2858,50 @@
    source_set("profile_menu_view") {
      public = [ "profile_menu_view.h" ]
      sources = [ "profile_menu_view.cc" ]
+--- a/chrome/browser/ui/views/profiles/signin_view_controller_delegate_views.cc
++++ b/chrome/browser/ui/views/profiles/signin_view_controller_delegate_views.cc
+@@ -64,7 +64,8 @@
+ #include "chrome/browser/ui/webui/signin/signout_confirmation/signout_confirmation_ui.h"
+ #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/ui/webui/signin/history_sync_optin/history_sync_optin_ui.h"
+ #include "chrome/browser/ui/webui/signin/managed_user_profile_notice_ui.h"
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
+@@ -140,7 +141,8 @@
+       kSyncConfirmationDialogWidth, InitializeSigninWebDialogUI(true));
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ std::unique_ptr<views::WebView>
+ SigninViewControllerDelegateViews::CreateHistorySyncOptInWebView(
+     BrowserWindowInterface* browser,
+@@ -588,7 +590,8 @@
+       /*animate_on_resize=*/true);
+ }
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // static
+ SigninViewControllerDelegate*
+ SigninViewControllerDelegate::CreateSyncHistoryOptInDelegate(
+--- a/chrome/browser/ui/views/profiles/signin_view_controller_delegate_views.h
++++ b/chrome/browser/ui/views/profiles/signin_view_controller_delegate_views.h
+@@ -59,7 +59,8 @@
+       SyncConfirmationStyle style,
+       bool is_sync_promo);
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   static std::unique_ptr<views::WebView> CreateHistorySyncOptInWebView(
+       BrowserWindowInterface* browser,
+       bool should_close_modal_dialog,
 --- a/chrome/browser/ui/views/relaunch_notification/BUILD.gn
 +++ b/chrome/browser/ui/views/relaunch_notification/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -1181,6 +2957,50 @@
  
  import("//build/config/ui.gni")
  import("//ui/webui/webui_features.gni")
+--- a/chrome/browser/ui/views/web_apps/BUILD.gn
++++ b/chrome/browser/ui/views/web_apps/BUILD.gn
+@@ -62,7 +62,7 @@
+     "//url",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     public += [
+       "deprecated_apps_dialog_view.h",
+       "force_installed_deprecated_apps_dialog_view.h",
+--- a/chrome/browser/ui/web_applications/web_app_dialogs.h
++++ b/chrome/browser/ui/web_applications/web_app_dialogs.h
+@@ -25,7 +25,7 @@
+ #include "ui/gfx/native_ui_types.h"
+ 
+ static_assert(BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+-              BUILDFLAG(IS_CHROMEOS));
++              BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD));
+ 
+ class BrowserWindowInterface;
+ class GURL;
+--- a/chrome/browser/ui/web_applications/web_app_ui_manager_impl.cc
++++ b/chrome/browser/ui/web_applications/web_app_ui_manager_impl.cc
+@@ -1201,7 +1201,7 @@
+ }
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ 
+ const base::Feature& GetPromoFeatureEngagementFromBrowser(
+     const BrowserWindowInterface* browser) {
+--- a/chrome/browser/ui/web_applications/web_app_ui_manager_impl.h
++++ b/chrome/browser/ui/web_applications/web_app_ui_manager_impl.h
+@@ -263,7 +263,7 @@
+       webapps::UninstallResultCode uninstall_code);
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   void ShowIPHPromoForAppsLaunchedViaLinkCapturing(
+       BrowserWindowInterface* browser,
+       const webapps::AppId& app_id,
 --- a/chrome/browser/ui/webui/BUILD.gn
 +++ b/chrome/browser/ui/webui/BUILD.gn
 @@ -727,7 +727,7 @@
@@ -1237,6 +3057,30 @@
  
  mojom("mojo_bindings") {
    sources = [ "app_home.mojom" ]
+--- a/chrome/browser/ui/webui/app_home/app_home_page_handler.cc
++++ b/chrome/browser/ui/webui/app_home/app_home_page_handler.cc
+@@ -65,7 +65,8 @@
+ #include "ui/base/window_open_disposition_utils.h"
+ #include "url/gurl.h"
+ 
+-static_assert(BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX));
++static_assert(BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
++              BUILDFLAG(IS_ZEDBSD));
+ 
+ using content::WebUI;
+ using extensions::Extension;
+--- a/chrome/browser/ui/webui/app_home/app_home_page_handler.h
++++ b/chrome/browser/ui/webui/app_home/app_home_page_handler.h
+@@ -23,7 +23,8 @@
+ #include "mojo/public/cpp/bindings/receiver.h"
+ #include "mojo/public/cpp/bindings/remote.h"
+ 
+-static_assert(BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX));
++static_assert(BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
++              BUILDFLAG(IS_ZEDBSD));
+ 
+ class BrowserWindowInterface;
+ class ExtensionEnableFlow;
 --- a/chrome/browser/ui/webui/app_management/BUILD.gn
 +++ b/chrome/browser/ui/webui/app_management/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -1248,6 +3092,39 @@
  
  source_set("app_management") {
    sources = [
+--- a/chrome/browser/ui/webui/app_settings/BUILD.gn
++++ b/chrome/browser/ui/webui/app_settings/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-assert(is_win || is_mac || is_linux)
++assert(is_win || is_mac || is_linux || is_zedbsd)
+ 
+ source_set("app_settings") {
+   public = [
+--- a/chrome/browser/ui/webui/browser_switch/BUILD.gn
++++ b/chrome/browser/ui/webui/browser_switch/BUILD.gn
+@@ -2,7 +2,7 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || is_linux || is_zedbsd) {
+   source_set("browser_switch") {
+     sources = [ "browser_switch_ui.cc" ]
+     public = [ "browser_switch_ui.h" ]
+--- a/chrome/browser/ui/webui/help/BUILD.gn
++++ b/chrome/browser/ui/webui/help/BUILD.gn
+@@ -70,7 +70,7 @@
+     }
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     sources = [ "version_updater_basic.cc" ]
+   }
+ }
 --- a/chrome/browser/ui/webui/intro/BUILD.gn
 +++ b/chrome/browser/ui/webui/intro/BUILD.gn
 @@ -16,7 +16,7 @@
@@ -1259,6 +3136,27 @@
    source_set("intro") {
      sources = [
        "finish_or_continue_handler.cc",
+--- a/chrome/browser/ui/webui/on_device_translation_internals/BUILD.gn
++++ b/chrome/browser/ui/webui/on_device_translation_internals/BUILD.gn
+@@ -10,7 +10,7 @@
+   webui_module_path = "/"
+ }
+ 
+-if (is_win || is_mac || is_linux) {
++if (is_win || is_mac || is_linux || is_zedbsd) {
+   source_set("on_device_translation_internals") {
+     sources = [
+       "on_device_translation_internals_page_handler_impl.cc",
+@@ -20,8 +20,8 @@
+       "on_device_translation_internals_page_handler_impl.h",
+       "on_device_translation_internals_ui.h",
+     ]
++    public_deps = [ ":mojo_bindings" ]
+     deps = [
+-      ":mojo_bindings",
+       "//base",
+       "//chrome/browser:browser_process",
+       "//chrome/browser/profiles:profile",
 --- a/chrome/browser/ui/webui/organizer_panel/BUILD.gn
 +++ b/chrome/browser/ui/webui/organizer_panel/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -1292,6 +3190,24 @@
  
  source_set("settings") {
    sources = [
+@@ -357,7 +357,7 @@
+     "//v8:v8_version",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     sources += [
+       "settings_default_browser_handler.cc",
+       "settings_manage_profile_handler.cc",
+@@ -387,7 +387,7 @@
+     deps += [ "//chrome/browser/win" ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     sources += [ "settings_utils_linux.cc" ]
+     deps += [
+       "//ui/linux:linux_ui_factory",
 --- a/chrome/browser/ui/webui/settings/search/BUILD.gn
 +++ b/chrome/browser/ui/webui/settings/search/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -1314,6 +3230,85 @@
  
  mojom("mojom") {
    sources = [
+--- a/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
++++ b/chrome/browser/ui/webui/settings/settings_localized_strings_provider.cc
+@@ -674,7 +674,7 @@
+       {"classicTheme", IDS_SETTINGS_CLASSIC_THEME},
+       {"useClassicTheme", IDS_SETTINGS_USE_CLASSIC_THEME},
+ #endif
+-#if !BUILDFLAG(IS_LINUX)
++#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_ZEDBSD)
+       {"resetToDefaultTheme", IDS_SETTINGS_RESET_TO_DEFAULT_THEME},
+ #endif
+       {"resetToolbarToDefault", IDS_SETTINGS_RESET_TOOLBAR_TO_DEFAULT},
+--- a/chrome/browser/ui/webui/settings/site_settings_handler.cc
++++ b/chrome/browser/ui/webui/settings/site_settings_handler.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/ui/webui/settings/site_settings_handler.h"
++#include "components/webapps/isolated_web_apps/scheme.h"
+ 
+ #include <algorithm>
+ #include <memory>
+@@ -2119,7 +2120,7 @@
+   base::ListValue zoom_levels_exceptions;
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   // Show any non-default Isolated Web App zoom levels at the top of the page.
+   auto* web_app_provider = web_app::WebAppProvider::GetForWebApps(profile_);
+   if (web_app_provider) {
+--- a/chrome/browser/ui/webui/signin/BUILD.gn
++++ b/chrome/browser/ui/webui/signin/BUILD.gn
+@@ -135,7 +135,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     sources += [
+       "history_sync_optin/history_sync_optin_handler.h",
+       "history_sync_optin/history_sync_optin_ui.h",
+@@ -229,7 +229,7 @@
+     ]
+   }
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     sources += [
+       "history_sync_optin/history_sync_optin_handler.cc",
+       "history_sync_optin/history_sync_optin_ui.cc",
+@@ -464,7 +464,7 @@
+       "//url",
+     ]
+ 
+-    if (is_win || is_mac || is_linux) {
++    if (is_win || is_mac || is_linux || is_zedbsd) {
+       deps += [ "//chrome/browser/ui/views/profiles:profile_management_types" ]
+     }
+   }
+--- a/chrome/browser/ui/webui/signin/cross_device_signin_qr_bubble/cross_device_signin_qr_bubble.mojom
++++ b/chrome/browser/ui/webui/signin/cross_device_signin_qr_bubble/cross_device_signin_qr_bubble.mojom
+@@ -15,7 +15,7 @@
+ 
+ // Used by the WebUI page to bootstrap communication.
+ // Messages sent from WebUI to C++.
+-[EnableIf=is_linux|is_mac|is_win]
++[EnableIf=is_linux|is_mac|is_win|is_zedbsd]
+ interface PageHandlerFactory {
+   // Creates a PageHandler to enable communication with the C++ backend.
+   // |handler|: A pending receiver that will be bound to the C++ implementation.
+@@ -24,7 +24,7 @@
+ };
+ 
+ // Messages sent from WebUI to C++.
+-[EnableIf=is_linux|is_mac|is_win]
++[EnableIf=is_linux|is_mac|is_win|is_zedbsd]
+ interface PageHandler {
+   // Fetches the user's current account information and a generated QR code.
+   // This is called once by the frontend to populate the UI when it loads.
 --- a/chrome/browser/ui/webui/signin/history_sync_optin/BUILD.gn
 +++ b/chrome/browser/ui/webui/signin/history_sync_optin/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -1336,6 +3331,17 @@
  assert(!is_fuchsia, "Fuchsia shouldn't use anything in //chrome")
  
  mojom("mojo_bindings") {
+--- a/chrome/browser/ui/webui/updater/BUILD.gn
++++ b/chrome/browser/ui/webui/updater/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//mojo/public/tools/bindings/mojom.gni")
+ 
+-assert(is_mac || is_win || is_linux)
++assert(is_mac || is_win || is_linux || is_zedbsd)
+ 
+ mojom("mojo_bindings") {
+   sources = [ "updater_ui.mojom" ]
 --- a/chrome/browser/ui/webui/util/BUILD.gn
 +++ b/chrome/browser/ui/webui/util/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -1347,6 +3353,37 @@
  
  source_set("util") {
    public = [
+--- a/chrome/browser/ui/webui/whats_new/BUILD.gn
++++ b/chrome/browser/ui/webui/whats_new/BUILD.gn
+@@ -24,7 +24,7 @@
+     "//url",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     sources += [
+       "whats_new_fetcher.h",
+       "whats_new_handler.h",
+@@ -72,7 +72,7 @@
+     "//url",
+   ]
+ 
+-  if (is_win || is_mac || is_linux) {
++  if (is_win || is_mac || is_linux || is_zedbsd) {
+     sources += [
+       "whats_new_fetcher.cc",
+       "whats_new_handler.cc",
+--- a/chrome/browser/ui/window_sizer/window_sizer.cc
++++ b/chrome/browser/ui/window_sizer/window_sizer.cc
+@@ -225,7 +225,7 @@
+       browser, window_bounds, show_state);
+ }
+ 
+-#if !BUILDFLAG(IS_LINUX)
++#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_ZEDBSD)
+ // Linux has its own implementation, see WindowSizerLinux.
+ // static
+ void WindowSizer::GetBrowserWindowBoundsAndShowState(
 --- a/chrome/browser/ui/zoom/BUILD.gn
 +++ b/chrome/browser/ui/zoom/BUILD.gn
 @@ -2,7 +2,7 @@
@@ -1358,9 +3395,338 @@
  
  source_set("zoom") {
    sources = [
+--- a/chrome/browser/updates/BUILD.gn
++++ b/chrome/browser/updates/BUILD.gn
+@@ -3,7 +3,7 @@
+ # found in the LICENSE file.
+ 
+ source_set("update_metrics") {
+-  assert(is_linux || is_win || is_mac)
++  assert(is_linux || is_win || is_mac || is_zedbsd)
+ 
+   public = [ "update_metrics_provider.h" ]
+ 
+@@ -11,7 +11,7 @@
+ }
+ 
+ source_set("impl") {
+-  assert(is_linux || is_win || is_mac)
++  assert(is_linux || is_win || is_mac || is_zedbsd)
+ 
+   sources = [ "update_metrics_provider.cc" ]
+ 
+--- a/chrome/browser/upgrade_detector/version_history_client.cc
++++ b/chrome/browser/upgrade_detector/version_history_client.cc
+@@ -177,7 +177,7 @@
+ #define CURRENT_PLATFORM "win"
+ #endif
+ 
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ 
+ #define CURRENT_PLATFORM "linux"
+ 
+--- a/chrome/browser/web_applications/BUILD.gn
++++ b/chrome/browser/web_applications/BUILD.gn
+@@ -458,6 +458,10 @@
+     sources += [
+       "os_integration/dynamic_launcher_portal.cc",
+       "os_integration/dynamic_launcher_portal.h",
++    ]
++  }
++  if (is_linux || is_zedbsd) {
++    sources += [
+       "os_integration/web_app_file_handler_registration_linux.cc",
+       "os_integration/web_app_run_on_os_login_linux.cc",
+       "os_integration/web_app_shortcut_linux.cc",
+--- a/chrome/browser/web_applications/icons/icon_masker.cc
++++ b/chrome/browser/web_applications/icons/icon_masker.cc
+@@ -12,7 +12,7 @@
+ 
+ namespace web_app {
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ZEDBSD)
+ void MaskIconOnOs(SkBitmap input_bitmap, MaskedIconCallback masked_callback) {
+   base::SequencedTaskRunner::GetCurrentDefault()->PostTask(
+       FROM_HERE,
+--- a/chrome/browser/web_applications/os_integration/os_integration_test_override.h
++++ b/chrome/browser/web_applications/os_integration/os_integration_test_override.h
+@@ -103,7 +103,7 @@
+   virtual base::FilePath chrome_apps_folder() = 0;
+   virtual void EnableOrDisablePathOnLogin(const base::FilePath& file_path,
+                                           bool enable_on_login) = 0;
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   virtual base::Environment* environment() = 0;
+ #endif
+ 
+--- a/chrome/browser/web_applications/os_integration/web_app_file_handler_registration.h
++++ b/chrome/browser/web_applications/os_integration/web_app_file_handler_registration.h
+@@ -40,7 +40,7 @@
+                                   const base::FilePath& profile_path,
+                                   ResultCallback callback);
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ // Exposed for testing purposes. Register the set of
+ // MIME-type-to-file-extensions mappings corresponding to |file_handlers|. File
+ // I/O and callouts to the Linux shell are performed asynchronously.
+--- a/chrome/browser/web_applications/os_integration/web_app_shortcut.h
++++ b/chrome/browser/web_applications/os_integration/web_app_shortcut.h
+@@ -22,9 +22,9 @@
+ #include "ui/gfx/image/image_family.h"
+ #include "url/gurl.h"
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/browser/web_applications/os_integration/web_app_shortcut_linux.h"
+-#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ 
+ #if BUILDFLAG(IS_MAC)
+ #include "chrome/browser/web_applications/os_integration/mac/app_shim_registry.h"
+@@ -77,9 +77,9 @@
+   // the installed PWA experience and thus the icons are not designed to be
+   // displayed on an OS dock.
+   bool is_diy_app = false;
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   std::set<DesktopActionInfo> actions;
+-#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ 
+   // An app is multi-profile if there is a single shortcut and single app shim
+   // for all profiles. The app itself has a profile switcher that may be used
+--- a/chrome/browser/web_applications/web_app.cc
++++ b/chrome/browser/web_applications/web_app.cc
+@@ -3,6 +3,7 @@
+ // found in the LICENSE file.
+ 
+ #include "chrome/browser/web_applications/web_app.h"
++#include "components/webapps/isolated_web_apps/scheme.h"
+ 
+ #include <array>
+ #include <cstdint>
+@@ -728,7 +729,7 @@
+ void WebApp::SetIsolationData(IsolationData isolation_data) {
+   CHECK(manifest_id_.is_valid()
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+         && manifest_id_.value().SchemeIs(webapps::kIsolatedAppScheme))
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+         // BUILDFLAG(IS_CHROMEOS)
+--- a/chrome/browser/web_applications/web_app_install_info.h
++++ b/chrome/browser/web_applications/web_app_install_info.h
+@@ -41,7 +41,7 @@
+ #include "url/gurl.h"
+ 
+ static_assert(BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+-              BUILDFLAG(IS_CHROMEOS));
++              BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD));
+ 
+ namespace web_app {
+ 
+--- a/chrome/browser/webauthn/password_credential_ui_controller.cc
++++ b/chrome/browser/webauthn/password_credential_ui_controller.cc
+@@ -26,7 +26,7 @@
+ namespace {
+ 
+ std::u16string GetAuthenticationMessage(std::string_view rp_id) {
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   return u"";
+ #else
+   return l10n_util::GetStringFUTF16(IDS_PASSWORD_MANAGER_FILLING_REAUTH,
+--- a/chrome/common/BUILD.gn
++++ b/chrome/common/BUILD.gn
+@@ -305,7 +305,7 @@
+     ]
+ 
+     # Add controlled frame dependencies on platforms that support it.
+-    if (is_win || is_mac || is_linux || is_chromeos) {
++    if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+       assert(enable_extensions)
+       deps += [
+         "//chrome/common/apps/platform_apps",
+@@ -420,11 +420,13 @@
+     public_deps += [ "//chrome/common/safe_browsing" ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     sources += [
+       "auto_start_linux.cc",
+       "auto_start_linux.h",
+     ]
++  }
++  if (is_linux || is_chromeos) {
+     deps += [ "//sandbox/linux:sandbox_services" ]
+   }
+ 
+@@ -606,7 +608,7 @@
+     # implemented in //ui/base, so we need that dependency.
+     deps += [ "//ui/base" ]
+   }
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "chrome_paths_linux.cc" ]
+     deps += [ ":channel_info" ]
+   }
+--- a/chrome/common/channel_info.h
++++ b/chrome/common/channel_info.h
+@@ -11,11 +11,11 @@
+ #include "build/branding_buildflags.h"
+ #include "build/build_config.h"
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ namespace base {
+ class Environment;
+ }
+-#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ 
+ namespace version_info {
+ enum class Channel;
+@@ -99,13 +99,13 @@
+ std::string GetChannelSuffixForDataDir();
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ std::string GetChannelSuffixForExtraFlagsEnvVarName();
+ 
+ // Returns the channel-specific filename of the desktop shortcut used to launch
+ // the browser.
+ std::string GetDesktopName(base::Environment* env);
+-#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ 
+ }  // namespace chrome
+ 
+--- a/chrome/common/channel_info_posix.cc
++++ b/chrome/common/channel_info_posix.cc
+@@ -117,7 +117,7 @@
+ }
+ #endif  // BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ std::string GetDesktopName(base::Environment* env) {
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+   // Google Chrome packaged as a snap is a special case: the application name
+--- a/chrome/common/chrome_features.cc
++++ b/chrome/common/chrome_features.cc
+@@ -66,7 +66,7 @@
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ // Enables or disables the Autofill survey triggered by opening a prompt to
+ // save address info.
+ BASE_FEATURE(kAutofillAddressSurvey, base::FEATURE_DISABLED_BY_DEFAULT);
+@@ -227,7 +227,8 @@
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Controls whether Chrome Apps are supported. See https://crbug.com/40186761.
+ // If the feature is disabled, Chrome Apps continue to work. If enabled, Chrome
+ // Apps will not launch and will be marked in the UI as deprecated.
+--- a/chrome/common/chrome_features.h
++++ b/chrome/common/chrome_features.h
+@@ -59,7 +59,7 @@
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ COMPONENT_EXPORT(CHROME_FEATURES) BASE_DECLARE_FEATURE(kAutofillAddressSurvey);
+ COMPONENT_EXPORT(CHROME_FEATURES) BASE_DECLARE_FEATURE(kAutofillCardSurvey);
+ COMPONENT_EXPORT(CHROME_FEATURES) BASE_DECLARE_FEATURE(kAutofillPasswordSurvey);
+@@ -143,7 +143,8 @@
+ COMPONENT_EXPORT(CHROME_FEATURES)
+ BASE_DECLARE_FEATURE(kDocumentPipStandaloneWindow);
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ COMPONENT_EXPORT(CHROME_FEATURES) BASE_DECLARE_FEATURE(kChromeAppsDeprecation);
+ #endif
+ 
+--- a/chrome/common/chrome_paths.h
++++ b/chrome/common/chrome_paths.h
+@@ -107,7 +107,7 @@
+ 
+ #if BUILDFLAG(ENABLE_EXTENSIONS_CORE) &&                                   \
+     (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
+-     BUILDFLAG(IS_ANDROID))
++     BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD))
+   DIR_NATIVE_MESSAGING,       // System directory where native messaging host
+                               // manifest files are stored.
+   DIR_USER_NATIVE_MESSAGING,  // Directory with Native Messaging Hosts
+--- a/chrome/common/chrome_switches.h
++++ b/chrome/common/chrome_switches.h
+@@ -1053,7 +1053,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_MAC) || \
+-    BUILDFLAG(IS_WIN)
++    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ZEDBSD)
+ // Causes the browser to launch directly in guest mode.
+ inline constexpr char kGuest[] = "guest";
+ 
+@@ -1127,7 +1127,8 @@
+ 
+ inline constexpr char kGlicGuestUrlPresetProd[] = "glic-guest-url-preset-prod";
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Writes open and installed web apps for each profile to the specified file
+ // without launching a new browser window or tab. Pass a absolute file path
+ // to specify where to output the information. Can be used together with
+--- a/chrome/common/extensions/api/api_sources.gni
++++ b/chrome/common/extensions/api/api_sources.gni
+@@ -103,7 +103,7 @@
+     schema_sources_ += [ "web_authentication_proxy.webidl" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     schema_sources_ += [ "contextual_tasks_private.webidl" ]
+   }
+ 
+--- a/chrome/common/extensions/extension_constants.h
++++ b/chrome/common/extensions/extension_constants.h
+@@ -175,7 +175,8 @@
+ inline constexpr base::FilePath::CharType kNewTabPageExtensionDirName[] =
+     FILE_PATH_LITERAL("new_tab_page_extension");
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // The extension id of the google tts engine extension to use on-device natural
+ // Google voices.
+ inline constexpr char kTTSEngineExtensionId[] =
+@@ -225,7 +226,8 @@
+         kGoogleSpeechSynthesisExtensionId,
+         kTextEditorAppId,
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || \
++    BUILDFLAG(IS_ZEDBSD)
+         kTTSEngineExtensionId,
+         kComponentUpdaterTTSEngineExtensionId,
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC)
 --- a/chrome/common/features.gni
 +++ b/chrome/common/features.gni
-@@ -40,7 +40,7 @@
+@@ -40,14 +40,14 @@
    # supported on all desktop platforms, as opposed to the v1 UI which is only
    # supported on platforms using NSS (Linux and CrOS).
    chrome_root_store_cert_management_ui =
@@ -1369,6 +3735,132 @@
  
    # Enables support for background apps.
    enable_background_contents = !is_android
+   enable_background_mode = !is_android && !is_chromeos
+ 
+   # Enables usage of notifications via Chrome's MessageCenter.
+-  enable_chrome_notifications = is_mac || is_win || is_linux
++  enable_chrome_notifications = is_mac || is_win || is_linux || is_zedbsd
+ 
+   # Skips unmigrated actor files in the build on Android. This is temporary, and
+   # will eventually be removed once migration is done. Adding this flag likely
+--- a/chrome/common/importer/BUILD.gn
++++ b/chrome/common/importer/BUILD.gn
+@@ -89,7 +89,7 @@
+     "importer_bridge.h",
+     "pstore_declarations.h",
+   ]
+-  if (is_chromeos || is_linux) {
++  if (is_chromeos || is_linux || is_zedbsd) {
+     sources += [ "firefox_importer_utils_linux.cc" ]
+   } else if (is_mac) {
+     sources += [
+--- a/chrome/common/pref_names.h
++++ b/chrome/common/pref_names.h
+@@ -831,7 +831,7 @@
+     "browser.show_update_promotion_info_bar";
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ // Boolean that is false if we should show window manager decorations.  If
+ // true, we draw a custom chrome frame (thicker title bar and blue border).
+ inline constexpr char kUseCustomChromeFrame[] = "browser.custom_chrome_frame";
+@@ -1417,7 +1417,8 @@
+     "browser.pin_infobar_times_shown";
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ 
+ // How many times the session restore infobar has been shown.
+ inline constexpr char kSessionRestoreInfoBarTimesShown[] =
+@@ -1559,7 +1560,8 @@
+ inline constexpr char kRestartInBackgroundOnShutdown[] =
+     "restart.in.background.on.shutdown";
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Timestamp of when the scheduled restart nudge dialog was last shown
+ // to the user, used for nudge cooldown calculations.
+ inline constexpr char kScheduledRestartLastNudgeTime[] =
+@@ -2946,7 +2948,8 @@
+ inline constexpr char kLensDesktopNTPSearchEnabled[] =
+     "policy.lens_desktop_ntp_search_enabled";
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // A dict mapping the edition name with the major version it was shown.
+ inline constexpr char kWhatsNewEditionUsed[] = "browser.whats_new.edition_used";
+ // A list containing the features of each module in order of when they
+--- a/chrome/common/url_constants.h
++++ b/chrome/common/url_constants.h
+@@ -717,7 +717,8 @@
+     "https://support.google.com/chrome?p=process_isolation";
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // "Learn more" URL for the chrome apps deprecation dialog.
+ inline constexpr char kChromeAppsDeprecationLearnMoreURL[] =
+     "https://support.google.com/chrome?p=chrome_app_deprecation";
+--- a/chrome/common/webui_url_constants.h
++++ b/chrome/common/webui_url_constants.h
+@@ -456,12 +456,14 @@
+ #endif  // BUILDFLAG(IS_CHROMEOS)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_DESKTOP_ANDROID)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_DESKTOP_ANDROID) || \
++    BUILDFLAG(IS_ZEDBSD)
+ inline constexpr char kChromeUIDiscardsHost[] = "discards";
+ inline constexpr char kChromeUIDiscardsURL[] = "chrome://discards/";
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ inline constexpr char kChromeUIDefaultBrowserModalURL[] =
+     "chrome://default-browser-modal/";
+ inline constexpr char kChromeUIDefaultBrowserModalHost[] =
+@@ -484,11 +486,12 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || \
+-    BUILDFLAG(IS_ANDROID)
++    BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_ZEDBSD)
+ inline constexpr char kChromeUISandboxHost[] = "sandbox";
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ inline constexpr char kChromeUIBrowserSwitchHost[] = "browser-switch";
+ inline constexpr char kChromeUIBrowserSwitchURL[] = "chrome://browser-switch/";
+ inline constexpr char kChromeUIIntroDefaultBrowserSubPage[] = "default-browser";
+--- a/chrome/enterprise_companion/BUILD.gn
++++ b/chrome/enterprise_companion/BUILD.gn
+@@ -552,7 +552,7 @@
+ artifact_zip("prod_zip") {
+   output = "$root_build_dir/enterprise_companion.zip"
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     inputs = [ "$root_build_dir/enterprise_companion" ]
+     deps = [ ":enterprise_companion" ]
+   } else if (is_mac) {
+@@ -589,7 +589,7 @@
+ artifact_zip("test_zip") {
+   output = "$root_build_dir/enterprise_companion_test.zip"
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     inputs = [ "$root_build_dir/enterprise_companion_test" ]
+     deps = [ ":enterprise_companion_test" ]
+   } else if (is_mac) {
 --- a/chrome/services/speech/buildflags/buildflags.gni
 +++ b/chrome/services/speech/buildflags/buildflags.gni
 @@ -11,7 +11,8 @@
@@ -1381,6 +3873,67 @@
  }
  
  declare_args() {
+--- a/chrome/utility/BUILD.gn
++++ b/chrome/utility/BUILD.gn
+@@ -117,7 +117,7 @@
+         "importer/safari_importer.mm",
+       ]
+     }
+-    if (!is_mac && !is_chromeos) {
++    if (!is_mac && !is_chromeos && !is_zedbsd) {
+       # NSS decryptor is not needed on ChromeOS. Additionally, it depends on
+       # system NSS that is unavailable on MacOS/Fuchsia.
+       sources += [
+--- a/chrome/utility/importer/firefox_importer.cc
++++ b/chrome/utility/importer/firefox_importer.cc
+@@ -32,9 +32,9 @@
+ #include "sql/statement.h"
+ #include "url/gurl.h"
+ 
+-#if !BUILDFLAG(IS_MAC)
++#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ZEDBSD)
+ #include "chrome/utility/importer/nss_decryptor.h"
+-#endif  // !BUILDFLAG(IS_MAC)
++#endif  // !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ZEDBSD)
+ 
+ namespace {
+ 
+@@ -154,13 +154,13 @@
+ }
+ 
+ void FirefoxImporter::ImportRemainingItems() {
+-#if !BUILDFLAG(IS_MAC)
++#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ZEDBSD)
+   if ((items_ & user_data_importer::PASSWORDS) && !cancelled()) {
+     bridge_->NotifyItemStarted(user_data_importer::PASSWORDS);
+     ImportPasswords();
+     bridge_->NotifyItemEnded(user_data_importer::PASSWORDS);
+   }
+-#endif  // !BUILDFLAG(IS_MAC)
++#endif  // !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ZEDBSD)
+   if ((items_ & user_data_importer::AUTOFILL_FORM_DATA) && !cancelled()) {
+     bridge_->NotifyItemStarted(user_data_importer::AUTOFILL_FORM_DATA);
+     ImportAutofillFormData();
+@@ -454,7 +454,7 @@
+   ImportRemainingItems();
+ }
+ 
+-#if !BUILDFLAG(IS_MAC)
++#if !BUILDFLAG(IS_MAC) && !BUILDFLAG(IS_ZEDBSD)
+ void FirefoxImporter::ImportPasswords() {
+   // Initializes NSS3.
+   NSSDecryptor decryptor;
+--- a/components/autofill/core/browser/BUILD.gn
++++ b/components/autofill/core/browser/BUILD.gn
+@@ -1616,7 +1616,7 @@
+     deps += [ "//components/autofill/ios/common" ]
+   }
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos || is_android) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_android || is_zedbsd) {
+     sources += [
+       "metrics/cross_tab_copy_paste_tracker.cc",
+       "metrics/cross_tab_copy_paste_tracker.h",
 --- a/components/compose/features.gni
 +++ b/components/compose/features.gni
 @@ -4,5 +4,5 @@
@@ -1401,6 +3954,37 @@
    if (!(platform & PLATFORM_LINUX))
      return nullptr;
  #elif BUILDFLAG(IS_MAC)
+--- a/components/crash/core/app/crashpad.cc
++++ b/components/crash/core/app/crashpad.cc
+@@ -97,7 +97,8 @@
+ #endif  // BUILDFLAG(GOOGLE_CHROME_BRANDING)
+            process_type == "GCPW Installer" || process_type == "GCPW DLL" ||
+            process_type == "elevated-tracing-service");
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID) || \
++    BUILDFLAG(IS_ZEDBSD)
+     DCHECK(browser_process);
+ #else
+ #error Port.
+@@ -172,6 +173,8 @@
+   const bool should_initialize_database_and_set_upload_policy = initial_client;
+ #elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ANDROID)
+   const bool should_initialize_database_and_set_upload_policy = browser_process;
++#elif BUILDFLAG(IS_ZEDBSD)
++  const bool should_initialize_database_and_set_upload_policy = false;
+ #endif
+   if (should_initialize_database_and_set_upload_policy) {
+     InitializeDatabasePath(database_path);
+@@ -266,7 +269,9 @@
+ 
+ #if !BUILDFLAG(IS_ANDROID)
+ void DumpWithoutCrashing() {
++#if !BUILDFLAG(IS_ZEDBSD)
+   CRASHPAD_SIMULATE_CRASH();
++#endif
+ }
+ 
+ #if BUILDFLAG(IS_IOS)
 --- a/components/crash/core/common/BUILD.gn
 +++ b/components/crash/core/common/BUILD.gn
 @@ -8,7 +8,7 @@
@@ -1412,6 +3996,91 @@
  }
  
  group("common") {
+--- a/components/crash/core/common/crash_keys.h
++++ b/components/crash/core/common/crash_keys.h
+@@ -37,6 +37,8 @@
+   std::string_view Name() const { return name_; }
+ #if BUILDFLAG(USE_CRASHPAD_ANNOTATION)
+   std::string_view Value() const { return crash_key_.value(); }
++#else
++  std::string_view Value() const { return {}; }
+ #endif
+   void Clear() { crash_key_.Clear(); }
+   void Set(std::string_view value) { crash_key_.Set(value); }
+--- a/components/device_signals/core/browser/BUILD.gn
++++ b/components/device_signals/core/browser/BUILD.gn
+@@ -85,7 +85,7 @@
+       "//components/safe_browsing/android:safe_browsing_api_handler",
+       "//components/safe_browsing/android:safe_browsing_api_handler_util",
+     ]
+-  } else if (is_win || is_mac || is_linux || is_chromeos) {
++  } else if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     public += [
+       "agent_signals_collector.h",
+       "certificate_signals_collector.h",
+@@ -111,7 +111,7 @@
+     sources += [ "mac/browser_utils_mac.cc" ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "linux/browser_utils_linux.cc" ]
+   }
+ 
+--- a/components/device_signals/core/browser/browser_utils.h
++++ b/components/device_signals/core/browser/browser_utils.h
+@@ -39,7 +39,7 @@
+ #endif  // !BUILDFLAG(IS_ANDROID) && !BUILDFLAG(IS_IOS)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ // Returns the hostname of the current machine.
+ std::vector<std::string> GetSystemDnsServers();
+ 
+--- a/components/device_signals/core/browser/linux/browser_utils_linux.cc
++++ b/components/device_signals/core/browser/linux/browser_utils_linux.cc
+@@ -55,6 +55,8 @@
+     return SettingValue::UNKNOWN;
+   }
+   return SettingValue::ENABLED;
++#elif BUILDFLAG(IS_ZEDBSD)
++  return SettingValue::UNKNOWN;
+ #else
+   base::FilePath path(*GetUfwConfigPath());
+   std::string file_content;
+--- a/components/device_signals/core/common/BUILD.gn
++++ b/components/device_signals/core/common/BUILD.gn
+@@ -50,7 +50,7 @@
+     deps += [ ":features" ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     if (use_glib) {
+       deps += [ "//ui/base/glib" ]
+     }
+--- a/components/device_signals/core/common/linux/platform_utils_linux.cc
++++ b/components/device_signals/core/common/linux/platform_utils_linux.cc
+@@ -8,7 +8,9 @@
+ #include <gio/gio.h>
+ #endif  // defined(USE_GIO)
+ #include <sys/stat.h>
++#if !defined(__ZEDBSD__)
+ #include <sys/sysmacros.h>
++#endif
+ 
+ #include <algorithm>
+ #include <optional>
+@@ -128,6 +130,8 @@
+ #if BUILDFLAG(IS_CHROMEOS)
+   // ChromeOS user partitions are always encrypted via cryptohome.
+   return SettingValue::ENABLED;
++#elif defined(__ZEDBSD__)
++  return SettingValue::UNKNOWN;
+ #else
+   struct stat info;
+   // First figure out the device identifier. Fail fast if this fails.
 --- a/components/embedder_support/user_agent_utils.cc
 +++ b/components/embedder_support/user_agent_utils.cc
 @@ -260,7 +260,7 @@
@@ -1434,7 +4103,7 @@
    if (ui::GetDeviceFormFactor() == ui::DEVICE_FORM_FACTOR_TABLET) {
 --- a/components/enterprise/buildflags/buildflags.gni
 +++ b/components/enterprise/buildflags/buildflags.gni
-@@ -10,25 +10,25 @@
+@@ -10,29 +10,30 @@
    # Indicates support for content analysis against a cloud agent for Enterprise
    # Connector policies.
    enterprise_cloud_content_analysis =
@@ -1466,8 +4135,45 @@
  
    # Indicates support for Enterprise Proxy policy and service.
    enterprise_proxy =
+-      is_win || is_mac || is_linux || is_chromeos || is_android || is_ios
++      is_win || is_mac || is_linux || is_chromeos || is_android || is_ios ||
++      is_zedbsd
+ }
+ 
+ declare_args() {
+--- a/components/feature_engagement/public/event_constants.cc
++++ b/components/feature_engagement/public/event_constants.cc
+@@ -11,7 +11,7 @@
+ namespace events {
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+ const char kNewTabOpened[] = "new_tab_opened";
+ const char kSixthTabOpened[] = "sixth_tab_opened";
+ const char kReadingListItemAdded[] = "reading_list_item_added";
+--- a/components/feature_engagement/public/event_constants.h
++++ b/components/feature_engagement/public/event_constants.h
+@@ -14,7 +14,7 @@
+ 
+ // Desktop
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+ // The user has explicitly opened a new tab via an entry point from inside of
+ // Chrome.
+ extern const char kNewTabOpened[];
 --- a/components/feature_engagement/public/feature_constants.cc
 +++ b/components/feature_engagement/public/feature_constants.cc
+@@ -35,7 +35,7 @@
+ }
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ BASE_FEATURE(kEsbDownloadRowPromoFeature,
+              "EsbDownloadRowPromo",
 @@ -1045,7 +1045,8 @@
  #endif  // BUILDFLAG(IS_IOS)
  
@@ -1478,8 +4184,36 @@
  BASE_FEATURE(kIPHAutofillAtMemoryFeature,
               "IPH_AutofillAtMemory",
               base::FEATURE_DISABLED_BY_DEFAULT);
+@@ -1110,7 +1111,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ // This can be enabled by default, as the DesktopPWAsLinkCapturing
+ // flag is needed for the IPH linked to this feature to work, and
+ // use-cases to show the IPH are guarded by that flag.
+@@ -1127,7 +1128,8 @@
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+         // BUILDFLAG(IS_CHROMEOS)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kIPHSignInBenefitsFeature,
+              "IPH_SignInBenefits",
+              base::FEATURE_DISABLED_BY_DEFAULT);
 --- a/components/feature_engagement/public/feature_constants.h
 +++ b/components/feature_engagement/public/feature_constants.h
+@@ -34,7 +34,7 @@
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHDummyFeature);
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kEsbDownloadRowPromoFeature);
+ #endif
 @@ -472,7 +472,8 @@
  #endif  // BUILDFLAG(IS_IOS)
  
@@ -1490,8 +4224,34 @@
  FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHAutofillAtMemoryFeature);
  FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHAutofillBnplAffirmOrZipSuggestionFeature);
  FEATURE_CONSTANTS_DECLARE_FEATURE(
+@@ -506,13 +507,14 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHDesktopPWAsLinkCapturingLaunch);
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHDesktopPWAsLinkCapturingLaunchAppInTab);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+         // BUILDFLAG(IS_CHROMEOS)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHSignInBenefitsFeature);
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHSignInBenefitsNewSigninFeature);
+ FEATURE_CONSTANTS_DECLARE_FEATURE(kIPHSupervisedUserProfileSigninFeature);
 --- a/components/feature_engagement/public/feature_list.cc
 +++ b/components/feature_engagement/public/feature_list.cc
+@@ -258,7 +258,7 @@
+ #endif  // BUILDFLAG(IS_IOS)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_APPLE) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD)
+ #if BUILDFLAG(GOOGLE_CHROME_BRANDING)
+     &kEsbDownloadRowPromoFeature,
+ #endif
 @@ -363,7 +363,8 @@
          // BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_FUCHSIA)
  
@@ -1512,6 +4272,38 @@
 +  enable_on_device_translation =
 +      is_mac || is_win || is_linux || is_chromeos || is_zedbsd
  }
+--- a/components/password_manager/core/browser/password_manager_client.h
++++ b/components/password_manager/core/browser/password_manager_client.h
+@@ -33,7 +33,7 @@
+ #include "net/cert/cert_status_flags.h"
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #include "base/i18n/rtl.h"
+ #include "components/password_manager/core/browser/password_cross_domain_confirmation_popup_controller.h"
+ #include "ui/gfx/geometry/rect_f.h"
+@@ -594,7 +594,7 @@
+   virtual void TriggerSignIn(signin_metrics::AccessPoint access_point) const;
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   // Shows the bubble with the details of the `form`.
+   virtual void OpenPasswordDetailsBubble(
+       const password_manager::PasswordForm& form) = 0;
+--- a/components/payments/content/browser_binding/BUILD.gn
++++ b/components/payments/content/browser_binding/BUILD.gn
+@@ -2,7 +2,8 @@
+ # Use of this source code is governed by a BSD-style license that can be
+ # found in the LICENSE file.
+ 
+-is_desktop = is_mac || is_win || is_linux || is_chromeos || is_fuchsia
++is_desktop =
++    is_mac || is_win || is_linux || is_chromeos || is_fuchsia || is_zedbsd
+ 
+ source_set("browser_binding") {
+   visibility = [
 --- a/components/policy/core/common/cloud/cloud_policy_util.cc
 +++ b/components/policy/core/common/cloud/cloud_policy_util.cc
 @@ -138,7 +138,7 @@
@@ -1563,6 +4355,30 @@
  
  static_library("renderer") {
    sources = [
+--- a/components/regional_capabilities/regional_capabilities_service.cc
++++ b/components/regional_capabilities/regional_capabilities_service.cc
+@@ -460,7 +460,8 @@
+       .choice_screen_eligibility_config.has_value();
+ }
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // static
+ bool RegionalCapabilitiesService::IsInAnySearchEngineChoiceScreenRegion(
+     Client& client) {
+--- a/components/regional_capabilities/regional_capabilities_service.h
++++ b/components/regional_capabilities/regional_capabilities_service.h
+@@ -132,7 +132,8 @@
+   static bool IsInAnySearchEngineChoiceScreenRegion(
+       const country_codes::CountryId& tested_country_id);
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+   // Returns whether the country obtained from the client is associated with
+   // a region in which we can show a search engine choice screen.
+   //
 --- a/components/safe_browsing/content/resources/BUILD.gn
 +++ b/components/safe_browsing/content/resources/BUILD.gn
 @@ -29,7 +29,7 @@
@@ -1574,6 +4390,17 @@
      target_arch = "linux"
    } else {
      # This will cause the script to fail.
+--- a/components/security_interstitials/content/utils.cc
++++ b/components/security_interstitials/content/utils.cc
+@@ -93,7 +93,7 @@
+   options.wait = false;
+   base::LaunchProcess(command, options);
+ 
+-#elif BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_IOS)
++#elif BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_IOS) || BUILDFLAG(IS_ZEDBSD)
+   // TODO(crbug.com/40191566): Send to the platform settings.
+   // The iOS Blink port also need to send the platform settings.
+   NOTIMPLEMENTED_LOG_ONCE();
 --- a/components/signin/features.gni
 +++ b/components/signin/features.gni
 @@ -10,7 +10,7 @@
@@ -1585,6 +4412,416 @@
  
  # Mirror is enabled and other account consistency mechanisms are not available.
  enable_mirror = is_android || is_chromeos || is_ios
+--- a/components/signin/public/base/signin_switches.cc
++++ b/components/signin/public/base/signin_switches.cc
+@@ -39,6 +39,7 @@
+ #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD) || \
+     BUILDFLAG(IS_ANDROID)
+ // Feature param to pass probability for identity surveys.
+ constexpr char kHatsSurveyProbabilityName[] = "probability";
+@@ -74,7 +75,8 @@
+ BASE_FEATURE(kAvoidAutoTriggerListAccountsOnStale,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kBeforeFirstRunDesktopRefreshSurvey,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+@@ -145,7 +147,8 @@
+                    1.0);
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ constexpr double kMediumSurveyProbability = 0.08;
+ constexpr double kLowSurveyProbability = 0.008;
+ BASE_FEATURE(kChromeIdentitySurveyAddressBubbleSignin,
+@@ -237,7 +240,8 @@
+     kMediumSurveyProbability);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kChromeIdentitySurveyLaunchWithDelay,
+              base::FEATURE_ENABLED_BY_DEFAULT);
+ BASE_FEATURE_PARAM(base::TimeDelta,
+@@ -262,7 +266,8 @@
+ BASE_FEATURE(kCrossDeviceSigninDismissModals, base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_IOS)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kCrossDeviceSigninFromDesktop, base::FEATURE_ENABLED_BY_DEFAULT);
+ const base::FeatureParam<std::string> kCrossDeviceSigninFromDesktopUrl{
+     &kCrossDeviceSigninFromDesktop, "url",
+@@ -284,7 +289,8 @@
+ BASE_FEATURE(kDiceLinkedAccounts, base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kDisableFirstRunAnimationsForTesting,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+@@ -663,7 +669,8 @@
+         base::Hours(8)};
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kEnterpriseSigninDialogsRefresh,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ bool IsEnterpriseSigninDialogsRefreshEnabled(
+@@ -686,7 +693,8 @@
+ #endif
+ );
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #if BUILDFLAG(IS_WIN)
+ BASE_FEATURE(kFirstRunDesktopChoiceScreenRefresh,
+              base::FEATURE_ENABLED_BY_DEFAULT);
+@@ -696,7 +704,8 @@
+ #endif
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ #if BUILDFLAG(IS_WIN)
+ BASE_FEATURE(kFirstRunDesktopRefresh, base::FEATURE_ENABLED_BY_DEFAULT);
+ #else
+@@ -711,11 +720,13 @@
+ }
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kFirstRunDesktopRefreshSurvey, base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kFirstRunDesktopRevamp, base::FEATURE_DISABLED_BY_DEFAULT);
+ bool IsFirstRunDesktopRevampEnabled(bool is_in_search_engine_choice_region) {
+   return IsFirstRunDesktopRefreshEnabled(is_in_search_engine_choice_region) &&
+@@ -723,20 +734,24 @@
+ }
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kFirstRunDesktopRevampNoFeatureShowcaseSurvey,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kFirstRunDesktopRevampSound, base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kFirstRunDesktopRevampSurvey, base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kFirstRunFeatureShowcaseGeminiStep,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+@@ -826,7 +841,8 @@
+              base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kPreFirstRunDesktopRefresh, base::FEATURE_DISABLED_BY_DEFAULT);
+ bool IsPreFirstRunDesktopRefreshEnabled() {
+   return base::FeatureList::IsEnabled(kFirstRunDesktopRefresh) &&
+@@ -836,17 +852,20 @@
+ }
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kPreFirstRunDesktopRefreshNoFeatureShowcaseSurvey,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kPreFirstRunDesktopRefreshSurvey,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kProfileCreationDeclineSigninCTAExperiment,
+              base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+@@ -894,7 +913,8 @@
+ BASE_FEATURE(kSigninLevelUpButton, base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kSignInPromoMaterialNextUI, base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+@@ -961,7 +981,8 @@
+ BASE_FEATURE(kSupportAddSessionEmailPrefill, base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Kill switch for displaying sign-in errors in the profile picker.
+ BASE_FEATURE(kSupportErrorsInProfilePicker, base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+--- a/components/signin/public/base/signin_switches.h
++++ b/components/signin/public/base/signin_switches.h
+@@ -69,7 +69,8 @@
+ COMPONENT_EXPORT(SIGNIN_SWITCHES)
+ BASE_DECLARE_FEATURE(kAvoidAutoTriggerListAccountsOnStale);
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // A HaTS survey flag for the survey to gather user feedback before any changes
+ // to the FRE as part of Chrome Desktop FRE Refresh project.
+ //
+@@ -137,7 +138,8 @@
+ BASE_DECLARE_FEATURE_PARAM(double, kChromeAndroidIdentitySurveyWebProbability);
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Enables surveys to measure the effectiveness of the identity model.
+ // These surveys would be displayed after interactions such as signin, profile
+ // switching, etc. Please keep sorted alphabetically.
+@@ -214,7 +216,8 @@
+ // LINT.ThenChange(//chrome/browser/signin/signin_hats_util.cc)
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Controls the duration for which the launch of an identity survey is delayed.
+ COMPONENT_EXPORT(SIGNIN_SWITCHES)
+ BASE_DECLARE_FEATURE(kChromeIdentitySurveyLaunchWithDelay);
+@@ -246,7 +249,8 @@
+ BASE_DECLARE_FEATURE(kCrossDeviceSigninDismissModals);
+ #endif  // BUILDFLAG(IS_IOS)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Feature flag to enable cross-device sign-in promo.
+ COMPONENT_EXPORT(SIGNIN_SWITCHES)
+ BASE_DECLARE_FEATURE(kCrossDeviceSigninFromDesktop);
+@@ -281,7 +285,8 @@
+ BASE_DECLARE_FEATURE(kDiceLinkedAccounts);
+ #endif  // BUILDFLAG(ENABLE_DICE_SUPPORT)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Controls whether the First Run animations are disabled or not. If the feature
+ // is enabled, animations in the First Run are disabled, otherwise they're
+ // enabled. It should be only used for the testing purposes (e.g. pixel tests)
+@@ -539,7 +544,8 @@
+     kPolicyDisclaimerRegistrationRetryDelay;
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // This feature controls showing the visually refreshed enterprise signin
+ // dialogs, i.e. all the screens served by `ManagedUserProfileNoticeUI`
+ // (enterprise profile welcome/creation, OIDC and the device signals
+@@ -576,7 +582,8 @@
+ COMPONENT_EXPORT(SIGNIN_SWITCHES)
+ BASE_DECLARE_FEATURE(kFetchAccountCapabilitiesOnRestart);
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // This feature controls running visually refreshed first run and profile
+ // creation flows, including the choice screen, for users in search engine
+ // choice screen regions. This feature is no-op if `kFirstRunDesktopRefresh` is
+@@ -589,7 +596,8 @@
+ BASE_DECLARE_FEATURE(kFirstRunDesktopChoiceScreenRefresh);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // This feature controls running visually refreshed first run and profile
+ // creation flows for users outside of the search engine choice regions. To
+ // enable the refresh in search engine choice screen regions,
+@@ -607,7 +615,8 @@
+ bool IsFirstRunDesktopRefreshEnabled(bool is_in_search_engine_choice_region);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // A HaTS survey flag for the survey to gather user feedback after the changes
+ // introduced with `kFirstRunDesktopRefresh`.
+ //
+@@ -617,7 +626,8 @@
+ BASE_DECLARE_FEATURE(kFirstRunDesktopRefreshSurvey);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // It enables the first run revamp (introduce new UIs and additional effects).
+ // This feature is no-op if `kFirstRunDesktopRefresh` is disabled.
+ //
+@@ -633,7 +643,8 @@
+ bool IsFirstRunDesktopRevampEnabled(bool is_in_search_engine_choice_region);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // A HaTS survey flag for the survey to gather user feedback after the changes
+ // introduced with `kFirstRunDesktopRevamp` for users who are not eligible for
+ // the Feature Showcase.
+@@ -644,14 +655,16 @@
+ BASE_DECLARE_FEATURE(kFirstRunDesktopRevampNoFeatureShowcaseSurvey);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Killswitch for the sound experience in the first run desktop revamp.
+ // This feature is no-op if `kFirstRunDesktopRevamp` is disabled.
+ COMPONENT_EXPORT(SIGNIN_SWITCHES)
+ BASE_DECLARE_FEATURE(kFirstRunDesktopRevampSound);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // A HaTS survey flag for the survey to gather user feedback after the changes
+ // introduced with `kFirstRunDesktopRevamp` for users who are eligible for the
+ // Feature Showcase.
+@@ -662,7 +675,8 @@
+ BASE_DECLARE_FEATURE(kFirstRunDesktopRevampSurvey);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // This feature controls whether Gemini step can be shown in the feature
+ // showcase. This feature is no-op if IsFirstRunDesktopRevamp() equals false.
+ //
+@@ -772,7 +786,8 @@
+ BASE_DECLARE_FEATURE(kOpenSystemAccountSettingsDirectly);
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // It enables the pre first run desktop refresh (changes to the onboarding flow
+ // prior to the core first run).
+ //
+@@ -791,7 +806,8 @@
+ bool IsPreFirstRunDesktopRefreshEnabled();
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // A HaTS survey flag for the survey to gather user feedback after the changes
+ // introduced with `kPreFirstRunDesktopRefresh` for users who are not eligible
+ // for the Feature Showcase.
+@@ -802,7 +818,8 @@
+ BASE_DECLARE_FEATURE(kPreFirstRunDesktopRefreshNoFeatureShowcaseSurvey);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // A HaTS survey flag for the survey to gather user feedback after the changes
+ // introduced with `kPreFirstRunDesktopRefresh` for users who are eligible for
+ // the Feature Showcase.
+@@ -813,7 +830,8 @@
+ BASE_DECLARE_FEATURE(kPreFirstRunDesktopRefreshSurvey);
+ #endif  // BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Experimenting with changing the secondary CTA for FRE and new profile
+ // creation.
+ COMPONENT_EXPORT(SIGNIN_SWITCHES)
+@@ -888,7 +906,8 @@
+ BASE_DECLARE_FEATURE(kSigninLevelUpButton);
+ #endif  // BUILDFLAG(IS_ANDROID)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Uses the Material Next theme for the signin promo.
+ COMPONENT_EXPORT(SIGNIN_SWITCHES)
+ BASE_DECLARE_FEATURE(kSignInPromoMaterialNextUI);
+@@ -948,7 +967,8 @@
+ BASE_DECLARE_FEATURE(kSupportAddSessionEmailPrefill);
+ #endif
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Kill switch for displaying sign-in errors in the profile picker.
+ COMPONENT_EXPORT(SIGNIN_SWITCHES)
+ BASE_DECLARE_FEATURE(kSupportErrorsInProfilePicker);
+--- a/components/storage_monitor/BUILD.gn
++++ b/components/storage_monitor/BUILD.gn
+@@ -65,7 +65,7 @@
+       ]
+       deps += [ "//services/device/public/mojom" ]
+     }
+-  } else if (is_linux) {
++  } else if (is_linux || is_zedbsd) {
+     if (use_udev) {
+       sources += [
+         "mtab_watcher_linux.cc",
+@@ -167,7 +167,7 @@
+         "storage_monitor_chromeos_unittest.cc",
+       ]
+     }
+-  } else if (is_linux) {
++  } else if (is_linux || is_zedbsd) {
+     if (use_udev) {
+       sources += [ "storage_monitor_linux_unittest.cc" ]
+     }
 --- a/components/supervised_user/buildflags.gni
 +++ b/components/supervised_user/buildflags.gni
 @@ -6,5 +6,6 @@
@@ -1595,6 +4832,59 @@
 +      is_android || is_chromeos || is_ios || is_linux || is_mac || is_win ||
 +      is_zedbsd
  }
+--- a/components/supervised_user/core/common/features.cc
++++ b/components/supervised_user/core/common/features.cc
+@@ -30,7 +30,7 @@
+ #endif
+ 
+ #if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_WIN)
++    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ZEDBSD)
+ const int kLocalWebApprovalBottomSheetLoadTimeoutDefaultValueMs = 5000;
+ 
+ const base::FeatureParam<int> kLocalWebApprovalBottomSheetLoadTimeoutMs{
+@@ -71,7 +71,8 @@
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kEnableSupervisedUserVersionSignOutDialog,
+              base::FEATURE_ENABLED_BY_DEFAULT);
+ #endif
+--- a/components/supervised_user/core/common/features.h
++++ b/components/supervised_user/core/common/features.h
+@@ -20,7 +20,7 @@
+ BASE_DECLARE_FEATURE(kAllowSubframeLocalWebApprovals);
+ 
+ #if BUILDFLAG(IS_IOS) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_WIN)
++    BUILDFLAG(IS_WIN) || BUILDFLAG(IS_ZEDBSD)
+ extern const base::FeatureParam<int> kLocalWebApprovalBottomSheetLoadTimeoutMs;
+ #endif  // BUILDFLAG(IS_IOS) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) ||
+         // BUILDFLAG(IS_WIN)
+@@ -31,7 +31,8 @@
+ BASE_DECLARE_FEATURE(kSupervisedUserVerificationPageOnAndroid);
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_WIN) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Uses supervised user strings on the signout dialog.
+ BASE_DECLARE_FEATURE(kEnableSupervisedUserVersionSignOutDialog);
+ #endif
+--- a/components/sync_device_info/BUILD.gn
++++ b/components/sync_device_info/BUILD.gn
+@@ -76,7 +76,7 @@
+     sources += [ "local_device_info_util_ios.mm" ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     sources += [ "local_device_info_util_linux.cc" ]
+   }
+ 
 --- a/components/sync_device_info/local_device_info_util.cc
 +++ b/components/sync_device_info/local_device_info_util.cc
 @@ -114,7 +114,7 @@
@@ -1606,6 +4896,20 @@
    return DeviceInfo::OsType::kLinux;
  #elif BUILDFLAG(IS_ANDROID)
    return DeviceInfo::OsType::kAndroid;
+--- a/components/sync_device_info/local_device_info_util_linux.cc
++++ b/components/sync_device_info/local_device_info_util_linux.cc
+@@ -24,7 +24,11 @@
+       return hostname_str;
+     }
+   }
++#if defined(__ZEDBSD__)
++  return "zedBSD";
++#else
+   return base::GetLinuxDistro();
++#endif
+ }
+ 
+ }  // namespace syncer
 --- a/components/trusted_vault/trusted_vault_connection_impl.cc
 +++ b/components/trusted_vault/trusted_vault_connection_impl.cc
 @@ -105,7 +105,7 @@

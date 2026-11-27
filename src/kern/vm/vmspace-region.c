@@ -419,13 +419,14 @@ vmspace_find_free_range_locked(
 	vmspace_layout_init();
 	if (hint < vm_layout.mmap_base)
 		hint = vm_layout.mmap_base;
-	if (hint >= vm_layout.user_limit)
-		return ENOMEM;
 
-	/* Searches from the hint up to the end of the user area. */
-
-	/* Reports why the search failed. */
-	error = vmspace_find_free_range_bounded_locked(vm, hint, vm_layout.user_limit, size, alignment, mapped);
+	/* Searches from the hint up to the end of the user area, then wraps. */
+	if (hint < vm_layout.user_limit)
+		error = vmspace_find_free_range_bounded_locked(vm, hint, vm_layout.user_limit, size, alignment, mapped);
+	else
+		error = ENOMEM;
+	if (error == ENOMEM && hint > vm_layout.mmap_base)
+		error = vmspace_find_free_range_bounded_locked(vm, vm_layout.mmap_base, vm_layout.user_limit, size, alignment, mapped);
 	if (error != 0)
 		return error;
 

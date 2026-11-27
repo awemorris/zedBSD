@@ -387,6 +387,26 @@
    // Only present when running web tests, which run inside Content Shell.
  
    // Web tests should not use the current machine settings for theming, but
+--- a/content/shell/common/shell_paths.cc
++++ b/content/shell/common/shell_paths.cc
+@@ -17,7 +17,7 @@
+ 
+ #if BUILDFLAG(IS_FUCHSIA)
+ #include "base/fuchsia/file_utils.h"
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ #include "base/nix/xdg_util.h"
+ #endif
+ 
+@@ -29,7 +29,7 @@
+ #if BUILDFLAG(IS_WIN)
+   CHECK(base::PathService::Get(base::DIR_LOCAL_APP_DATA, result));
+   *result = result->Append(std::wstring(L"content_shell"));
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+   std::unique_ptr<base::Environment> env(base::Environment::Create());
+   base::FilePath config_dir(base::nix::GetXDGDirectory(
+       env.get(), base::nix::kXdgConfigHomeEnvVar, base::nix::kDotConfigDir));
 --- a/content/test/BUILD.gn
 +++ b/content/test/BUILD.gn
 @@ -3256,7 +3256,8 @@
@@ -399,6 +419,51 @@
      data = [
        "$root_out_dir/content_shell.pak",
        "data/",
+--- a/device/fido/public/features.cc
++++ b/device/fido/public/features.cc
+@@ -34,7 +34,7 @@
+ // comment.
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ // Not yet enabled by default.
+ BASE_FEATURE(kPasskeyUnlockErrorUi, base::FEATURE_DISABLED_BY_DEFAULT);
+ 
+--- a/device/fido/public/features.h
++++ b/device/fido/public/features.h
+@@ -14,7 +14,7 @@
+ namespace device {
+ 
+ #if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
+-    BUILDFLAG(IS_CHROMEOS)
++    BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ // Allows the passkey unlock error UI to be shown.
+ COMPONENT_EXPORT(FIDO_PUBLIC)
+ BASE_DECLARE_FEATURE(kPasskeyUnlockErrorUi);
+--- a/extensions/browser/api/system_cpu/BUILD.gn
++++ b/extensions/browser/api/system_cpu/BUILD.gn
+@@ -33,7 +33,8 @@
+     sources += [ "cpu_info_provider_mac.cc" ]
+   }
+ 
+-  if (is_linux || is_chromeos || enable_desktop_android_extensions) {
++  if (is_linux || is_chromeos || enable_desktop_android_extensions ||
++      is_zedbsd) {
+     sources += [ "cpu_info_provider_linux.cc" ]
+   }
+ 
+--- a/extensions/common/command.cc
++++ b/extensions/common/command.cc
+@@ -117,7 +117,7 @@
+   return ui::kKeybindingPlatformMac;
+ #elif BUILDFLAG(IS_CHROMEOS)
+   return ui::kKeybindingPlatformChromeOs;
+-#elif BUILDFLAG(IS_LINUX)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   return ui::kKeybindingPlatformLinux;
+ #elif BUILDFLAG(IS_DESKTOP_ANDROID)
+   // For now, we use linux keybindings on desktop android.
 --- a/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
 +++ b/gpu/command_buffer/service/shared_image/ozone_image_backing.cc
 @@ -137,7 +137,7 @@
@@ -423,6 +488,17 @@
    if (is_android) {
      sources += [ "gpu_info_collector_android.cc" ]
    }
+--- a/gpu/config/gpu_control_list.cc
++++ b/gpu/config/gpu_control_list.cc
+@@ -822,7 +822,7 @@
+   return kOsAndroid;
+ #elif BUILDFLAG(IS_FUCHSIA)
+   return kOsFuchsia;
+-#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD)
++#elif BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_OPENBSD) || BUILDFLAG(IS_ZEDBSD)
+   return kOsLinux;
+ #elif BUILDFLAG(IS_MAC)
+   return kOsMacosx;
 --- a/gpu/config/gpu_test_config.cc
 +++ b/gpu/config/gpu_test_config.cc
 @@ -27,7 +27,7 @@
@@ -509,6 +585,52 @@
    // Use AGC2 digital and input volume controller.
    // TODO(crbug.com/40872787): Remove `kWebRtcAllowInputVolumeAdjustment` safely
    // and set `input_volume_controller.enabled` true.
+--- a/printing/BUILD.gn
++++ b/printing/BUILD.gn
+@@ -245,7 +245,7 @@
+     ]
+   }
+ 
+-  if (!enable_basic_print_dialog) {
++  if (!enable_basic_print_dialog || is_zedbsd) {
+     sources += [
+       "printing_context_no_system_dialog.cc",
+       "printing_context_no_system_dialog.h",
+--- a/sandbox/policy/mojom/sandbox.mojom
++++ b/sandbox/policy/mojom/sandbox.mojom
+@@ -90,10 +90,10 @@
+   [EnableIf=is_win] kPdfConversion,
+ 
+   // Interfaces with operating system print drivers.
+-  [EnableIf=is_chromeos|is_linux|is_mac|is_win] kPrintBackend,
++  [EnableIf=is_chromeos|is_linux|is_mac|is_win|is_zedbsd] kPrintBackend,
+ 
+   // Like kUtility but allows loading of screen AI library.
+-  [EnableIf=is_chromeos|is_linux|is_mac|is_win] kScreenAI,
++  [EnableIf=is_chromeos|is_linux|is_mac|is_win|is_zedbsd] kScreenAI,
+ 
+   // Like kUtility but allows loading of platform runtime library.
+   [EnableIf=is_chromeos|is_linux|is_mac|is_win] kPlatformRuntime,
+--- a/services/audio/public/cpp/BUILD.gn
++++ b/services/audio/public/cpp/BUILD.gn
+@@ -18,7 +18,7 @@
+     "output_device.h",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [
+       "sounds/audio_stream_handler.cc",
+       "sounds/audio_stream_handler.h",
+@@ -53,7 +53,7 @@
+     "fake_system_info.h",
+   ]
+ 
+-  if (is_win || is_mac || is_linux || is_chromeos) {
++  if (is_win || is_mac || is_linux || is_chromeos || is_zedbsd) {
+     sources += [ "sounds/test_data.h" ]
+   }
+ 
 --- a/services/cert_verifier/cert_verifier_creation.cc
 +++ b/services/cert_verifier/cert_verifier_creation.cc
 @@ -129,7 +129,7 @@
@@ -551,7 +673,7 @@
  source_set("test_support") {
 --- /dev/null
 +++ b/services/device/time_zone_monitor/time_zone_monitor_zedbsd.cc
-@@ -0,0 +1,20 @@
+@@ -0,0 +1,30 @@
 +// Copyright 2026 The Chromium Authors and zedBSD Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -565,10 +687,20 @@
 +
 +namespace device {
 +
++namespace {
++
++class TimeZoneMonitorZedBSD : public TimeZoneMonitor {
++ public:
++  TimeZoneMonitorZedBSD() = default;
++  ~TimeZoneMonitorZedBSD() override = default;
++};
++
++}  // namespace
++
 +// static
 +std::unique_ptr<TimeZoneMonitor> TimeZoneMonitor::Create(
 +    scoped_refptr<base::SequencedTaskRunner> file_task_runner) {
-+  return nullptr;
++  return std::make_unique<TimeZoneMonitorZedBSD>();
 +}
 +
 +}  // namespace device
@@ -625,6 +757,52 @@
  
    # Screen AI library is not available for browser tests on ChromeOS. Tast tests
    # cover library's OCR functionality on ChromeOS.
+--- a/services/tracing/public/cpp/stack_sampling/tracing_sampler_profiler.cc
++++ b/services/tracing/public/cpp/stack_sampling/tracing_sampler_profiler.cc
+@@ -43,7 +43,7 @@
+ #include "third_party/perfetto/protos/perfetto/trace/track_event/process_descriptor.pbzero.h"
+ #include "third_party/perfetto/protos/perfetto/trace/track_event/thread_descriptor.pbzero.h"
+ 
+-#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE)
++#if BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE) && !BUILDFLAG(IS_ZEDBSD)
+ #include "base/profiler/thread_delegate_posix.h"
+ #define INITIALIZE_THREAD_DELEGATE_POSIX 1
+ #else  // BUILDFLAG(IS_POSIX) && !BUILDFLAG(IS_APPLE)
+--- a/skia/BUILD.gn
++++ b/skia/BUILD.gn
+@@ -433,6 +433,10 @@
+       sources += skia_ports_fontmgr_custom_sources
+       sources += skia_ports_fontmgr_empty_sources
+       public += skia_ports_fontmgr_empty_public
++      if (is_zedbsd) {
++        public += skia_ports_fontmgr_directory_public
++        sources += skia_ports_fontmgr_directory_sources
++      }
+     }
+     sources += skia_ports_typeface_proxy_sources
+     sources += skia_ports_typeface_fontations_sources
+--- a/skia/ext/font_utils.cc
++++ b/skia/ext/font_utils.cc
+@@ -53,6 +53,10 @@
+ #include "third_party/skia/include/ports/SkFontMgr_empty.h"
+ #endif
+ 
++#if BUILDFLAG(IS_ZEDBSD)
++#include "third_party/skia/include/ports/SkFontMgr_directory.h"
++#endif
++
+ #include <mutex>
+ 
+ namespace {
+@@ -100,6 +104,8 @@
+                                SkFontScanner_Make_Fontations());
+ #elif BUILDFLAG(IS_WIN)
+   return SkFontMgr_New_DirectWrite();
++#elif BUILDFLAG(IS_ZEDBSD)
++  return SkFontMgr_New_Custom_Directory("/usr/share/fonts");
+ #elif defined(SK_FONTMGR_FREETYPE_EMPTY_AVAILABLE)
+   return SkFontMgr_New_Custom_Empty();
+ #else
 --- a/v8/BUILD.gn
 +++ b/v8/BUILD.gn
 @@ -1150,6 +1150,7 @@
@@ -885,6 +1063,134 @@
  #elif V8_OS_POSIX
    long pages = sysconf(_SC_PHYS_PAGES);    // NOLINT(runtime/int)
    long page_size = sysconf(_SC_PAGESIZE);  // NOLINT(runtime/int)
+--- a/v8/src/common/code-memory-access-inl.h
++++ b/v8/src/common/code-memory-access-inl.h
+@@ -22,10 +22,23 @@
+ #if V8_HAS_BECORE_JIT_WRITE_PROTECT
+ #include <BrowserEngineCore/BEMemory.h>
+ #endif
++#if defined(V8_OS_ZEDBSD)
++#include <sys/mman.h>
++#endif
+ 
+ namespace v8 {
+ namespace internal {
+ 
++#if defined(V8_OS_ZEDBSD)
++inline void ZedBsdSetCodePermissions(Address addr, size_t size, int prot) {
++  if (size == 0) return;
++  constexpr size_t kPage = 4096;
++  Address start = addr & ~(kPage - 1);
++  Address end = (addr + size + kPage - 1) & ~(kPage - 1);
++  mprotect(reinterpret_cast<void*>(start), end - start, prot);
++}
++#endif
++
+ RwxMemoryWriteScope::RwxMemoryWriteScope(const char* comment) {
+   if (!v8_flags.jitless || v8_flags.force_memory_protection_keys) {
+     SetWritable();
+@@ -46,6 +59,12 @@
+     write_scope_.emplace("~WritableJitAllocation");
+   }
+ #endif
++#if defined(V8_OS_ZEDBSD)
++  if (write_scope_.has_value()) {
++    ZedBsdSetCodePermissions(address_, allocation_.Size(),
++                             PROT_READ | PROT_EXEC);
++  }
++#endif
+ }
+ 
+ WritableJitAllocation::WritableJitAllocation(
+@@ -61,6 +80,9 @@
+                       ? page_ref_->RegisterAllocation(addr, size, type)
+                       : page_ref_->LookupAllocation(addr, size, type)),
+       enforce_write_api_(enforce_write_api) {
++#if defined(V8_OS_ZEDBSD)
++  ZedBsdSetCodePermissions(address_, size, PROT_READ | PROT_WRITE);
++#endif
+ #ifdef DEBUG
+   if (enforce_write_api_) {
+     // Reset the write scope for debugging. We'll create fine-grained scopes in
+@@ -91,7 +113,11 @@
+     : address_(addr),
+       write_scope_("WritableJitAllocation"),
+       allocation_(size,
+-                  ThreadIsolation::JitAllocationType::kInstructionStream) {}
++                  ThreadIsolation::JitAllocationType::kInstructionStream) {
++#if defined(V8_OS_ZEDBSD)
++  ZedBsdSetCodePermissions(address_, size, PROT_READ | PROT_WRITE);
++#endif
++}
+ 
+ // static
+ WritableJitAllocation WritableJitAllocation::ForPatchableBaselineJIT(
+@@ -296,7 +322,14 @@
+   return WritableFreeSpace(addr, size, true);
+ }
+ 
+-WritableFreeSpace::~WritableFreeSpace() = default;
++WritableFreeSpace::~WritableFreeSpace() {
++#if defined(V8_OS_ZEDBSD)
++  if (executable_) {
++    ZedBsdSetCodePermissions(address_, static_cast<size_t>(size_),
++                             PROT_READ | PROT_EXEC);
++  }
++#endif
++}
+ 
+ // static
+ V8_INLINE WritableFreeSpace
+@@ -306,7 +339,14 @@
+ 
+ V8_INLINE WritableFreeSpace::WritableFreeSpace(base::Address addr, size_t size,
+                                                bool executable)
+-    : address_(addr), size_(static_cast<int>(size)), executable_(executable) {}
++    : address_(addr), size_(static_cast<int>(size)), executable_(executable) {
++#if defined(V8_OS_ZEDBSD)
++  if (executable_) {
++    ZedBsdSetCodePermissions(address_, static_cast<size_t>(size_),
++                             PROT_READ | PROT_WRITE);
++  }
++#endif
++}
+ 
+ template <typename T, size_t offset>
+ void WritableFreeSpace::WriteHeaderSlot(Tagged<T> value,
+--- a/v8/src/heap/code-range.cc
++++ b/v8/src/heap/code-range.cc
+@@ -172,7 +172,11 @@
+   params.base_alignment =
+       VirtualMemoryCage::ReservationParams::kAnyBaseAlignment;
+   params.page_size = kPageSize;
++#if defined(V8_OS_ZEDBSD)
++  if (true) {
++#else
+   if (v8_flags.jitless) {
++#endif
+     params.permissions = PageAllocator::Permission::kNoAccess;
+     params.page_initialization_mode =
+         base::PageInitializationMode::kAllocatedPagesCanBeUninitialized;
+--- a/v8/src/heap/memory-allocator.cc
++++ b/v8/src/heap/memory-allocator.cc
+@@ -685,6 +685,9 @@
+   DCHECK(IsAligned(start, GetCommitPageSize()));
+   DCHECK_EQ(0, chunk_size % GetCommitPageSize());
+ 
++#if defined(V8_OS_ZEDBSD)
++  return vm->SetPermissions(start, chunk_size, PageAllocator::kReadWrite);
++#else
+   if (isolate_->RequiresCodeRange()) {
+     // The pages of the code range are already mapped RWX, we just need to
+     // recommit them.
+@@ -694,6 +697,7 @@
+     return vm->SetPermissions(start, chunk_size,
+                               MutablePage::GetCodeModificationPermission());
+   }
++#endif
+ }
+ 
+ const MemoryChunk* MemoryAllocator::LookupChunkContainingAddress(
 --- a/v8/src/libsampler/sampler.cc
 +++ b/v8/src/libsampler/sampler.cc
 @@ -19,7 +19,7 @@
@@ -929,6 +1235,33 @@
  #define USE_SIGNALS
  #endif
  
+--- a/v8/src/wasm/wasm-code-manager.cc
++++ b/v8/src/wasm/wasm-code-manager.cc
+@@ -2252,9 +2252,15 @@
+ 
+   TRACE_HEAP("Setting rwx permissions for 0x%" PRIxPTR ":0x%" PRIxPTR "\n",
+              region.begin(), region.end());
++#if defined(V8_OS_ZEDBSD)
++  bool success = GetPageAllocator()->SetPermissions(
++      reinterpret_cast<void*>(region.begin()), region.size(),
++      PageAllocator::kReadWrite);
++#else
+   bool success = GetPageAllocator()->RecommitPages(
+       reinterpret_cast<void*>(region.begin()), region.size(),
+       PageAllocator::kReadWriteExecute);
++#endif
+ 
+   if (V8_UNLIKELY(!success)) {
+     auto oom_detail = base::FormattedString{} << "region size: "
+@@ -2338,7 +2344,7 @@
+   // required for recommit.
+   // iOS cannot adjust page permissions for MAP_JIT'd pages, they are set as RWX
+   // at the start.
+-#if !defined(V8_OS_WIN) && !defined(V8_OS_IOS)
++#if !defined(V8_OS_WIN) && !defined(V8_OS_IOS) && !defined(V8_OS_ZEDBSD)
+   bool success = false;
+   if (MemoryProtectionKeysEnabled()) {
+ #if V8_HAS_PKU_JIT_WRITE_PROTECT
 --- a/v8/tools/metagen/compile_flags.py
 +++ b/v8/tools/metagen/compile_flags.py
 @@ -199,9 +199,11 @@

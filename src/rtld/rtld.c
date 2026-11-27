@@ -650,6 +650,7 @@ static void loader_unlock(void);
 static void *allocate_tls_block(const struct rtld_tls_module *module);
 static uintptr_t thread_pointer(void);
 static void layout_static_tls(void);
+static void populate_static_tls_template(void);
 #if defined(HAL_ARCH_X86_64) || defined(HAL_ARCH_I386)
 static uintptr_t static_tls_place(struct rtld_tls_module *module, uintptr_t offset);
 #endif
@@ -1969,6 +1970,7 @@ rtld_main(
 		if (object->active)
 			relocate_object(object);
 	}
+	populate_static_tls_template();
 
 	/*
  * The initial executable, interpreter, and DT_NEEDED closure remain
@@ -2271,6 +2273,12 @@ layout_static_tls(
 	 * the same reason, so every module stays dynamic.
 	 */
 }
+
+static void
+populate_static_tls_template(
+	void)
+{
+}
 #else
 static void
 layout_static_tls(
@@ -2278,7 +2286,6 @@ layout_static_tls(
 {
 	struct rtld_tls_module *module;
 	struct rtld_tls_module *main_module;
-	unsigned char *image;
 	uintptr_t offset;
 	uintptr_t id;
 
@@ -2311,8 +2318,23 @@ layout_static_tls(
 
 	/* No module is placed after this pass. */
 	static_tls_sealed = 1;
+	static_tls_distance = offset;
+}
 
-	/* Handles the offset condition. */
+/*
+ * Copies each static TLS module's initialized image after relocations run so
+ * RELATIVE pointers inside .tdata are resolved in the template.
+ */
+static void
+populate_static_tls_template(
+	void)
+{
+	struct rtld_tls_module *module;
+	unsigned char *image;
+	uintptr_t offset;
+	uintptr_t id;
+
+	offset = static_tls_distance;
 	if (offset == 0)
 		return;
 
@@ -2337,7 +2359,6 @@ layout_static_tls(
 	}
 
 	/* Publishes the area every new thread gets. */
-	static_tls_distance = offset;
 	static_tls_template = image;
 	static_tls_template_size = (size_t)offset;
 }

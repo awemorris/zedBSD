@@ -21,6 +21,17 @@
    uid_t socket_euid;
    gid_t socket_gid;
    if (getpeereid(fd, &socket_euid, &socket_gid) < 0) {
+--- a/mojo/public/tools/bindings/mojom.gni
++++ b/mojo/public/tools/bindings/mojom.gni
+@@ -770,6 +770,8 @@
+       enabled_features += [ "is_ios" ]
+     } else if (is_linux) {
+       enabled_features += [ "is_linux" ]
++    } else if (is_zedbsd) {
++      enabled_features += [ "is_zedbsd" ]
+     } else if (is_mac) {
+       enabled_features += [ "is_mac" ]
+     } else if (is_win) {
 --- a/net/base/net_errors_posix.cc
 +++ b/net/base/net_errors_posix.cc
 @@ -43,7 +43,9 @@

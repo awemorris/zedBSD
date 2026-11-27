@@ -8323,7 +8323,7 @@ tcp_recvfrom(
 	 * back for the next read.
 	 */
 	copied = 0;
-	dequeue_flags = flags;
+	dequeue_flags = flags & MSG_DONTWAIT;
 	for (;;) {
 		/* The next packet; past the first, only one already queued. */
 		error = socket_dequeue_packet(socket, dequeue_flags, &packet);
@@ -8350,6 +8350,11 @@ tcp_recvfrom(
 			kern_memcpy((uint8_t *)buffer + copied, packet->data, take);
 		copied += take;
 
+		if ((flags & MSG_PEEK) != 0) {
+			(void)socket_requeue_packet_front(socket, packet);
+			break;
+		}
+
 		/* A short unread suffix goes back to the head; the read is full. */
 		if (take < packet->length) {
 			(void)packet_buf_pull(packet, take);
@@ -8362,6 +8367,9 @@ tcp_recvfrom(
 		if (take == 0 || copied == length)
 			break;
 	}
+
+	if ((flags & MSG_PEEK) != 0)
+		return (ssize_t)copied;
 
 	/*
 	 * Tells the peer about room the read has made (RFC 1122 4.2.3.3) when

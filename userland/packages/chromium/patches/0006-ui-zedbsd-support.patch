@@ -1,3 +1,27 @@
+--- a/ui/accessibility/accessibility_features.cc
++++ b/ui/accessibility/accessibility_features.cc
+@@ -467,7 +467,8 @@
+ }
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ BASE_FEATURE(kWasmTtsEngineAutoInstallDisabled,
+              base::FEATURE_DISABLED_BY_DEFAULT);
+ bool IsWasmTtsEngineAutoInstallDisabled() {
+--- a/ui/accessibility/accessibility_features.h
++++ b/ui/accessibility/accessibility_features.h
+@@ -391,7 +391,8 @@
+ AX_BASE_EXPORT bool IsMacAccessibilityTextOperationEnabled();
+ #endif  // BUILDFLAG(IS_MAC)
+ 
+-#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_WIN) || BUILDFLAG(IS_MAC) || BUILDFLAG(IS_LINUX) || \
++    BUILDFLAG(IS_ZEDBSD)
+ // Disable the wasm tts engine component to use dev version local extension
+ // files.
+ AX_BASE_EXPORT BASE_DECLARE_FEATURE(kWasmTtsEngineAutoInstallDisabled);
 --- a/ui/base/BUILD.gn
 +++ b/ui/base/BUILD.gn
 @@ -470,7 +470,7 @@
@@ -27,6 +51,17 @@
    static_library("pixel_diff_test_support") {
      testonly = true
      sources = [
+--- a/ui/base/accelerators/global_accelerator_listener/global_accelerator_listener_ozone.cc
++++ b/ui/base/accelerators/global_accelerator_listener/global_accelerator_listener_ozone.cc
+@@ -69,6 +69,8 @@
+     return linux_instance;
+   }
+   return nullptr;
++#else
++  return nullptr;
+ #endif
+ }
+ 
 --- a/ui/base/clipboard/clipboard_constants.h
 +++ b/ui/base/clipboard/clipboard_constants.h
 @@ -46,7 +46,8 @@
@@ -84,6 +119,51 @@
      sources += [ "idle_fuchsia.cc" ]
    }
  
+--- a/ui/base/ime/linux/BUILD.gn
++++ b/ui/base/ime/linux/BUILD.gn
+@@ -4,7 +4,7 @@
+ 
+ import("//build/config/linux/pangocairo/pangocairo.gni")
+ 
+-assert(is_linux)
++assert(is_linux || is_zedbsd)
+ 
+ component("linux") {
+   output_name = "ui_base_ime_linux"
+--- a/ui/base/ime/linux/input_method_auralinux.cc
++++ b/ui/base/ime/linux/input_method_auralinux.cc
+@@ -534,7 +534,9 @@
+   auto* text_input_client = GetTextInputClient();
+   if (!text_input_client)
+     return;
++#if !BUILDFLAG(IS_ZEDBSD)
+   text_input_client->SetCompositionFromExistingText(range, spans);
++#endif
+ 
+   std::u16string text;
+   if (text_input_client->GetTextFromRange(range, &text)) {
+--- a/ui/base/ui_base_switches.h
++++ b/ui/base/ui_base_switches.h
+@@ -39,7 +39,7 @@
+ inline constexpr char kSystemFontFamily[] = "system-font-family";
+ #endif
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ // Specify the toolkit used to construct the Linux GUI.
+ inline constexpr char kUiToolkitFlag[] = "ui-toolkit";
+ // Specify the GTK version to be loaded.
+--- a/ui/base/ui_features.gni
++++ b/ui/base/ui_features.gni
+@@ -28,7 +28,7 @@
+ 
+   # Whether the message center should be included for displaying notifications.
+   enable_message_center =
+-      is_win || is_mac || is_linux || is_chromeos || is_fuchsia
++      is_win || is_mac || is_linux || is_chromeos || is_fuchsia || is_zedbsd
+ 
+   enable_hidpi = true
+ }
 --- a/ui/base/unowned_user_data/BUILD.gn
 +++ b/ui/base/unowned_user_data/BUILD.gn
 @@ -5,8 +5,8 @@
@@ -222,6 +302,66 @@
  #else
  #error Unsupported OS
  #endif
+--- a/ui/linux/BUILD.gn
++++ b/ui/linux/BUILD.gn
+@@ -6,7 +6,7 @@
+ import("//build/config/linux/gtk/gtk.gni")
+ import("//ui/qt/qt.gni")
+ 
+-assert(is_linux)
++assert(is_linux || is_zedbsd)
+ 
+ component("linux_ui") {
+   defines = [ "IS_LINUX_UI_IMPL" ]
+--- a/ui/linux/linux_ui_factory.cc
++++ b/ui/linux/linux_ui_factory.cc
+@@ -137,6 +137,7 @@
+ 
+   std::unique_ptr<base::Environment> env = base::Environment::Create();
+   switch (GetDefaultSystemTheme()) {
++#if !BUILDFLAG(IS_ZEDBSD)
+     case SystemTheme::kQt:
+       if (auto* qt_ui = GetQtUi()) {
+         return qt_ui;
+@@ -146,6 +147,7 @@
+       }
+       return GetFallbackUi();
+     case SystemTheme::kGtk:
++#endif
+     case SystemTheme::kDefault:
+       if (auto* gtk_ui = GetGtkUi()) {
+         return gtk_ui;
+@@ -169,10 +171,12 @@
+ 
+ LinuxUiTheme* GetLinuxUiTheme(SystemTheme system_theme) {
+   switch (system_theme) {
++#if !BUILDFLAG(IS_ZEDBSD)
+     case SystemTheme::kQt:
+       return GetQtUi();
+     case SystemTheme::kGtk:
+       return GetGtkUi();
++#endif
+     case SystemTheme::kDefault:
+       return nullptr;
+   }
+@@ -184,6 +188,9 @@
+ }
+ 
+ SystemTheme GetDefaultSystemTheme() {
++#if BUILDFLAG(IS_ZEDBSD)
++  return SystemTheme::kDefault;
++#else
+   std::unique_ptr<base::Environment> env = base::Environment::Create();
+ 
+   switch (base::nix::GetDesktopEnvironment(env.get())) {
+@@ -205,6 +212,7 @@
+     case base::nix::DESKTOP_ENVIRONMENT_OTHER:
+       return SystemTheme::kDefault;
+   }
++#endif
+ }
+ 
+ }  // namespace ui
 --- a/ui/menus/BUILD.gn
 +++ b/ui/menus/BUILD.gn
 @@ -4,7 +4,7 @@
@@ -233,6 +373,50 @@
  
  component("menus") {
    sources = [
+--- a/ui/message_center/dummy_message_center.cc
++++ b/ui/message_center/dummy_message_center.cc
+@@ -9,7 +9,7 @@
+ // and link with Android implementations of Chrome which do not have
+ // notification systems yet. This is to avoid spreading compile-time flags
+ // everywhere in the code.
+-#if !(BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA))
++#if !(BUILDFLAG(IS_ANDROID) || BUILDFLAG(IS_FUCHSIA) || BUILDFLAG(IS_ZEDBSD))
+ #error This file should only be used in Android and Fuchsia.
+ #endif
+ 
+--- a/ui/platform_window/BUILD.gn
++++ b/ui/platform_window/BUILD.gn
+@@ -46,7 +46,7 @@
+     ]
+   }
+ 
+-  if (is_linux || is_chromeos) {
++  if (is_linux || is_chromeos || is_zedbsd) {
+     sources += [
+       "extensions/system_modal_extension.cc",
+       "extensions/system_modal_extension.h",
+--- a/ui/platform_window/platform_window_delegate.cc
++++ b/ui/platform_window/platform_window_delegate.cc
+@@ -58,7 +58,7 @@
+   return gfx::Insets();
+ }
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ void PlatformWindowDelegate::OnWindowTiledStateChanged(
+     WindowTiledEdges new_tiled_edges) {}
+ #endif
+--- a/ui/platform_window/platform_window_delegate.h
++++ b/ui/platform_window/platform_window_delegate.h
+@@ -146,7 +146,7 @@
+   virtual void OnWindowStateChanged(PlatformWindowState old_state,
+                                     PlatformWindowState new_state) = 0;
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+   // Notifies the delegate that the tiled state of the window edges has changed.
+   virtual void OnWindowTiledStateChanged(WindowTiledEdges new_tiled_edges);
+ #endif
 --- a/ui/shell_dialogs/BUILD.gn
 +++ b/ui/shell_dialogs/BUILD.gn
 @@ -137,7 +137,7 @@
@@ -246,6 +430,24 @@
  }
 --- a/ui/views/BUILD.gn
 +++ b/ui/views/BUILD.gn
+@@ -703,7 +703,7 @@
+     ]
+   }
+ 
+-  if (is_linux) {
++  if (is_linux || is_zedbsd) {
+     public_deps += [ "//ui/linux:linux_ui" ]
+     deps += [ "//ui/base/ime/linux" ]
+     public += [
+@@ -974,7 +974,7 @@
+         public += [ "widget/desktop_aura/desktop_screen_ozone.h" ]
+         sources += [ "widget/desktop_aura/desktop_screen_ozone.cc" ]
+       }
+-      if (is_linux) {
++      if (is_linux || is_zedbsd) {
+         public += [ "widget/desktop_aura/desktop_window_tree_host_linux.h" ]
+         sources += [
+           "widget/desktop_aura/desktop_window_tree_host_linux.cc",
 @@ -986,7 +986,7 @@
            "//ui/base:ozone_buildflags",
          ]
@@ -284,6 +486,106 @@
      if (use_ozone) {
        sources += [ "unhandled_keyboard_event_handler_ozone.cc" ]
        deps += [ "//ui/ozone" ]
+--- a/ui/views/views_delegate.cc
++++ b/ui/views/views_delegate.cc
+@@ -92,7 +92,7 @@
+   return false;
+ }
+ #elif BUILDFLAG(ENABLE_DESKTOP_AURA) && \
+-    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
++    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD))
+ gfx::ImageSkia* ViewsDelegate::GetDefaultWindowIcon() const {
+   return nullptr;
+ }
+--- a/ui/views/views_delegate.h
++++ b/ui/views/views_delegate.h
+@@ -139,7 +139,7 @@
+   // environment.
+   virtual bool IsWindowInMetro(gfx::NativeWindow window) const;
+ #elif BUILDFLAG(ENABLE_DESKTOP_AURA) && \
+-    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS))
++    (BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD))
+   virtual gfx::ImageSkia* GetDefaultWindowIcon() const;
+ #endif
+ 
+--- a/ui/views/widget/desktop_aura/desktop_window_tree_host_linux.cc
++++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_linux.cc
+@@ -502,6 +502,7 @@
+ void DesktopWindowTreeHostLinux::AddAdditionalInitProperties(
+     const Widget::InitParams& params,
+     ui::PlatformWindowInitProperties* properties) {
++#if !BUILDFLAG(IS_ZEDBSD)
+   // Set the background color on startup to make the initial flickering
+   // happening between the XWindow is mapped and the first expose event
+   // is completely handled less annoying. If possible, we use the content
+@@ -534,6 +535,7 @@
+   properties->x11_extension_delegate = this;
+ 
+   properties->prefer_dark_theme = ui::LinuxUiTheme::GetForProfile(nullptr);
++#endif
+ }
+ 
+ base::flat_map<std::string, std::string>
+--- a/ui/views/widget/desktop_aura/desktop_window_tree_host_platform.cc
++++ b/ui/views/widget/desktop_aura/desktop_window_tree_host_platform.cc
+@@ -1342,7 +1342,7 @@
+ // DesktopWindowTreeHost:
+ 
+ // Linux subclasses this host and adds some Linux specific bits.
+-#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS)
++#if !BUILDFLAG(IS_LINUX) && !BUILDFLAG(IS_CHROMEOS) && !BUILDFLAG(IS_ZEDBSD)
+ // static
+ DesktopWindowTreeHost* DesktopWindowTreeHost::Create(
+     internal::NativeWidgetDelegate* native_widget_delegate,
+--- a/ui/views/widget/widget.h
++++ b/ui/views/widget/widget.h
+@@ -498,7 +498,7 @@
+     bool dont_show_in_taskbar = false;
+ #endif  // BUILDFLAG(IS_WIN)
+ 
+-#if BUILDFLAG(IS_LINUX)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+     // Only used by X11, for root level windows. Specifies the res_name and
+     // res_class fields, respectively, of the WM_CLASS window property. Controls
+     // window grouping and desktop file matching in Linux window managers.
+@@ -511,7 +511,7 @@
+     // The startup ID (or XDG activation token) used to associate the window
+     // with the launch event that created it. Used for both X11 and Wayland.
+     std::string startup_id;
+-#endif  // BUILDFLAG(IS_LINUX)
++#endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_ZEDBSD)
+ 
+     // If set, the window size will follow the content preferred size.
+     bool autosize = false;
+--- a/ui/views/window/native_frame_view_linux.cc
++++ b/ui/views/window/native_frame_view_linux.cc
+@@ -87,6 +87,7 @@
+ }
+ 
+ void NativeFrameViewLinux::PaintMaximizedFrameBorder(gfx::Canvas* canvas) {
++#if !BUILDFLAG(IS_ZEDBSD)
+   ui::NativeTheme::FrameTopAreaExtraParams frame_top_area;
+   frame_top_area.use_custom_frame = true;
+   frame_top_area.has_frame_border = true;
+@@ -96,6 +97,7 @@
+       canvas->sk_canvas(), GetColorProvider(), ui::NativeTheme::kFrameTopArea,
+       ui::NativeTheme::kNormal,
+       gfx::Rect(0, 0, width(), layout()->GetTopAreaHeight()), params);
++#endif
+ }
+ 
+ void NativeFrameViewLinux::OnThemeOrButtonOrderChanged() {
+--- a/ui/webui/resources/mojo/BUILD.gn
++++ b/ui/webui/resources/mojo/BUILD.gn
+@@ -107,7 +107,7 @@
+       [ "components/user_education/webui/user_education.mojom-webui.ts" ]
+ }
+ 
+-if (is_mac || is_win || is_linux || is_chromeos || is_android) {
++if (is_mac || is_win || is_linux || is_chromeos || is_android || is_zedbsd) {
+   mojo_ts_files += [ "mojo/public/mojom/base/version.mojom-webui.ts" ]
+ }
+ 
 --- a/ui/webui/webui_features.gni
 +++ b/ui/webui/webui_features.gni
 @@ -50,17 +50,17 @@

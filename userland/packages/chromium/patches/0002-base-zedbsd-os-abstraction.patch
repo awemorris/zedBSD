@@ -86,18 +86,22 @@
      sources += [ "synchronization/cancelable_event_posix.cc" ]
    }
  
-@@ -2440,6 +2467,10 @@
+@@ -2440,6 +2467,14 @@
      }
    }
  
 +  if (is_zedbsd) {
++    sources += [
++      "nix/mime_util_xdg.cc",
++      "nix/mime_util_xdg.h",
++    ]
 +    deps += [ "//base/third_party/xdg_user_dirs" ]
 +  }
 +
    if (use_blink) {
      sources += [
        "files/file_path_watcher.cc",
-@@ -4487,7 +4518,7 @@
+@@ -4487,7 +4522,7 @@
        "posix/file_descriptor_shuffle_unittest.cc",
        "posix/unix_domain_socket_unittest.cc",
      ]
@@ -106,7 +110,7 @@
        sources += [
          "profiler/stack_base_address_posix_unittest.cc",
          "profiler/stack_copier_signal_unittest.cc",
-@@ -4591,7 +4622,8 @@
+@@ -4591,7 +4626,8 @@
      sources += [ "debug/allocation_trace_unittest.cc" ]
    }
  
@@ -303,6 +307,15 @@
  #include <sys/types.h>
  #include <unistd.h>
  
+@@ -39,7 +41,7 @@
+ // Controls whether `dladdr(...)` is used to print the callstack. This is
+ // only used on iOS Official build where `backtrace_symbols(...)` prints
+ // misleading symbols (as the binary is stripped).
+-#if BUILDFLAG(IS_IOS) && defined(OFFICIAL_BUILD)
++#if (BUILDFLAG(IS_IOS) && defined(OFFICIAL_BUILD)) || BUILDFLAG(IS_ZEDBSD)
+ #define HAVE_DLADDR
+ #include <dlfcn.h>
+ #endif
 @@ -86,7 +88,7 @@
  #include "base/strings/string_util.h"
  #include "build/build_config.h"
@@ -357,7 +370,51 @@
      PrintToStderr(buf);
    }
    PrintToStderr("\n");
-@@ -660,7 +666,7 @@
+@@ -537,6 +543,43 @@
+   }
+   PrintToStderr("\n");
+ #endif  // ARCH_CPU_X86_FAMILY
++#elif BUILDFLAG(IS_ZEDBSD)
++  ucontext_t* context = reinterpret_cast<ucontext_t*>(void_context);
++  if (context) {
++    auto print_pc = [&](const char* label, uintptr_t addr) {
++      PrintToStderr(label);
++      internal::itoa_r(static_cast<intptr_t>(addr), 16, 16, buf);
++      PrintToStderr(buf);
++      Dl_info dli;
++      if (dladdr(reinterpret_cast<const void*>(addr), &dli) != 0 &&
++          dli.dli_fname) {
++        PrintToStderr(" ");
++        PrintToStderr(dli.dli_fname);
++        PrintToStderr("+0x");
++        internal::itoa_r(
++            static_cast<intptr_t>(addr - reinterpret_cast<uintptr_t>(dli.dli_fbase)),
++            16, 0, buf);
++        PrintToStderr(buf);
++      }
++      PrintToStderr("\n");
++    };
++    print_pc("  pc: ", static_cast<uintptr_t>(context->uc_mcontext.mc_pc));
++    print_pc("  sp: ", static_cast<uintptr_t>(context->uc_mcontext.mc_sp));
++    const uintptr_t* sp =
++        reinterpret_cast<const uintptr_t*>(context->uc_mcontext.mc_sp);
++    if (sp) {
++      for (size_t i = 0; i < 64; ++i) {
++        uintptr_t val = UNSAFE_BUFFERS(sp[i]);
++        if (val >= 0x10000) {
++          Dl_info dli;
++          if (dladdr(reinterpret_cast<const void*>(val), &dli) != 0 &&
++              dli.dli_fname) {
++            print_pc("  stk: ", val);
++          }
++        }
++      }
++    }
++  }
+ #endif  // BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
+ 
+   PrintToStderr("[end of stack trace]\n");
+@@ -660,7 +703,7 @@
    StackTrace stack_trace;
  }
  
@@ -366,7 +423,7 @@
  
  // class SandboxSymbolizeHelper.
  //
-@@ -980,7 +986,7 @@
+@@ -980,7 +1023,7 @@
  }  // namespace
  
  bool EnableInProcessStackDumping() {
@@ -375,7 +432,7 @@
    SandboxSymbolizeHelper::GetInstance();
  #endif  // USE_SYMBOLIZE
  
-@@ -1075,14 +1081,14 @@
+@@ -1075,14 +1118,14 @@
  #endif
  }
  
@@ -861,6 +918,28 @@
      }
    }
  
+--- a/base/process/kill.h
++++ b/base/process/kill.h
+@@ -125,7 +125,7 @@
+ BASE_EXPORT TerminationStatus
+ GetKnownDeadTerminationStatus(ProcessHandle handle, int* exit_code);
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ // Spawns a thread to wait asynchronously for the child |process| to exit
+ // and then reaps it.
+ BASE_EXPORT void EnsureProcessGetsReaped(Process process);
+--- a/base/process/kill_posix.cc
++++ b/base/process/kill_posix.cc
+@@ -169,7 +169,7 @@
+       0, MakeSelfDeleting<BackgroundReaper>(std::move(process), Seconds(2)));
+ }
+ 
+-#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS)
++#if BUILDFLAG(IS_LINUX) || BUILDFLAG(IS_CHROMEOS) || BUILDFLAG(IS_ZEDBSD)
+ void EnsureProcessGetsReaped(Process process) {
+   DCHECK(!process.is_current());
+ 
 --- a/base/process/launch_posix.cc
 +++ b/base/process/launch_posix.cc
 @@ -14,7 +14,9 @@
@@ -1084,7 +1163,7 @@
  static const rlim_t kSystemDefaultMaxFds = 256;
 --- /dev/null
 +++ b/base/process/process_metrics_zedbsd.cc
-@@ -0,0 +1,90 @@
+@@ -0,0 +1,102 @@
 +// Copyright 2026 zedBSD Authors
 +// Use of this source code is governed by a BSD-style license that can be
 +// found in the LICENSE file.
@@ -1159,6 +1238,18 @@
 +base::expected<ProcessMemoryInfo, ProcessUsageError>
 +ProcessMetrics::GetMemoryInfo() const {
 +  return base::unexpected(ProcessUsageError::kSystemError);
++}
++
++int ProcessMetrics::GetOpenFdCount() const {
++  return 0;
++}
++
++int ProcessMetrics::GetOpenFdSoftLimit() const {
++  return 1024;
++}
++
++size_t GetSystemCommitCharge() {
++  return 0;
 +}
 +
 +// static
