@@ -1243,16 +1243,48 @@ size_t kl_system_network_get_links(const struct kl_system *system, struct kl_net
 size_t kl_system_network_get_dns(const struct kl_system *system, char (*servers)[KL_NETWORK_ADDRESS_MAX], size_t capacity);
 size_t kl_system_network_get_saved(const struct kl_system *system, char (*ssids)[KL_NETWORK_SSID_MAX], size_t capacity);
 
+/* Limits and kinds of audio devices reported by the sound service. */
+#define KL_AUDIO_DEVICE_KEY_MAX		32U
+#define KL_AUDIO_DEVICE_NAME_MAX	32U
+#define KL_AUDIO_DEVICES_MAX		32U
+#define KL_AUDIO_KIND_OUTPUT		0U
+#define KL_AUDIO_KIND_INPUT		1U
+
+/* One audio output or input device offered by the sound service. */
+struct kl_audio_device {
+	uint32_t id;
+	unsigned kind;
+	unsigned endpoint_class;
+	char key[KL_AUDIO_DEVICE_KEY_MAX];
+	char name[KL_AUDIO_DEVICE_NAME_MAX];
+};
+
 /*
  * Copies the sound output's state.
  */
 void kl_system_audio_get_state(const struct kl_system *system, struct kl_audio_state *state);
 
 /*
+ * Copies up to capacity audio output/input devices and returns how many were copied.
+ */
+size_t kl_system_audio_get_devices(const struct kl_system *system, struct kl_audio_device *devices, size_t capacity);
+
+/*
+ * Copies the active media output and input device IDs (0 if none).
+ */
+void kl_system_audio_get_route(const struct kl_system *system, uint32_t *output_id, uint32_t *input_id);
+
+/*
  * Asks for each channel's volume (0 to 100) and the mute.  Returns 0 when
  * asked, ENOTSUP, or EINVAL.
  */
 int kl_system_audio_set_volume(struct kl_system *system, unsigned left, unsigned right, unsigned muted, uint32_t *request);
+
+/*
+ * Asks for the active media output and input devices (0 selects the default).
+ * Returns 0 when asked, or ENOTSUP.
+ */
+int kl_system_audio_set_route(struct kl_system *system, uint32_t output_id, uint32_t input_id, uint32_t *request);
 
 /*
  * Asks for the short feedback sound at the device volume.  Returns 0 when

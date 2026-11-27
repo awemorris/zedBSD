@@ -472,6 +472,22 @@ size_t kl_backend_network_get_saved(char (*ssids)[KL_BACKEND_NETWORK_SSID_MAX], 
  */
 struct kl_backend_audio;
 
+/* Limits and kinds of audio endpoints reported by the sound service. */
+#define KL_BACKEND_AUDIO_KEY_MAX	32U
+#define KL_BACKEND_AUDIO_NAME_MAX	32U
+#define KL_BACKEND_AUDIO_ENDPOINTS_MAX	32U
+#define KL_BACKEND_AUDIO_KIND_OUTPUT	0U
+#define KL_BACKEND_AUDIO_KIND_INPUT	1U
+
+/* One audio output or input endpoint offered by the sound service. */
+struct kl_backend_audio_endpoint {
+	uint32_t id;
+	unsigned kind;
+	unsigned endpoint_class;
+	char key[KL_BACKEND_AUDIO_KEY_MAX];
+	char name[KL_BACKEND_AUDIO_NAME_MAX];
+};
+
 /* What the sound service last reported. */
 struct kl_backend_audio_state {
 	unsigned reachable;	/* 0 while the service cannot be reached */
@@ -481,11 +497,15 @@ struct kl_backend_audio_state {
 	unsigned left;		/* 0..100 */
 	unsigned right;		/* 0..100 */
 	unsigned muted;		/* 0 or 1 */
+	uint32_t output_id;	/* active media output endpoint id, 0 if none */
+	uint32_t input_id;	/* active media input endpoint id, 0 if none */
 };
 
 /* What kl_backend_audio_update found changed. */
 #define KL_BACKEND_AUDIO_CHANGED_REACHABLE	1U	/* the service came or went */
 #define KL_BACKEND_AUDIO_CHANGED_VOLUME		2U	/* the volume or mute changed */
+#define KL_BACKEND_AUDIO_CHANGED_ENDPOINTS	4U	/* the endpoint list changed */
+#define KL_BACKEND_AUDIO_CHANGED_ROUTE		8U	/* the active media route changed */
 
 /*
  * Starts following the volume.  Returns NULL only without memory.
@@ -531,6 +551,19 @@ int kl_backend_audio_set_volume(struct kl_backend_audio *audio, unsigned left, u
  * without it stays silent).  Returns 0, ENOTCONN, or the error of sending.
  */
 int kl_backend_audio_feedback(struct kl_backend_audio *audio);
+
+/*
+ * Copies the endpoints the sound service last reported, up to capacity.
+ */
+size_t kl_backend_audio_get_endpoints(const struct kl_backend_audio *audio,
+    struct kl_backend_audio_endpoint *endpoints, size_t capacity);
+
+/*
+ * Asks the sound service to set the active media output and input endpoints.
+ * Passing 0 for either selects the service's default for that direction.
+ */
+int kl_backend_audio_set_route(struct kl_backend_audio *audio,
+    uint32_t output_id, uint32_t input_id);
 
 /*
  * Tells whether the sound service runs: 1 when it does, 0 when it does

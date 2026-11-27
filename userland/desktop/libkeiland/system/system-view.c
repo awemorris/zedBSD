@@ -331,8 +331,38 @@ system_view_audio_state(
 	struct system_view *view,
 	const struct kl_audio_state *state)
 {
-	/* The state, pending. */
+	/* The state, pending; also reset pending device list for this batch. */
 	view->audio_pending = *state;
+	view->audio_devices_pending_count = 0U;
+	view->audio_touched = 1U;
+}
+
+/*
+ * Keeps an audio device pending until its done.
+ */
+void
+system_view_audio_device(
+	struct system_view *view,
+	const struct kl_audio_device *device)
+{
+	if (view->audio_devices_pending_count < KL_AUDIO_DEVICES_MAX) {
+		view->audio_devices_pending[view->audio_devices_pending_count] = *device;
+		view->audio_devices_pending_count++;
+	}
+	view->audio_touched = 1U;
+}
+
+/*
+ * Keeps the active media route pending until its done.
+ */
+void
+system_view_audio_route(
+	struct system_view *view,
+	uint32_t output_id,
+	uint32_t input_id)
+{
+	view->audio_output_pending = output_id;
+	view->audio_input_pending = input_id;
 	view->audio_touched = 1U;
 }
 
@@ -349,10 +379,23 @@ system_view_audio_done(
 	if (!view->audio_touched)
 		return;
 
-	/* The state, told when it changed. */
+	/* The state, devices, and route, told when any changed. */
 	view->audio_touched = 0U;
-	differs = memcmp(&view->audio, &view->audio_pending, sizeof(view->audio));
+	differs = memcmp(&view->audio, &view->audio_pending, sizeof(view->audio)) != 0 ||
+	    view->audio_output_id != view->audio_output_pending ||
+	    view->audio_input_id != view->audio_input_pending ||
+	    view->audio_device_count != view->audio_devices_pending_count ||
+	    (view->audio_device_count > 0U &&
+	    memcmp(view->audio_devices, view->audio_devices_pending,
+		view->audio_device_count * sizeof(view->audio_devices[0])) != 0);
 	view->audio = view->audio_pending;
+	view->audio_output_id = view->audio_output_pending;
+	view->audio_input_id = view->audio_input_pending;
+	view->audio_device_count = view->audio_devices_pending_count;
+	if (view->audio_device_count > 0U) {
+		memcpy(view->audio_devices, view->audio_devices_pending,
+		    view->audio_device_count * sizeof(view->audio_devices[0]));
+	}
 	if (differs != 0)
 		view->changed |= KL_SYSTEM_CHANGED_AUDIO;
 }

@@ -248,7 +248,7 @@ se_sound_draw(
 	(void)kl_text_draw_fit(app->text, canvas, x + INPUT_PAD + 2, y + 32 + line.ascent, "No sound plays while it is on.", INPUT_TEXT_SMALL, 0, width - 120, SE_COLOR_TEXT_SECONDARY);
 	se_toggle_draw(app, canvas, x + width - INPUT_PAD - 44, y + 16, app->sound.muted, available, SE_SOUND_MUTE);
 
-	/* The output's card: the service's state. */
+	/* The output's card: the service's state and selectable output devices. */
 	card += height + INPUT_GAP;
 	running = se_sound_running(app);
 	service = "Not running";
@@ -258,8 +258,84 @@ se_sound_draw(
 		service = "Running, no sound output";
 	else if (running != 0)
 		service = "Running";
-	y = se_card_begin(app, canvas, x, card, width, se_card_height(1, 1), "Output", NULL);
-	(void)se_row_value(app, canvas, x, y, width, "Sound service", service, 1);
+	{
+		size_t out_count;
+		size_t in_count;
+		size_t i;
+		int out_rows;
+		int in_rows;
+		int row_y;
+
+		out_count = 0U;
+		in_count = 0U;
+		for (i = 0U; i < app->sound.device_count; i++) {
+			if (app->sound.devices[i].kind == KL_AUDIO_KIND_OUTPUT)
+				out_count++;
+			else if (app->sound.devices[i].kind == KL_AUDIO_KIND_INPUT)
+				in_count++;
+		}
+
+		out_rows = 1 + (out_count > 0U ? (int)out_count : 1);
+		height = se_card_height(out_rows, 1);
+		y = se_card_begin(app, canvas, x, card, width, height, kl_tr("Output Device"), NULL);
+		row_y = se_row_value(app, canvas, x, y, width, kl_tr("Sound service"), service, out_count == 0U && !running);
+		if (out_count == 0U) {
+			(void)se_row_value(app, canvas, x, row_y, width, kl_tr("Device"), kl_tr("No output devices"), 1);
+		} else {
+			size_t seen;
+
+			seen = 0U;
+			kl_text_metrics(app->text, INPUT_TEXT_TITLE, &line);
+			for (i = 0U; i < app->sound.device_count; i++) {
+				int last;
+
+				if (app->sound.devices[i].kind != KL_AUDIO_KIND_OUTPUT)
+					continue;
+				seen++;
+				last = (seen == out_count);
+				(void)kl_text_draw_fit(app->text, canvas, x + INPUT_PAD + 2, row_y + 10 + line.ascent,
+				    app->sound.devices[i].name, INPUT_TEXT_TITLE, 1, width - 120, SE_COLOR_TEXT);
+				se_toggle_draw(app, canvas, x + width - INPUT_PAD - 44, row_y + 8,
+				    app->sound.devices[i].id == app->sound.output_id, running,
+				    SE_SOUND_OUTPUT_BASE + (int)i);
+				row_y += 40;
+				if (!last)
+					kl_canvas_line(canvas, (float)(x + INPUT_PAD), (float)row_y - 0.5f,
+					    (float)(x + width - INPUT_PAD), (float)row_y - 0.5f, 1.0f, SE_COLOR_SEPARATOR);
+			}
+		}
+
+		/* The input device card: selectable input devices. */
+		card += height + INPUT_GAP;
+		in_rows = in_count > 0U ? (int)in_count : 1;
+		height = se_card_height(in_rows, 1);
+		row_y = se_card_begin(app, canvas, x, card, width, height, kl_tr("Input Device"), NULL);
+		if (in_count == 0U) {
+			(void)se_row_value(app, canvas, x, row_y, width, kl_tr("Device"), kl_tr("No input devices"), 1);
+		} else {
+			size_t seen;
+
+			seen = 0U;
+			kl_text_metrics(app->text, INPUT_TEXT_TITLE, &line);
+			for (i = 0U; i < app->sound.device_count; i++) {
+				int last;
+
+				if (app->sound.devices[i].kind != KL_AUDIO_KIND_INPUT)
+					continue;
+				seen++;
+				last = (seen == in_count);
+				(void)kl_text_draw_fit(app->text, canvas, x + INPUT_PAD + 2, row_y + 10 + line.ascent,
+				    app->sound.devices[i].name, INPUT_TEXT_TITLE, 1, width - 120, SE_COLOR_TEXT);
+				se_toggle_draw(app, canvas, x + width - INPUT_PAD - 44, row_y + 8,
+				    app->sound.devices[i].id == app->sound.input_id, running,
+				    SE_SOUND_INPUT_BASE + (int)i);
+				row_y += 40;
+				if (!last)
+					kl_canvas_line(canvas, (float)(x + INPUT_PAD), (float)row_y - 0.5f,
+					    (float)(x + width - INPUT_PAD), (float)row_y - 0.5f, 1.0f, SE_COLOR_SEPARATOR);
+			}
+		}
+	}
 
 	/* What the volume is, and why it cannot be changed now. */
 	note = "The system bar's volume icon changes the same volume.";
@@ -267,7 +343,7 @@ se_sound_draw(
 		note = "The sound is set from this desktop's own settings.";
 	else if (!available)
 		note = "The volume can be changed when the sound service runs with a sound output.";
-	y = input_note(app, canvas, x, card + se_card_height(1, 1) + INPUT_GAP, width, note);
+	y = input_note(app, canvas, x, card + height + INPUT_GAP, width, note);
 
 	/* The edge below the cards. */
 	return y;

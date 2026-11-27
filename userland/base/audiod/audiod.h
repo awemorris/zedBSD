@@ -88,6 +88,9 @@ struct audiod_client {
 struct audiod_device {
 	int dsp;			/* -1 without a device */
 	int mixer;
+	int unit;			/* active playback /dev/dspN unit, -1 if none */
+	int capture_dsp;		/* capture /dev/dspN fd (may equal dsp) */
+	int capture_unit;		/* active capture /dev/dspN unit, -1 if none */
 	uint32_t format;
 	uint32_t channels;
 	uint32_t rate;
@@ -185,7 +188,11 @@ int audiod_feedback_make(struct audiod_device *device);
 
 /* device.c */
 int audiod_device_open(struct audiod_device *device);
+int audiod_device_probe(unsigned unit, int *has_output, int *has_input);
+int audiod_device_switch_output(struct audiod_device *device, unsigned unit);
+int audiod_device_switch_input(struct audiod_device *device, unsigned unit);
 int audiod_device_fd(const struct audiod_device *device, short *events);
+int audiod_device_capture_fd(const struct audiod_device *device, short *events);
 int audiod_device_timeout_ms(const struct audiod_device *device);
 void audiod_device_service(struct audiod_device *device, short revents);
 void audiod_timing(const char *format, ...);

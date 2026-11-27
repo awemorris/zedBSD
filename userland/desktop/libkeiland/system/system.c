@@ -154,6 +154,8 @@ struct system_audio_listener {
 	void (*state)(void *data, struct wl_proxy *proxy, uint32_t reachable, uint32_t device, uint32_t rate, uint32_t channels, uint32_t left, uint32_t right, uint32_t muted);
 	void (*done)(void *data, struct wl_proxy *proxy, uint32_t serial);
 	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
+	void (*device)(void *data, struct wl_proxy *proxy, uint32_t id, uint32_t kind, uint32_t endpoint_class, const char *key, const char *name);
+	void (*route)(void *data, struct wl_proxy *proxy, uint32_t output_id, uint32_t input_id);
 };
 
 /* The listener of kl_system_power_v1's events, in their order. */
@@ -355,6 +357,8 @@ static void system_details_done(void *data, struct wl_proxy *proxy);
 static void system_network_done(void *data, struct wl_proxy *proxy, uint32_t serial);
 static void system_audio_state(void *data, struct wl_proxy *proxy, uint32_t reachable, uint32_t device, uint32_t rate, uint32_t channels, uint32_t left, uint32_t right, uint32_t muted);
 static void system_audio_done(void *data, struct wl_proxy *proxy, uint32_t serial);
+static void system_audio_device(void *data, struct wl_proxy *proxy, uint32_t id, uint32_t kind, uint32_t endpoint_class, const char *key, const char *name);
+static void system_audio_route(void *data, struct wl_proxy *proxy, uint32_t output_id, uint32_t input_id);
 static void system_power_state(void *data, struct wl_proxy *proxy, uint32_t source, int32_t percent, uint32_t charging, uint32_t actions);
 static void system_power_done(void *data, struct wl_proxy *proxy, uint32_t serial);
 static void system_device(void *data, struct wl_proxy *proxy, const char *id, uint32_t kind, uint32_t state, const char *name, const char *location);
@@ -415,7 +419,9 @@ static const struct system_network_listener system_network_listener = {
 static const struct system_audio_listener system_audio_listener = {
 	system_audio_state,
 	system_audio_done,
-	system_result
+	system_result,
+	system_audio_device,
+	system_audio_route
 };
 
 /* The power object's callbacks. */
@@ -3218,6 +3224,63 @@ kl_system_audio_get_state(
 }
 
 /*
+ * Copies up to capacity audio output/input devices and returns how many were copied.
+ */
+size_t
+kl_system_audio_get_devices(
+	const struct kl_system *system,
+	struct kl_audio_device *devices,
+	size_t capacity)
+{
+	size_t count;
+
+	if (system == NULL || devices == NULL)
+		return 0U;
+	count = system->view.audio_device_count;
+	if (count > capacity)
+		count = capacity;
+	if (count > 0U)
+		memcpy(devices, system->view.audio_devices, count * sizeof(devices[0]));
+	return count;
+}
+
+/*
+ * Copies the active media output and input device IDs.
+ */
+void
+kl_system_audio_get_route(
+	const struct kl_system *system,
+	uint32_t *output_id,
+	uint32_t *input_id)
+{
+	if (output_id != NULL)
+		*output_id = system != NULL ? system->view.audio_output_id : 0U;
+	if (input_id != NULL)
+		*input_id = system != NULL ? system->view.audio_input_id : 0U;
+}
+
+/*
+ * Asks for the active media output and input devices.
+ */
+int
+kl_system_audio_set_route(
+	struct kl_system *system,
+	uint32_t output_id,
+	uint32_t input_id,
+	uint32_t *request)
+{
+	uint32_t number;
+
+	if (system->audio == NULL || system->lost ||
+	    wl_proxy_get_version(system->audio) < KL_SYSTEM_AUDIO_SINCE_DEVICES)
+		return ENOTSUP;
+
+	number = system_number(system, request);
+	wl_proxy_marshal(system->audio, KL_SYSTEM_AUDIO_SET_ROUTE, number, output_id, input_id);
+	return 0;
+}
+
+/*
  * Asks for each channel's volume and the mute.
  */
 int
@@ -4795,6 +4858,50 @@ system_audio_state(
 
 	/* Pending until the done. */
 	system_view_audio_state(&system->view, &state);
+}
+
+/* Keeps one audio device, in effect at its done. */
+static void
+system_audio_device(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t id,
+	uint32_t kind,
+	uint32_t endpoint_class,
+	const char *key,
+	const char *name)
+{
+	struct kl_system *system;
+	struct kl_audio_device device;
+
+	UNUSED_PARAMETER(proxy);
+
+	system = data;
+	memset(&device, 0, sizeof(device));
+	device.id = id;
+	device.kind = kind;
+	device.endpoint_class = endpoint_class;
+	if (key != NULL)
+		(void)snprintf(device.key, sizeof(device.key), "%s", key);
+	if (name != NULL)
+		(void)snprintf(device.name, sizeof(device.name), "%s", name);
+	system_view_audio_device(&system->view, &device);
+}
+
+/* Keeps the active media route, in effect at its done. */
+static void
+system_audio_route(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t output_id,
+	uint32_t input_id)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	system = data;
+	system_view_audio_route(&system->view, output_id, input_id);
 }
 
 /* Puts the sound's state into effect. */

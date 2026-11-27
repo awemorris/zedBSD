@@ -387,3 +387,15 @@ msg	Try the key again, or press Next and connect later in Settings.
 msg	No Wi-Fi and no wired connection were found. Press Next to go on; Settings > Ethernet or Wi-Fi connects later.	
 # userland/desktop/settings/welcome.c:639
 msg	The Welcome could not be marked as done; it will show again at the next login. Press again to go on.	
+# userland/desktop/locale/settings.keys:89
+msg	Output Device	出力デバイス
+# userland/desktop/locale/settings.keys:90
+msg	Input Device	入力デバイス
+# userland/desktop/locale/settings.keys:91
+msg	Sound service	サウンドサービス
+# userland/desktop/locale/settings.keys:92
+msg	Device	デバイス
+# userland/desktop/locale/settings.keys:93
+msg	No output devices	出力デバイスがありません
+# userland/desktop/locale/settings.keys:94
+msg	No input devices	入力デバイスがありません

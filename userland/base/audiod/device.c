@@ -36,6 +36,8 @@ static void fill_written(struct audiod_device *device);
 static void read_capture(struct audiod_device *device);
 static void finish_drains(struct audiod_device *device);
 static int allocate_buffers(struct audiod_device *device);
+static void open_output_unit(struct audiod_device *device, unsigned unit);
+static void close_output_unit(struct audiod_device *device);
 static void feedback_track(struct audiod_device *device, uint64_t period_byte);
 static void feedback_played(struct audiod_device *device);
 
@@ -47,61 +49,26 @@ int
 audiod_device_open(
 	struct audiod_device *device)
 {
-	struct audio_format format;
-	struct audio_buffer_info info;
-	struct audio_caps caps;
-	struct audio_space space;
-	uint32_t bits;
-	void *map;
 	int error;
 
 	/* The defaults without a device: 48 kHz stereo S16, 8 fragments of 4096 bytes. */
 	memset(device, 0, sizeof(*device));
 	device->dsp = -1;
 	device->mixer = -1;
+	device->unit = -1;
+	device->capture_dsp = -1;
+	device->capture_unit = -1;
 	device->format = AUDIOD_FORMAT_S16_LE;
 	device->channels = 2;
 	device->rate = 48000;
 	device->fragment_bytes = 4096;
 	device->fragment_count = 8;
 
-	/*
-	 * A device opened write-only cannot be mapped, so playback is opened
-	 * read-write; the device gives it whichever directions it has.
-	 */
-	device->dsp = open("/dev/dsp0", O_RDWR | O_NONBLOCK);
-	if (device->dsp >= 0) {
-		/* Its format; one that is not stereo is asked for S16 stereo at 48 kHz. */
-		memset(&format, 0, sizeof(format));
-		error = ioctl(device->dsp, KERN_AUDIO_GET_FORMAT, &format);
-		if (error == 0 && format.channels != 2U) {
-			format.format = KERN_AUDIO_FORMAT_S16_LE;
-			format.channels = 2;
-			format.rate = 48000;
-			format.reserved = 0;
-			(void)ioctl(device->dsp, KERN_AUDIO_SET_FORMAT, &format);
-			(void)ioctl(device->dsp, KERN_AUDIO_GET_FORMAT, &format);
-		}
-
-		/* Its buffer, asked for only when it is stereo. */
-		error = -1;
-		if (format.channels == 2U)
-			error = ioctl(device->dsp, KERN_AUDIO_GET_BUFFER, &info);
-
-		/* A device that is not stereo, or has no buffer, is not used. */
-		if (error != 0) {
-			close(device->dsp);
-			device->dsp = -1;
-		} else {
-			device->format = format.format;
-			device->rate = format.rate;
-			device->fragment_bytes = info.fragment_bytes;
-			device->fragment_count = info.fragment_count;
-			error = ioctl(device->dsp, KERN_AUDIO_GET_ISPACE, &space);
-			device->capture = 0;
-			if (error == 0)
-				device->capture = 1;
-		}
+	/* Opens /dev/dsp0 and /dev/mixer0 when present. */
+	open_output_unit(device, 0U);
+	if (device->dsp >= 0 && device->capture) {
+		device->capture_dsp = device->dsp;
+		device->capture_unit = 0;
 	}
 
 	/* The frame and period sizes, and the buffers for them. */
@@ -111,31 +78,7 @@ audiod_device_open(
 	if (error != 0)
 		return -1;
 
-	/* Maps the playback ring when the device can, and starts it. */
-	error = -1;
-	if (device->dsp >= 0)
-		error = ioctl(device->dsp, KERN_AUDIO_GET_CAPS, &caps);
-	if (error == 0 && (caps.caps & KERN_AUDIO_CAP_MMAP) != 0) {
-		map = mmap(NULL, caps.mmap_bytes, PROT_READ | PROT_WRITE,
-		    MAP_SHARED, device->dsp, 0);
-		if (map != MAP_FAILED) {
-			device->map = map;
-			device->map_bytes = caps.mmap_bytes;
-			device->lead_bytes = caps.mmap_lead_bytes;
-			fill_mapped(device);
-
-			/* Started; a device that cannot start is written to instead. */
-			bits = KERN_AUDIO_TRIGGER_OUTPUT;
-			error = ioctl(device->dsp, KERN_AUDIO_SET_TRIGGER, &bits);
-			if (error != 0) {
-				munmap(device->map, device->map_bytes);
-				device->map = NULL;
-			}
-		}
-	}
-
-	/* The volume node, and the clock of a device-less run. */
-	device->mixer = open("/dev/mixer0", O_RDWR);
+	/* The clock of a device-less run. */
 	device->timer_next_ns = audiod_now_ns();
 
 	/* The volume audiod applies itself until the device takes one (ws100-p002): full and unmuted. */
@@ -147,6 +90,173 @@ audiod_device_open(
 	(void)audiod_feedback_make(device);
 
 	/* Succeeded: the device (or the clock without one) is ready. */
+	return 0;
+}
+
+/*
+ * Probes /dev/dspN to see whether it exists and supports output and/or input.
+ * Returns 0 if the device node opened, or -1 if it does not exist.
+ */
+int
+audiod_device_probe(
+	unsigned unit,
+	int *has_output,
+	int *has_input)
+{
+	struct audio_format format;
+	struct audio_buffer_info info;
+	struct audio_space space;
+	char path[32];
+	int fd;
+	int error;
+
+	*has_output = 0;
+	*has_input = 0;
+	(void)snprintf(path, sizeof(path), "/dev/dsp%u", unit);
+	fd = open(path, O_RDWR | O_NONBLOCK);
+	if (fd < 0)
+		return -1;
+
+	memset(&format, 0, sizeof(format));
+	error = ioctl(fd, KERN_AUDIO_GET_FORMAT, &format);
+	if (error == 0 && format.channels != 2U) {
+		format.format = KERN_AUDIO_FORMAT_S16_LE;
+		format.channels = 2;
+		format.rate = 48000;
+		format.reserved = 0;
+		(void)ioctl(fd, KERN_AUDIO_SET_FORMAT, &format);
+		(void)ioctl(fd, KERN_AUDIO_GET_FORMAT, &format);
+	}
+	if (error == 0 && format.channels == 2U &&
+	    ioctl(fd, KERN_AUDIO_GET_BUFFER, &info) == 0)
+		*has_output = 1;
+	if (ioctl(fd, KERN_AUDIO_GET_ISPACE, &space) == 0)
+		*has_input = 1;
+
+	(void)close(fd);
+	return 0;
+}
+
+/*
+ * Switches the active playback device to /dev/dspN and /dev/mixerN.
+ */
+int
+audiod_device_switch_output(
+	struct audiod_device *device,
+	unsigned unit)
+{
+	struct audiod_client *client;
+	struct audiod_stream *stream;
+	char path[32];
+	uint32_t left;
+	uint32_t right;
+	uint32_t muted;
+	int old_capture_shared;
+	int error;
+
+	if ((int)unit == device->unit && device->dsp >= 0)
+		return 0;
+
+	/* Preserves the active volume before closing the old mixer. */
+	audiod_device_get_volume(device, &left, &right, &muted);
+
+	/* If capture was sharing the old dsp fd, reopen it on its own fd first. */
+	old_capture_shared = (device->capture_dsp >= 0 && device->capture_dsp == device->dsp);
+	if (old_capture_shared && device->capture_unit >= 0) {
+		(void)snprintf(path, sizeof(path), "/dev/dsp%d", device->capture_unit);
+		device->capture_dsp = open(path, O_RDONLY | O_NONBLOCK);
+		if (device->capture_dsp < 0) {
+			device->capture = 0;
+			device->capture_started = 0;
+			device->capture_unit = -1;
+		}
+	}
+
+	close_output_unit(device);
+	device->format = AUDIOD_FORMAT_S16_LE;
+	device->channels = 2;
+	device->rate = 48000;
+	device->fragment_bytes = 4096;
+	device->fragment_count = 8;
+	device->written = 0;
+	device->consumed = 0;
+
+	open_output_unit(device, unit);
+	if (device->dsp < 0)
+		return ENOENT;
+
+	/* If capture is on the same unit, share the new dsp fd. */
+	if (device->capture_unit == (int)unit && device->capture) {
+		if (device->capture_dsp >= 0 && device->capture_dsp != device->dsp)
+			(void)close(device->capture_dsp);
+		device->capture_dsp = device->dsp;
+	}
+
+	device->frame_bytes = audiod_frame_bytes(device->format, device->channels);
+	device->period_frames = device->fragment_bytes / device->frame_bytes;
+	error = allocate_buffers(device);
+	if (error != 0)
+		return ENOMEM;
+
+	free(device->feedback);
+	device->feedback = NULL;
+	device->feedback_length = 0U;
+	device->feedback_next = 0U;
+	(void)audiod_feedback_make(device);
+
+	audiod_device_set_volume(device, left, right, muted);
+
+	for (client = audiod_clients; client != NULL; client = client->next) {
+		for (stream = client->streams; stream != NULL; stream = stream->next)
+			audiod_stream_rates(stream, device);
+	}
+	return 0;
+}
+
+/*
+ * Switches the active capture device to /dev/dspN.
+ */
+int
+audiod_device_switch_input(
+	struct audiod_device *device,
+	unsigned unit)
+{
+	struct audio_space space;
+	char path[32];
+	int fd;
+
+	if ((int)unit == device->capture_unit && device->capture_dsp >= 0)
+		return 0;
+
+	if (device->capture_dsp >= 0 && device->capture_dsp != device->dsp)
+		(void)close(device->capture_dsp);
+	device->capture_dsp = -1;
+	device->capture_unit = -1;
+	device->capture = 0;
+	device->capture_fill = 0U;
+
+	if ((int)unit == device->unit && device->dsp >= 0) {
+		if (ioctl(device->dsp, KERN_AUDIO_GET_ISPACE, &space) == 0) {
+			device->capture_dsp = device->dsp;
+			device->capture_unit = (int)unit;
+			device->capture = 1;
+			return 0;
+		}
+		return ENODEV;
+	}
+
+	(void)snprintf(path, sizeof(path), "/dev/dsp%u", unit);
+	fd = open(path, O_RDONLY | O_NONBLOCK);
+	if (fd < 0)
+		return errno;
+	if (ioctl(fd, KERN_AUDIO_GET_ISPACE, &space) != 0) {
+		(void)close(fd);
+		return ENODEV;
+	}
+
+	device->capture_dsp = fd;
+	device->capture_unit = (int)unit;
+	device->capture = 1;
 	return 0;
 }
 
@@ -170,9 +280,22 @@ audiod_device_fd(
 	ahead = (uint64_t)audiod_route_fill_fragments() * device->fragment_bytes;
 	if (device->map != NULL || device->written - device->consumed < ahead)
 		*events = POLLOUT;
-	if (device->capture_started)
+	if (device->capture_started && device->capture_dsp == device->dsp)
 		*events |= POLLIN;
 	return device->dsp;
+}
+
+/* Reports the separate capture descriptor to poll when capture uses another device, or -1. */
+int
+audiod_device_capture_fd(
+	const struct audiod_device *device,
+	short *events)
+{
+	if (device->capture_dsp < 0 || device->capture_dsp == device->dsp ||
+	    !device->capture_started)
+		return -1;
+	*events = POLLIN;
+	return device->capture_dsp;
 }
 
 /* Reports how long poll may wait: forever with a device, a period without. */
@@ -231,7 +354,7 @@ void
 audiod_device_start_capture(
 	struct audiod_device *device)
 {
-	if (device->dsp < 0 || !device->capture || device->capture_started)
+	if (device->capture_dsp < 0 || !device->capture || device->capture_started)
 		return;
 	device->capture_started = 1;
 	read_capture(device);
@@ -479,8 +602,10 @@ read_capture(
 {
 	ssize_t count;
 
+	if (device->capture_dsp < 0)
+		return;
 	for (;;) {
-		count = read(device->dsp, device->capture_raw + device->capture_fill,
+		count = read(device->capture_dsp, device->capture_raw + device->capture_fill,
 		    device->fragment_bytes - device->capture_fill);
 		if (count <= 0)
 			return;
@@ -514,11 +639,15 @@ finish_drains(
 	}
 }
 
-/* Allocates the period buffers. */
+/* Allocates or reallocates the period buffers. */
 static int
 allocate_buffers(
 	struct audiod_device *device)
 {
+	free(device->scratch);
+	free(device->capture_raw);
+	free(device->mix);
+	free(device->capture_frames);
 	device->scratch = malloc(device->fragment_bytes);
 	device->capture_raw = malloc(device->fragment_bytes);
 	device->mix = malloc((size_t)device->period_frames * 2U * sizeof(*device->mix));
@@ -529,4 +658,98 @@ allocate_buffers(
 		return -1;
 	memset(device->scratch, 0, device->fragment_bytes);
 	return 0;
+}
+
+/* Opens /dev/dspN and /dev/mixerN for playback (and checks capture capability). */
+static void
+open_output_unit(
+	struct audiod_device *device,
+	unsigned unit)
+{
+	struct audio_format format;
+	struct audio_buffer_info info;
+	struct audio_caps caps;
+	struct audio_space space;
+	char path[32];
+	uint32_t bits;
+	void *map;
+	int error;
+
+	(void)snprintf(path, sizeof(path), "/dev/dsp%u", unit);
+	device->dsp = open(path, O_RDWR | O_NONBLOCK);
+	if (device->dsp >= 0) {
+		memset(&format, 0, sizeof(format));
+		error = ioctl(device->dsp, KERN_AUDIO_GET_FORMAT, &format);
+		if (error == 0 && format.channels != 2U) {
+			format.format = KERN_AUDIO_FORMAT_S16_LE;
+			format.channels = 2;
+			format.rate = 48000;
+			format.reserved = 0;
+			(void)ioctl(device->dsp, KERN_AUDIO_SET_FORMAT, &format);
+			(void)ioctl(device->dsp, KERN_AUDIO_GET_FORMAT, &format);
+		}
+
+		error = -1;
+		if (format.channels == 2U)
+			error = ioctl(device->dsp, KERN_AUDIO_GET_BUFFER, &info);
+
+		if (error != 0) {
+			close(device->dsp);
+			device->dsp = -1;
+		} else {
+			device->unit = (int)unit;
+			device->format = format.format;
+			device->rate = format.rate;
+			device->fragment_bytes = info.fragment_bytes;
+			device->fragment_count = info.fragment_count;
+			error = ioctl(device->dsp, KERN_AUDIO_GET_ISPACE, &space);
+			device->capture = 0;
+			if (error == 0)
+				device->capture = 1;
+		}
+	}
+
+	error = -1;
+	if (device->dsp >= 0)
+		error = ioctl(device->dsp, KERN_AUDIO_GET_CAPS, &caps);
+	if (error == 0 && (caps.caps & KERN_AUDIO_CAP_MMAP) != 0) {
+		map = mmap(NULL, caps.mmap_bytes, PROT_READ | PROT_WRITE,
+		    MAP_SHARED, device->dsp, 0);
+		if (map != MAP_FAILED) {
+			device->map = map;
+			device->map_bytes = caps.mmap_bytes;
+			device->lead_bytes = caps.mmap_lead_bytes;
+			bits = KERN_AUDIO_TRIGGER_OUTPUT;
+			error = ioctl(device->dsp, KERN_AUDIO_SET_TRIGGER, &bits);
+			if (error != 0) {
+				munmap(device->map, device->map_bytes);
+				device->map = NULL;
+			}
+		}
+	}
+
+	(void)snprintf(path, sizeof(path), "/dev/mixer%u", unit);
+	device->mixer = open(path, O_RDWR);
+}
+
+/* Closes the active playback device and mixer. */
+static void
+close_output_unit(
+	struct audiod_device *device)
+{
+	if (device->map != NULL) {
+		(void)munmap(device->map, device->map_bytes);
+		device->map = NULL;
+		device->map_bytes = 0U;
+		device->lead_bytes = 0U;
+	}
+	if (device->dsp >= 0) {
+		(void)close(device->dsp);
+		device->dsp = -1;
+	}
+	if (device->mixer >= 0) {
+		(void)close(device->mixer);
+		device->mixer = -1;
+	}
+	device->unit = -1;
 }

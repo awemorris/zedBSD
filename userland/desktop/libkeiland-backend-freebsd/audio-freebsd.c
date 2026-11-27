@@ -292,6 +292,36 @@ kl_backend_audio_available(
 	return 1;
 }
 
+/*
+ * Copies the endpoints (none beyond the single mixer on FreeBSD).
+ */
+size_t
+kl_backend_audio_get_endpoints(
+	const struct kl_backend_audio *audio,
+	struct kl_backend_audio_endpoint *endpoints,
+	size_t capacity)
+{
+	UNUSED_PARAMETER(audio);
+	UNUSED_PARAMETER(endpoints);
+	UNUSED_PARAMETER(capacity);
+	return 0U;
+}
+
+/*
+ * Sets the active route (not supported on FreeBSD's OSS mixer backend).
+ */
+int
+kl_backend_audio_set_route(
+	struct kl_backend_audio *audio,
+	uint32_t output_id,
+	uint32_t input_id)
+{
+	UNUSED_PARAMETER(audio);
+	UNUSED_PARAMETER(output_id);
+	UNUSED_PARAMETER(input_id);
+	return ENOTSUP;
+}
+
 /* Reads monotonic milliseconds for retries independently of wall clock changes. */
 static uint64_t
 audio_milliseconds(

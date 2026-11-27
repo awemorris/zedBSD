@@ -38,11 +38,15 @@
 #include <math.h>
 #include <pwd.h>
 #include <setjmp.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+/* The most /dev/dspN units tracked as internal endpoints (ids 1..14, below AUDIOD_ENDPOINT_FIRST). */
+#define ROUTE_DSP_MAX		7U
 
 /* The account bluetoothd runs as, and the node whose owner is the seat's user. */
 #define ROUTE_BLUETOOTH_ACCOUNT	"_bluetooth"
@@ -158,6 +162,8 @@ static int route_bluetooth_known;
 
 static struct route_endpoint *route_find(uint32_t id);
 static struct route_endpoint *route_internal(uint32_t id, uint32_t kind, uint32_t endpoint_class, const char *key, const char *name);
+static void route_refresh_dsp(void);
+static int route_dsp_unit(uint32_t id);
 static int route_may_register(const struct audiod_client *client);
 static int route_may_choose(const struct audiod_client *client);
 static int route_fits(uint32_t route, uint32_t kind, const struct route_endpoint *endpoint);
@@ -216,12 +222,8 @@ audiod_route_init(
 	struct passwd *account;
 	const char *test_uid;
 
-	/* The kernel's device, audiod's own endpoints. */
-	if (audiod_device.dsp >= 0) {
-		(void)route_internal(AUDIOD_ENDPOINT_DEVICE_OUT, AUDIOD_KIND_SINK, AUDIOD_CLASS_SPEAKER, "dev:dsp0:out", "Speaker");
-		if (audiod_device.capture)
-			(void)route_internal(AUDIOD_ENDPOINT_DEVICE_IN, AUDIOD_KIND_SOURCE, AUDIOD_CLASS_MIC, "dev:dsp0:in", "Microphone");
-	}
+	/* The kernel's devices, audiod's own endpoints. */
+	route_refresh_dsp();
 
 	/* The routes on their defaults. */
 	memset(&route_media, 0, sizeof(route_media));
@@ -419,17 +421,15 @@ audiod_route_timeout_ms(
 	return (int)(nearest_ns / 1000000) + 1;
 }
 
-/* Tells whether the media streams play on device:out now (its route's output is the device's). */
+/* Tells whether the media streams play on a kernel device now (its route's output is an internal endpoint). */
 int
 audiod_route_media_to_device(
 	void)
 {
-	/* device:out exists and is the media output. */
-	if (route_media.output != AUDIOD_ENDPOINT_DEVICE_OUT)
-		return 0;
+	struct route_endpoint *output;
 
-	/* Succeeded: to the device. */
-	return route_find(AUDIOD_ENDPOINT_DEVICE_OUT) != NULL;
+	output = route_find(route_media.output);
+	return output != NULL && output->owner == NULL;
 }
 
 /*
@@ -632,6 +632,73 @@ route_internal(
 	return endpoint;
 }
 
+/* Returns the /dev/dspN unit for an internal endpoint id, or -1. */
+static int
+route_dsp_unit(
+	uint32_t id)
+{
+	if (id == 0U || id >= 1U + ROUTE_DSP_MAX * 2U)
+		return -1;
+	return (int)((id - 1U) / 2U);
+}
+
+/* Ensures an internal /dev/dspN endpoint exists when present, or removes it when gone. */
+static void
+route_sync_dsp_endpoint(
+	unsigned unit,
+	uint32_t id,
+	uint32_t kind,
+	uint32_t endpoint_class,
+	int present)
+{
+	struct route_endpoint *endpoint;
+	char key[AUDIOD_KEY_MAX];
+	char name[AUDIOD_NAME_MAX];
+
+	endpoint = route_find(id);
+	if (present) {
+		if (endpoint == NULL) {
+			(void)snprintf(key, sizeof(key), "dev:dsp%u:%s",
+			    unit, kind == AUDIOD_KIND_SINK ? "out" : "in");
+			if (unit == 0U) {
+				(void)snprintf(name, sizeof(name), "%s",
+				    kind == AUDIOD_KIND_SINK ? "Speaker" : "Microphone");
+			} else {
+				(void)snprintf(name, sizeof(name), "%s (dsp%u)",
+				    kind == AUDIOD_KIND_SINK ? "Audio Device" : "Microphone", unit);
+			}
+			(void)route_internal(id, kind, endpoint_class, key, name);
+		}
+		return;
+	}
+	if (endpoint != NULL && endpoint->owner == NULL)
+		route_remove(endpoint, AUDIOD_REASON_REMOVED, 0);
+}
+
+/* Probes /dev/dsp0..N and synchronizes internal endpoints. */
+static void
+route_refresh_dsp(
+	void)
+{
+	unsigned unit;
+	int has_out;
+	int has_in;
+
+	for (unit = 0U; unit < ROUTE_DSP_MAX; unit++) {
+		if ((int)unit == audiod_device.unit && audiod_device.dsp >= 0) {
+			has_out = 1;
+			has_in = audiod_device.capture;
+		} else if (audiod_device_probe(unit, &has_out, &has_in) != 0) {
+			has_out = 0;
+			has_in = 0;
+		}
+		if ((int)unit == audiod_device.capture_unit && audiod_device.capture_dsp >= 0)
+			has_in = 1;
+		route_sync_dsp_endpoint(unit, 1U + unit * 2U, AUDIOD_KIND_SINK, AUDIOD_CLASS_SPEAKER, has_out);
+		route_sync_dsp_endpoint(unit, 2U + unit * 2U, AUDIOD_KIND_SOURCE, AUDIOD_CLASS_MIC, has_in);
+	}
+}
+
 /* Tells whether a client may register endpoints and set calls: root or the Bluetooth daemon (E3). */
 static int
 route_may_register(
@@ -752,6 +819,12 @@ route_default(
 	endpoint = route_find(device);
 	if (endpoint != NULL)
 		return device;
+
+	/* Any internal device endpoint of that kind. */
+	for (endpoint = route_endpoints; endpoint != NULL; endpoint = endpoint->next) {
+		if (endpoint->owner == NULL && endpoint->kind == kind)
+			return endpoint->id;
+	}
 
 	/* None. */
 	return 0U;
@@ -1056,6 +1129,16 @@ route_set(
 
 	/* The route; held media stays held (G5). */
 	if (request.route == AUDIOD_ROUTE_MEDIA) {
+		if (output != NULL && output->owner == NULL) {
+			int unit = route_dsp_unit(output_id);
+			if (unit >= 0 && audiod_device_switch_output(&audiod_device, (unsigned)unit) != 0)
+				return ENODEV;
+		}
+		if (input != NULL && input->owner == NULL) {
+			int unit = route_dsp_unit(input_id);
+			if (unit >= 0 && audiod_device_switch_input(&audiod_device, (unsigned)unit) != 0)
+				return ENODEV;
+		}
 		route_media.output = output_id;
 		route_media.input = input_id;
 		route_media.reason = AUDIOD_REASON_NONE;
@@ -1223,6 +1306,9 @@ route_list_endpoints(
 {
 	struct audiod_endpoint_info info;
 	struct route_endpoint *endpoint;
+
+	/* Refresh internal /dev/dspN endpoints in case a device was plugged or unplugged. */
+	route_refresh_dsp();
 
 	/* Each endpoint. */
 	for (endpoint = route_endpoints; endpoint != NULL; endpoint = endpoint->next) {

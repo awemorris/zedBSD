@@ -204,7 +204,10 @@
 		kl_system_network_get_dns;
 		kl_system_network_get_saved;
 		kl_system_audio_get_state;
+		kl_system_audio_get_devices;
+		kl_system_audio_get_route;
 		kl_system_audio_set_volume;
+		kl_system_audio_set_route;
 		kl_system_audio_feedback;
 		kl_system_power_get_state;
 		kl_system_power_action;

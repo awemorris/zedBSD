@@ -78,6 +78,8 @@
 /* The preferences' keys. */
 #define VOLUME_KEY_VOLUME	"sound.volume"
 #define VOLUME_KEY_MUTED	"sound.muted"
+#define VOLUME_KEY_OUTPUT	"sound.output"
+#define VOLUME_KEY_INPUT	"sound.input"
 
 /*
  * The volume's side of the system bar: audiod's link in libkeiland (made
@@ -98,6 +100,8 @@ struct volume_view {
 	struct kl_backend_audio *audio;
 	unsigned opened;
 	struct kl_backend_audio_state state;
+	struct kl_backend_audio_endpoint endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
+	size_t endpoint_count;
 	unsigned value;
 	unsigned muted;
 	unsigned open;
@@ -114,9 +118,12 @@ struct volume_view {
 	unsigned send_waiting;
 	unsigned applied;
 	unsigned restored;
+	unsigned route_restored;
 	unsigned kept;
 	unsigned kept_value;
 	unsigned kept_muted;
+	char kept_output[KL_BACKEND_AUDIO_KEY_MAX];
+	char kept_input[KL_BACKEND_AUDIO_KEY_MAX];
 };
 
 /*
@@ -139,6 +146,9 @@ static void volume_set(struct kwl_server *server, unsigned value, unsigned muted
 static void volume_send(struct kwl_server *server);
 static void volume_send_fired(void *context, struct kwl_timer *timer);
 static void volume_restore(struct kwl_server *server);
+static void volume_restore_route(struct kwl_server *server);
+static const char *volume_endpoint_key(uint32_t id);
+static uint32_t volume_endpoint_id(const char *key, unsigned kind);
 static int volume_sound(void);
 static int volume_in_icon(unsigned slot, int32_t x, int32_t y);
 static int volume_in_popup(int32_t x, int32_t y);
@@ -178,8 +188,21 @@ kwl_volume_tick(
 		/* audiod reached or lost: the volume is given once per connection. */
 		if ((changed & KL_BACKEND_AUDIO_CHANGED_REACHABLE) != 0U) {
 			printf("KWL VOLUME reachable=%u device=%u\n", volume_view.state.reachable, volume_view.state.device);
-			if (!volume_view.state.reachable)
+			if (!volume_view.state.reachable) {
 				volume_view.applied = 0U;
+				volume_view.route_restored = 0U;
+				volume_view.endpoint_count = 0U;
+			}
+		}
+
+		/* Endpoints updated: keep local copy and restore saved route once. */
+		if ((changed & KL_BACKEND_AUDIO_CHANGED_ENDPOINTS) != 0U) {
+			volume_view.endpoint_count = kl_backend_audio_get_endpoints(
+			    volume_view.audio, volume_view.endpoints, KL_BACKEND_AUDIO_ENDPOINTS_MAX);
+			if (volume_view.state.reachable && !volume_view.route_restored) {
+				volume_view.route_restored = 1U;
+				volume_restore_route(server);
+			}
 		}
 
 		/* A report shows the volume, unless a drag or a wheel leads. */
@@ -262,6 +285,20 @@ kwl_volume_keep(
 	volume_view.kept = 1U;
 	volume_view.kept_value = value;
 	volume_view.kept_muted = muted;
+
+	/* Also persist active output/input endpoint keys if changed. */
+	if (volume_view.state.reachable) {
+		const char *out_key = volume_endpoint_key(volume_view.state.output_id);
+		const char *in_key = volume_endpoint_key(volume_view.state.input_id);
+		if (out_key != NULL && strcmp(out_key, volume_view.kept_output) != 0) {
+			kwl_settings_store_report(server->settings, VOLUME_KEY_OUTPUT, out_key);
+			(void)snprintf(volume_view.kept_output, sizeof(volume_view.kept_output), "%s", out_key);
+		}
+		if (in_key != NULL && strcmp(in_key, volume_view.kept_input) != 0) {
+			kwl_settings_store_report(server->settings, VOLUME_KEY_INPUT, in_key);
+			(void)snprintf(volume_view.kept_input, sizeof(volume_view.kept_input), "%s", in_key);
+		}
+	}
 
 	/* Logs the keep for the tests; handing it to the store cannot fail, so the error is always 0. */
 	printf("KWL VOLUME kept value=%u muted=%u why=%s write=1 error=%d\n", value, muted, why, 0);
@@ -403,6 +440,46 @@ kwl_volume_audio_state(
 {
 	/* The state last read. */
 	*state = volume_view.state;
+}
+
+/*
+ * Copies the sound service's endpoints as last reported, up to capacity.
+ */
+size_t
+kwl_volume_audio_endpoints(
+	struct kl_backend_audio_endpoint *endpoints,
+	size_t capacity)
+{
+	size_t count;
+
+	if (endpoints == NULL)
+		return 0U;
+	count = volume_view.endpoint_count;
+	if (count > capacity)
+		count = capacity;
+	if (count > 0U)
+		memcpy(endpoints, volume_view.endpoints, count * sizeof(endpoints[0]));
+	return count;
+}
+
+/*
+ * Sets the active media output and input endpoints a client asked for.
+ */
+int
+kwl_volume_request_route(
+	struct kwl_server *server,
+	uint32_t output_id,
+	uint32_t input_id)
+{
+	int error;
+
+	UNUSED_PARAMETER(server);
+	if (volume_view.audio == NULL || !volume_view.state.reachable)
+		return ENODEV;
+	error = kl_backend_audio_set_route(volume_view.audio, output_id, input_id);
+	if (error != 0)
+		return error;
+	return 0;
 }
 
 /*
@@ -982,6 +1059,76 @@ volume_restore(
 	volume_send(server);
 	server->dirty = 1;
 	printf("KWL VOLUME preferences value=%d muted=%d\n", value, muted);
+}
+
+/* Finds an endpoint's key by id, or NULL if not found. */
+static const char *
+volume_endpoint_key(
+	uint32_t id)
+{
+	size_t i;
+
+	if (id == 0U)
+		return NULL;
+	for (i = 0U; i < volume_view.endpoint_count; i++) {
+		if (volume_view.endpoints[i].id == id)
+			return volume_view.endpoints[i].key;
+	}
+	return NULL;
+}
+
+/* Finds an endpoint's id by key and kind, or 0 if not found. */
+static uint32_t
+volume_endpoint_id(
+	const char *key,
+	unsigned kind)
+{
+	size_t i;
+
+	if (key == NULL || key[0] == '\0')
+		return 0U;
+	for (i = 0U; i < volume_view.endpoint_count; i++) {
+		if (volume_view.endpoints[i].kind == kind &&
+		    strcmp(volume_view.endpoints[i].key, key) == 0)
+			return volume_view.endpoints[i].id;
+	}
+	return 0U;
+}
+
+/* Restores saved output/input endpoints from settings when audiod connects. */
+static void
+volume_restore_route(
+	struct kwl_server *server)
+{
+	struct kwl_settings_entry *out_entry;
+	struct kwl_settings_entry *in_entry;
+	uint32_t out_id;
+	uint32_t in_id;
+
+	if (server->settings == NULL)
+		return;
+
+	out_id = 0U;
+	in_id = 0U;
+	out_entry = kwl_settings_store_find(server->settings, VOLUME_KEY_OUTPUT);
+	if (out_entry != NULL && out_entry->chosen && out_entry->value[0] != '\0') {
+		(void)snprintf(volume_view.kept_output, sizeof(volume_view.kept_output), "%.*s",
+		    (int)(sizeof(volume_view.kept_output) - 1U), out_entry->value);
+		out_id = volume_endpoint_id(out_entry->value, KL_BACKEND_AUDIO_KIND_OUTPUT);
+	}
+	in_entry = kwl_settings_store_find(server->settings, VOLUME_KEY_INPUT);
+	if (in_entry != NULL && in_entry->chosen && in_entry->value[0] != '\0') {
+		(void)snprintf(volume_view.kept_input, sizeof(volume_view.kept_input), "%.*s",
+		    (int)(sizeof(volume_view.kept_input) - 1U), in_entry->value);
+		in_id = volume_endpoint_id(in_entry->value, KL_BACKEND_AUDIO_KIND_INPUT);
+	}
+	if (out_id != 0U || in_id != 0U) {
+		if (out_id == 0U)
+			out_id = volume_view.state.output_id;
+		if (in_id == 0U)
+			in_id = volume_view.state.input_id;
+		(void)kl_backend_audio_set_route(volume_view.audio, out_id, in_id);
+	}
 }
 
 /* Tells whether there is sound: audiod reached, with a device. */

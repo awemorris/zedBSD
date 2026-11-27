@@ -85,3 +85,10 @@ msg	Mail
 msg	Calendar
 msg	Phone
 msg	Browser
+# Sound page device selection (page-input.c).
+msg	Output Device
+msg	Input Device
+msg	Sound service
+msg	Device
+msg	No output devices
+msg	No input devices

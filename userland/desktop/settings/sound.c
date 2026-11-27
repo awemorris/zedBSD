@@ -27,6 +27,7 @@
 #include "settings.h"
 
 #include <stdio.h>
+#include <string.h>
 
 /* How long a drag holds back its volumes, in milliseconds (the system bar's). */
 #define SOUND_SEND_MS		50U
@@ -68,6 +69,8 @@ se_sound_open(
 
 	/* What the compositor told; the volume shown is audiod's once it is reached. */
 	kl_system_audio_get_state(app->system, &sound->state);
+	sound->device_count = kl_system_audio_get_devices(app->system, sound->devices, KL_AUDIO_DEVICES_MAX);
+	kl_system_audio_get_route(app->system, &sound->output_id, &sound->input_id);
 	if (sound->state.reachable) {
 		sound->value = (int)sound->state.left;
 		sound->muted = (int)sound->state.muted;
@@ -101,11 +104,23 @@ se_sound_poll(
 
 	/* A new report. */
 	if ((app->system_changed & KL_SYSTEM_CHANGED_AUDIO) != 0U) {
+		struct kl_audio_device prev_devices[KL_AUDIO_DEVICES_MAX];
+		size_t prev_count;
+		uint32_t prev_out;
+		uint32_t prev_in;
+
 		reachable = sound->state.reachable;
 		device = sound->state.device;
 		value = sound->value;
 		muted = sound->muted;
+		prev_count = sound->device_count;
+		if (prev_count > 0U)
+			memcpy(prev_devices, sound->devices, prev_count * sizeof(prev_devices[0]));
+		prev_out = sound->output_id;
+		prev_in = sound->input_id;
 		kl_system_audio_get_state(app->system, &sound->state);
+		sound->device_count = kl_system_audio_get_devices(app->system, sound->devices, KL_AUDIO_DEVICES_MAX);
+		kl_system_audio_get_route(app->system, &sound->output_id, &sound->input_id);
 		se_log("SOUND report reachable=%u device=%u value=%u muted=%u", sound->state.reachable, sound->state.device, sound->state.left, sound->state.muted);
 
 		/* A report shows the volume (set here or in the system bar), unless a drag or a held volume leads. */
@@ -123,6 +138,11 @@ se_sound_poll(
 		else if (value != sound->value)
 			changed = 1;
 		else if (muted != sound->muted)
+			changed = 1;
+		else if (prev_out != sound->output_id || prev_in != sound->input_id)
+			changed = 1;
+		else if (prev_count != sound->device_count ||
+		    (prev_count > 0U && memcmp(prev_devices, sound->devices, prev_count * sizeof(prev_devices[0])) != 0))
 			changed = 1;
 		if (changed != 0 &&
 		    (app->page == SE_PAGE_SOUND ||
@@ -212,14 +232,50 @@ se_sound_press(
 	int index)
 {
 	int available;
+	int running;
+	size_t i;
 
-	/* Only the switch, and only while there is sound. */
+	/* Mute switch requires an active output device. */
 	available = se_sound_available(app);
-	if (index != SE_SOUND_MUTE || !available)
+	if (index == SE_SOUND_MUTE) {
+		if (available)
+			sound_set(app, app->sound.value, !app->sound.muted, 1);
+		return;
+	}
+
+	/* Output or input device selection requires audiod to be running. */
+	running = se_sound_running(app);
+	if (!running)
 		return;
 
-	/* Mute turns (the sound only when it is turned off). */
-	sound_set(app, app->sound.value, !app->sound.muted, 1);
+	if (index >= SE_SOUND_OUTPUT_BASE &&
+	    index < SE_SOUND_OUTPUT_BASE + (int)KL_AUDIO_DEVICES_MAX) {
+		i = (size_t)(index - SE_SOUND_OUTPUT_BASE);
+		if (i < app->sound.device_count &&
+		    app->sound.devices[i].kind == KL_AUDIO_KIND_OUTPUT) {
+			app->sound.output_id = app->sound.devices[i].id;
+			app->dirty = 1;
+			(void)kl_system_audio_set_route(app->system,
+			    app->sound.output_id, app->sound.input_id, NULL);
+			se_log("SOUND select output=%u key=%s",
+			    app->sound.output_id, app->sound.devices[i].key);
+		}
+		return;
+	}
+
+	if (index >= SE_SOUND_INPUT_BASE &&
+	    index < SE_SOUND_INPUT_BASE + (int)KL_AUDIO_DEVICES_MAX) {
+		i = (size_t)(index - SE_SOUND_INPUT_BASE);
+		if (i < app->sound.device_count &&
+		    app->sound.devices[i].kind == KL_AUDIO_KIND_INPUT) {
+			app->sound.input_id = app->sound.devices[i].id;
+			app->dirty = 1;
+			(void)kl_system_audio_set_route(app->system,
+			    app->sound.output_id, app->sound.input_id, NULL);
+			se_log("SOUND select input=%u key=%s",
+			    app->sound.input_id, app->sound.devices[i].key);
+		}
+	}
 }
 
 /*

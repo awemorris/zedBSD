@@ -52,12 +52,14 @@
 /* The bytes kept of messages not read whole yet. */
 #define AUDIO_PENDING (AUDIOD_MESSAGE_MAX * 8U)
 
-/* The subscription's mask: the device volume. */
-#define AUDIO_SUBSCRIBE_VOLUME 1U
+/* The subscription's mask: volume, endpoints, and routes. */
+#define AUDIO_SUBSCRIBE_MASK \
+	(AUDIOD_SUBSCRIBE_VOLUME | AUDIOD_SUBSCRIBE_ENDPOINTS | AUDIOD_SUBSCRIBE_ROUTES)
 
 /* What a request handed to the thread asks. */
 #define AUDIO_OP_VOLUME		1U
 #define AUDIO_OP_FEEDBACK	2U
+#define AUDIO_OP_ROUTE		3U
 
 /*
  * The thread's following of audiod: the connection (-1 while none), the
@@ -71,19 +73,27 @@
 struct audio_link {
 	int socket;
 	uint32_t serial;
+	uint32_t protocol_version;
+	uint32_t list_serial;
 	uint64_t retry_ms;
 	uint8_t pending[AUDIO_PENDING];
 	size_t pending_used;
 	struct kl_backend_audio_state state;
+	struct kl_backend_audio_endpoint endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
+	size_t endpoint_count;
+	struct kl_backend_audio_endpoint next_endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
+	size_t next_endpoint_count;
 	unsigned changed;
 };
 
 /*
  * What the event loop sees of the following: audiod's state as reported,
- * and whether a connection is there (requests are refused without one).
+ * the endpoints, and whether a connection is there (requests are refused without one).
  */
 struct audio_view {
 	struct kl_backend_audio_state state;
+	struct kl_backend_audio_endpoint endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
+	size_t endpoint_count;
 	unsigned connected;
 };
 
@@ -113,6 +123,8 @@ struct audio_op {
 	unsigned left;
 	unsigned right;
 	unsigned muted;
+	uint32_t output_id;
+	uint32_t input_id;
 };
 
 static void audio_step(void *owner);
@@ -127,12 +139,15 @@ static const struct kl_daemon_link_ops audio_link_ops = {
 };
 
 static void audio_op_run(void *owner, struct kl_daemon_link_op *op);
-static int audio_submit(struct kl_backend_audio *audio, unsigned kind, unsigned left, unsigned right, unsigned muted);
+static int audio_submit(struct kl_backend_audio *audio, unsigned kind, unsigned left, unsigned right, unsigned muted, uint32_t output_id, uint32_t input_id);
 static int audio_connect(struct audio_link *audio);
 static void audio_drop(struct audio_link *audio);
 static int audio_send(struct audio_link *audio, const void *message, uint32_t length);
 static void audio_read(struct audio_link *audio);
 static void audio_message(struct audio_link *audio, const uint8_t *bytes, uint32_t length);
+static void audio_endpoint_fill(const struct audiod_endpoint_info *info, struct kl_backend_audio_endpoint *out);
+static void audio_endpoint_upsert(struct audio_link *audio, const struct kl_backend_audio_endpoint *endpoint);
+static void audio_endpoint_remove(struct audio_link *audio, uint32_t id);
 static uint64_t audio_milliseconds(void);
 
 /*
@@ -274,7 +289,7 @@ kl_backend_audio_set_volume(
 		return EINVAL;
 
 	/* Hands the request to the thread. */
-	error = audio_submit(audio, AUDIO_OP_VOLUME, left, right, muted);
+	error = audio_submit(audio, AUDIO_OP_VOLUME, left, right, muted, 0U, 0U);
 	if (error != 0)
 		return error;
 
@@ -296,12 +311,46 @@ kl_backend_audio_feedback(
 		return EINVAL;
 
 	/* Hands the request to the thread. */
-	error = audio_submit(audio, AUDIO_OP_FEEDBACK, 0U, 0U, 0U);
+	error = audio_submit(audio, AUDIO_OP_FEEDBACK, 0U, 0U, 0U, 0U, 0U);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: the sound plays from audiod's next period. */
 	return 0;
+}
+
+/*
+ * Copies the endpoints audiod last reported, up to capacity.
+ */
+size_t
+kl_backend_audio_get_endpoints(
+	const struct kl_backend_audio *audio,
+	struct kl_backend_audio_endpoint *endpoints,
+	size_t capacity)
+{
+	size_t count;
+
+	if (audio == NULL || endpoints == NULL)
+		return 0U;
+	count = audio->view.endpoint_count;
+	if (count > capacity)
+		count = capacity;
+	memcpy(endpoints, audio->view.endpoints, count * sizeof(endpoints[0]));
+	return count;
+}
+
+/*
+ * Asks audiod to set the media output and input endpoints (ROUTE_SET).
+ */
+int
+kl_backend_audio_set_route(
+	struct kl_backend_audio *audio,
+	uint32_t output_id,
+	uint32_t input_id)
+{
+	if (audio == NULL)
+		return EINVAL;
+	return audio_submit(audio, AUDIO_OP_ROUTE, 0U, 0U, 0U, output_id, input_id);
 }
 
 /*
@@ -409,8 +458,13 @@ audio_publish(
 	if (record->inner.changed == 0U && connected == record->published.connected)
 		return 0;
 
-	/* The state, whether requests can go, and the changes not taken yet. */
+	/* The state, endpoints, whether requests can go, and the changes not taken yet. */
 	record->published.state = record->inner.state;
+	record->published.endpoint_count = record->inner.endpoint_count;
+	if (record->inner.endpoint_count > 0U) {
+		memcpy(record->published.endpoints, record->inner.endpoints,
+		    record->inner.endpoint_count * sizeof(record->published.endpoints[0]));
+	}
 	record->published.connected = connected;
 	record->published_changed |= record->inner.changed;
 	record->inner.changed = 0U;
@@ -427,6 +481,7 @@ audio_op_run(
 {
 	struct kl_backend_audio *record;
 	struct audiod_volume volume;
+	struct audiod_route_set route_set;
 	struct audiod_header header;
 	struct audio_op *request;
 	struct audio_link *audio;
@@ -453,6 +508,21 @@ audio_op_run(
 		return;
 	}
 
+	/* ROUTE_SET for media (version 2 only). */
+	if (request->kind == AUDIO_OP_ROUTE) {
+		if (audio->protocol_version < AUDIOD_PROTOCOL_VERSION_2)
+			return;
+		memset(&route_set, 0, sizeof(route_set));
+		route_set.header.type = AUDIOD_ROUTE_SET;
+		route_set.header.length = sizeof(route_set);
+		route_set.header.serial = audio->serial++;
+		route_set.route = AUDIOD_ROUTE_MEDIA;
+		route_set.output = request->output_id;
+		route_set.input = request->input_id;
+		(void)audio_send(audio, &route_set, sizeof(route_set));
+		return;
+	}
+
 	/* FEEDBACK, the header only (an older audiod answers ERROR, which is passed over). */
 	memset(&header, 0, sizeof(header));
 	header.type = AUDIOD_FEEDBACK;
@@ -468,7 +538,9 @@ audio_submit(
 	unsigned kind,
 	unsigned left,
 	unsigned right,
-	unsigned muted)
+	unsigned muted,
+	uint32_t output_id,
+	uint32_t input_id)
 {
 	struct audio_op *request;
 
@@ -485,6 +557,8 @@ audio_submit(
 	request->left = left;
 	request->right = right;
 	request->muted = muted;
+	request->output_id = output_id;
+	request->input_id = input_id;
 	kl_daemon_link_submit(&audio->link, &request->op);
 
 	/* Succeeded: the thread sends it before its next read. */
@@ -530,13 +604,16 @@ audio_connect(
 	/* Publishes the connection with no partially received message. */
 	audio->socket = descriptor;
 	audio->pending_used = 0U;
+	audio->protocol_version = AUDIOD_PROTOCOL_VERSION_1;
+	audio->list_serial = 0U;
+	audio->next_endpoint_count = 0U;
 
 	/* HELLO: audiod answers WELCOME with the device. */
 	memset(&hello, 0, sizeof(hello));
 	hello.header.type = AUDIOD_HELLO;
 	hello.header.length = sizeof(hello);
 	hello.header.serial = audio->serial++;
-	hello.version = AUDIOD_PROTOCOL_VERSION_1;
+	hello.version = AUDIOD_PROTOCOL_VERSION;
 	error = audio_send(audio, &hello, sizeof(hello));
 	if (error != 0)
 		return error;
@@ -546,7 +623,7 @@ audio_connect(
 	subscribe.header.type = AUDIOD_SUBSCRIBE;
 	subscribe.header.length = sizeof(subscribe);
 	subscribe.header.serial = audio->serial++;
-	subscribe.mask = AUDIO_SUBSCRIBE_VOLUME;
+	subscribe.mask = AUDIO_SUBSCRIBE_MASK;
 	error = audio_send(audio, &subscribe, sizeof(subscribe));
 	if (error != 0)
 		return error;
@@ -573,8 +650,15 @@ audio_drop(
 	if (audio->state.reachable) {
 		audio->state.reachable = 0U;
 		audio->state.device = 0U;
+		audio->state.output_id = 0U;
+		audio->state.input_id = 0U;
 		audio->changed |= KL_BACKEND_AUDIO_CHANGED_REACHABLE;
 	}
+	if (audio->endpoint_count != 0U)
+		audio->changed |= KL_BACKEND_AUDIO_CHANGED_ENDPOINTS;
+	audio->endpoint_count = 0U;
+	audio->next_endpoint_count = 0U;
+	audio->list_serial = 0U;
 
 	/* Succeeded: the subscription waits to reconnect with empty pending input. */
 	return;
@@ -665,7 +749,12 @@ audio_message(
 {
 	struct audiod_welcome welcome;
 	struct audiod_volume volume;
+	struct audiod_endpoint_info ep_info;
+	struct audiod_endpoint_removed ep_removed;
+	struct audiod_route_info route_info;
 	struct audiod_header header;
+	struct audiod_header list_req;
+	struct kl_backend_audio_endpoint endpoint;
 
 	/* Its type. */
 	memcpy(&header, bytes, sizeof(header));
@@ -673,6 +762,7 @@ audio_message(
 	/* WELCOME: reachable, with the device. */
 	if (header.type == AUDIOD_WELCOME && length >= sizeof(welcome)) {
 		memcpy(&welcome, bytes, sizeof(welcome));
+		audio->protocol_version = welcome.version;
 		audio->state.reachable = 1U;
 		audio->state.device = 0U;
 
@@ -684,6 +774,23 @@ audio_message(
 		audio->state.rate = welcome.rate;
 		audio->state.channels = welcome.channels;
 		audio->changed |= KL_BACKEND_AUDIO_CHANGED_REACHABLE;
+
+		/* Version 2: ask for the initial endpoint and route lists. */
+		if (welcome.version >= AUDIOD_PROTOCOL_VERSION_2) {
+			audio->next_endpoint_count = 0U;
+			audio->list_serial = audio->serial++;
+			memset(&list_req, 0, sizeof(list_req));
+			list_req.type = AUDIOD_ENDPOINT_LIST;
+			list_req.length = sizeof(list_req);
+			list_req.serial = audio->list_serial;
+			(void)audio_send(audio, &list_req, sizeof(list_req));
+
+			memset(&list_req, 0, sizeof(list_req));
+			list_req.type = AUDIOD_ROUTE_LIST;
+			list_req.length = sizeof(list_req);
+			list_req.serial = audio->serial++;
+			(void)audio_send(audio, &list_req, sizeof(list_req));
+		}
 		return;
 	}
 
@@ -700,10 +807,107 @@ audio_message(
 
 		/* Notifies the subscriber that its visible volume state changed. */
 		audio->changed |= KL_BACKEND_AUDIO_CHANGED_VOLUME;
+		return;
+	}
+
+	/* ENDPOINT_INFO: either part of ENDPOINT_LIST or an async add/update. */
+	if (header.type == AUDIOD_ENDPOINT_INFO && length >= sizeof(ep_info)) {
+		memcpy(&ep_info, bytes, sizeof(ep_info));
+		audio_endpoint_fill(&ep_info, &endpoint);
+		if (header.serial != 0U && header.serial == audio->list_serial) {
+			if (audio->next_endpoint_count < KL_BACKEND_AUDIO_ENDPOINTS_MAX) {
+				audio->next_endpoints[audio->next_endpoint_count] = endpoint;
+				audio->next_endpoint_count++;
+			}
+		} else {
+			audio_endpoint_upsert(audio, &endpoint);
+			audio->changed |= KL_BACKEND_AUDIO_CHANGED_ENDPOINTS;
+		}
+		return;
+	}
+
+	/* DONE for ENDPOINT_LIST: commit the accumulated endpoint list. */
+	if (header.type == AUDIOD_DONE && header.serial != 0U && header.serial == audio->list_serial) {
+		memcpy(audio->endpoints, audio->next_endpoints,
+		    audio->next_endpoint_count * sizeof(audio->endpoints[0]));
+		audio->endpoint_count = audio->next_endpoint_count;
+		audio->list_serial = 0U;
+		audio->changed |= KL_BACKEND_AUDIO_CHANGED_ENDPOINTS;
+		return;
+	}
+
+	/* ENDPOINT_REMOVED: remove an endpoint by id. */
+	if (header.type == AUDIOD_ENDPOINT_REMOVED && length >= sizeof(ep_removed)) {
+		memcpy(&ep_removed, bytes, sizeof(ep_removed));
+		audio_endpoint_remove(audio, ep_removed.id);
+		audio->changed |= KL_BACKEND_AUDIO_CHANGED_ENDPOINTS;
+		return;
+	}
+
+	/* ROUTE_INFO: track the active media output and input endpoints. */
+	if (header.type == AUDIOD_ROUTE_INFO && length >= sizeof(route_info)) {
+		memcpy(&route_info, bytes, sizeof(route_info));
+		if (route_info.route == AUDIOD_ROUTE_MEDIA) {
+			audio->state.output_id = route_info.output;
+			audio->state.input_id = route_info.input;
+			audio->changed |= KL_BACKEND_AUDIO_CHANGED_ROUTE;
+		}
 	}
 
 	/* Succeeded: the report is applied or its unneeded type is passed over. */
 	return;
+}
+
+/* Converts an audiod ENDPOINT_INFO into a backend endpoint record. */
+static void
+audio_endpoint_fill(
+	const struct audiod_endpoint_info *info,
+	struct kl_backend_audio_endpoint *out)
+{
+	memset(out, 0, sizeof(*out));
+	out->id = info->id;
+	out->kind = info->kind == AUDIOD_KIND_SOURCE ?
+	    KL_BACKEND_AUDIO_KIND_INPUT : KL_BACKEND_AUDIO_KIND_OUTPUT;
+	out->endpoint_class = info->endpoint_class;
+	(void)snprintf(out->key, sizeof(out->key), "%s", info->key);
+	(void)snprintf(out->name, sizeof(out->name), "%s", info->name);
+}
+
+/* Inserts or updates an endpoint in the active list by id. */
+static void
+audio_endpoint_upsert(
+	struct audio_link *audio,
+	const struct kl_backend_audio_endpoint *endpoint)
+{
+	size_t i;
+
+	for (i = 0U; i < audio->endpoint_count; i++) {
+		if (audio->endpoints[i].id == endpoint->id) {
+			audio->endpoints[i] = *endpoint;
+			return;
+		}
+	}
+	if (audio->endpoint_count < KL_BACKEND_AUDIO_ENDPOINTS_MAX) {
+		audio->endpoints[audio->endpoint_count] = *endpoint;
+		audio->endpoint_count++;
+	}
+}
+
+/* Removes an endpoint from the active list by id. */
+static void
+audio_endpoint_remove(
+	struct audio_link *audio,
+	uint32_t id)
+{
+	size_t i;
+
+	for (i = 0U; i < audio->endpoint_count; i++) {
+		if (audio->endpoints[i].id == id) {
+			audio->endpoint_count--;
+			audio->endpoints[i] = audio->endpoints[audio->endpoint_count];
+			return;
+		}
+	}
 }
 
 /* Gives the monotonic clock in milliseconds (0 when it cannot be read). */

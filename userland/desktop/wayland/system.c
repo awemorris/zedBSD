@@ -246,6 +246,8 @@ struct system_state {
 	struct system_details details_read;
 	unsigned power_reading;
 	struct kl_backend_audio_state audio;
+	struct kl_backend_audio_endpoint audio_endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
+	size_t audio_endpoint_count;
 	unsigned audio_told;
 	struct kl_backend_power_state power;
 	unsigned power_started;
@@ -607,12 +609,28 @@ kwl_system_tick(
 		system_devices_answers(server);
 
 	/* The sound as volume.c has it, told to every sound object when it changed. */
-	kwl_volume_audio_state(&audio);
-	differs = memcmp(&audio, &system_state.audio, sizeof(audio));
-	if (differs != 0 || !system_state.audio_told) {
-		system_state.audio = audio;
-		system_state.audio_told = 1U;
-		system_tell(server, KWL_SYSTEM_AUDIO, system_audio_state, KL_SYSTEM_AUDIO_EVENT_DONE);
+	{
+		struct kl_backend_audio_endpoint endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
+		size_t endpoint_count;
+		int ep_differs;
+
+		kwl_volume_audio_state(&audio);
+		endpoint_count = kwl_volume_audio_endpoints(endpoints, KL_BACKEND_AUDIO_ENDPOINTS_MAX);
+		differs = memcmp(&audio, &system_state.audio, sizeof(audio));
+		ep_differs = endpoint_count != system_state.audio_endpoint_count ||
+		    (endpoint_count > 0U &&
+		    memcmp(endpoints, system_state.audio_endpoints,
+			endpoint_count * sizeof(endpoints[0])) != 0);
+		if (differs != 0 || ep_differs || !system_state.audio_told) {
+			system_state.audio = audio;
+			system_state.audio_endpoint_count = endpoint_count;
+			if (endpoint_count > 0U) {
+				memcpy(system_state.audio_endpoints, endpoints,
+				    endpoint_count * sizeof(endpoints[0]));
+			}
+			system_state.audio_told = 1U;
+			system_tell(server, KWL_SYSTEM_AUDIO, system_audio_state, KL_SYSTEM_AUDIO_EVENT_DONE);
+		}
 	}
 }
 
@@ -1739,6 +1757,21 @@ system_audio_request(
 			return EPROTO;
 		number = system_word(bytes, 0U);
 		error = kwl_volume_feedback();
+		system_result(object, KL_SYSTEM_AUDIO_EVENT_RESULT, number, system_result_of(error));
+		return 0;
+	}
+
+	/* Set active media output and input endpoints (since version 2). */
+	if (opcode == KL_SYSTEM_AUDIO_SET_ROUTE) {
+		uint32_t output_id;
+		uint32_t input_id;
+
+		if (size != 12U)
+			return EPROTO;
+		number = system_word(bytes, 0U);
+		output_id = system_word(bytes, 4U);
+		input_id = system_word(bytes, 8U);
+		error = kwl_volume_request_route(object->client->server, output_id, input_id);
 		system_result(object, KL_SYSTEM_AUDIO_EVENT_RESULT, number, system_result_of(error));
 		return 0;
 	}
@@ -3693,6 +3726,33 @@ system_audio_state(
 	words[5] = state.right;
 	words[6] = state.muted;
 	(void)kwl_emit(object->client, object->id, KL_SYSTEM_AUDIO_EVENT_STATE, words, sizeof(words));
+
+	/* Version 2: emit each audio endpoint and the active media route. */
+	if (object->version >= KL_SYSTEM_AUDIO_SINCE_DEVICES) {
+		struct kl_backend_audio_endpoint endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
+		unsigned char payload[SYSTEM_EVENT_MAX];
+		uint32_t route_words[2];
+		size_t count;
+		size_t index;
+		size_t offset;
+
+		count = kwl_volume_audio_endpoints(endpoints, KL_BACKEND_AUDIO_ENDPOINTS_MAX);
+		for (index = 0U; index < count; index++) {
+			offset = 0U;
+			memcpy(payload + offset, &endpoints[index].id, 4U);
+			offset += 4U;
+			memcpy(payload + offset, &endpoints[index].kind, 4U);
+			offset += 4U;
+			memcpy(payload + offset, &endpoints[index].endpoint_class, 4U);
+			offset += 4U;
+			offset = system_put_string(payload, offset, endpoints[index].key);
+			offset = system_put_string(payload, offset, endpoints[index].name);
+			(void)kwl_emit(object->client, object->id, KL_SYSTEM_AUDIO_EVENT_DEVICE, payload, offset);
+		}
+		route_words[0] = state.output_id;
+		route_words[1] = state.input_id;
+		(void)kwl_emit(object->client, object->id, KL_SYSTEM_AUDIO_EVENT_ROUTE, route_words, sizeof(route_words));
+	}
 }
 
 /* Sends a devices object every volume: its ID, kind, state, name and where it is mounted, and (version 9) its file system and size. */

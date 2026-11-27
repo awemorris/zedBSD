@@ -32,7 +32,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define AUDIOD_POLL_MAX		66U
+#define AUDIOD_POLL_MAX		68U
 #define AUDIOD_CLIENT_MAX	64U
 
 /* The connections kept for root and the Bluetooth daemon: others take at most the rest (ws209-p002, N23). */
@@ -127,6 +127,8 @@ main(
 	short events;
 	int device_slot;
 	int device_fd;
+	int capture_slot;
+	int capture_fd;
 	int timeout;
 	int route_timeout;
 
@@ -165,6 +167,14 @@ main(
 			fds[count].events = events;
 			clients[count++] = NULL;
 		}
+		capture_slot = -1;
+		capture_fd = audiod_device_capture_fd(&audiod_device, &events);
+		if (capture_fd >= 0) {
+			capture_slot = (int)count;
+			fds[count].fd = capture_fd;
+			fds[count].events = events;
+			clients[count++] = NULL;
+		}
 		for (client = audiod_clients; client != NULL && count < AUDIOD_POLL_MAX;
 		     client = client->next) {
 			fds[count].fd = client->fd;
@@ -185,7 +195,8 @@ main(
 
 		/* The device first, so that a client's new request sees current positions. */
 		audiod_device_service(&audiod_device,
-		    device_slot >= 0 ? fds[device_slot].revents : 0);
+		    (device_slot >= 0 ? fds[device_slot].revents : 0) |
+		    (capture_slot >= 0 ? fds[capture_slot].revents : 0));
 		if ((fds[0].revents & POLLIN) != 0)
 			accept_client();
 		for (index = 0; index < count; index++) {
