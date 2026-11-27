@@ -170,6 +170,7 @@ static int tmpfs_truncate(struct inode *inode, off_t size);
 static int tmpfs_getattr(struct inode *inode, struct stat *status);
 static int tmpfs_setattr(struct inode *inode, const struct stat *status, unsigned mask);
 static int tmpfs_readdir(struct file *file, struct dirent *entry, int *eof);
+static int tmpfs_fsync(struct file *file);
 static void tmpfs_reclaim(struct inode *inode);
 static void tmpfs_retire_namespace(struct inode *inode);
 static int tmpfs_mount_impl(struct mount *mountp);
@@ -200,6 +201,7 @@ static const struct inode_ops tmpfs_inode_ops = {
 
 static const struct file_ops tmpfs_directory_ops = {
 	.readdir = tmpfs_readdir,
+	.fsync = tmpfs_fsync,
 };
 
 static const struct file_ops tmpfs_regular_ops = {
@@ -207,6 +209,7 @@ static const struct file_ops tmpfs_regular_ops = {
 	.write = tmpfs_write,
 	.pread = tmpfs_pread,
 	.pwrite = tmpfs_pwrite,
+	.fsync = tmpfs_fsync,
 };
 
 const struct filesystem_type tmpfs_type = {
@@ -1626,6 +1629,16 @@ tmpfs_setattr(
 		return error;
 	}
 
+	return 0;
+}
+
+/* Synchronizes a tmpfs file or directory (in-memory, always durable). */
+static int
+tmpfs_fsync(
+	struct file *file)
+{
+	if (file == NULL)
+		return EINVAL;
 	return 0;
 }
 
