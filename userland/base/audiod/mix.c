@@ -18,6 +18,8 @@
 
 #include "userland/base/audiod/audiod.h"
 
+#include <uapi/audio.h>
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -71,8 +73,12 @@ audiod_frame_bytes(
 	uint32_t format,
 	uint32_t channels)
 {
-	if (format == AUDIOD_FORMAT_S16_LE)
+	if (format == KERN_AUDIO_FORMAT_U8)
+		return 1U * channels;
+	if (format == KERN_AUDIO_FORMAT_S16_LE)
 		return 2U * channels;
+	if (format == KERN_AUDIO_FORMAT_S24_3LE)
+		return 3U * channels;
 	return 4U * channels;
 }
 
@@ -343,7 +349,14 @@ audiod_mix_period(
 	/* Writes the mix in the device's format, saturating. */
 	for (i = 0; i < frames * 2U; i++) {
 		value = mix[i];
-		if (device->format == AUDIOD_FORMAT_S16_LE) {
+		if (device->format == KERN_AUDIO_FORMAT_U8) {
+			value = (value >> 24) + 128;
+			if (value > 255)
+				value = 255;
+			if (value < 0)
+				value = 0;
+			out[i] = (uint8_t)value;
+		} else if (device->format == KERN_AUDIO_FORMAT_S16_LE) {
 			/* S16: the top 16 bits, saturated. */
 			value >>= 16;
 			if (value > 32767)
@@ -352,6 +365,14 @@ audiod_mix_period(
 				value = -32768;
 			sample16 = (int16_t)value;
 			memcpy(out + i * 2U, &sample16, 2);
+		} else if (device->format == KERN_AUDIO_FORMAT_S24_3LE) {
+			sample32 = clamp32(value);
+			out[i * 3U + 0U] = (uint8_t)(((uint32_t)sample32 >> 8) & 0xffU);
+			out[i * 3U + 1U] = (uint8_t)(((uint32_t)sample32 >> 16) & 0xffU);
+			out[i * 3U + 2U] = (uint8_t)(((uint32_t)sample32 >> 24) & 0xffU);
+		} else if (device->format == KERN_AUDIO_FORMAT_S24_LE) {
+			sample32 = clamp32(value) >> 8;
+			memcpy(out + i * 4U, &sample32, 4);
 		} else {
 			/* S32: saturated. */
 			sample32 = clamp32(value);
@@ -603,9 +624,20 @@ device_to_stereo(
 		for (channel = 0; channel < 2U; channel++) {
 			uint32_t source = channel < device->channels ? channel : 0U;
 
-			if (device->format == AUDIOD_FORMAT_S16_LE) {
+			if (device->format == KERN_AUDIO_FORMAT_U8) {
+				out[i * 2 + channel] = ((int32_t)in[i * device->channels + source] - 128) * 16777216;
+			} else if (device->format == KERN_AUDIO_FORMAT_S16_LE) {
 				memcpy(&s16, in + (i * device->channels + source) * 2U, 2);
 				out[i * 2 + channel] = (int32_t)s16 * 65536;
+			} else if (device->format == KERN_AUDIO_FORMAT_S24_3LE) {
+				const uint8_t *p = in + (i * device->channels + source) * 3U;
+				uint32_t u = ((uint32_t)p[0] << 8) |
+				             ((uint32_t)p[1] << 16) |
+				             ((uint32_t)p[2] << 24);
+				out[i * 2 + channel] = (int32_t)u;
+			} else if (device->format == KERN_AUDIO_FORMAT_S24_LE) {
+				memcpy(&s32, in + (i * device->channels + source) * 4U, 4);
+				out[i * 2 + channel] = (int32_t)((uint32_t)s32 << 8);
 			} else {
 				memcpy(&s32, in + (i * device->channels + source) * 4U, 4);
 				out[i * 2 + channel] = s32;

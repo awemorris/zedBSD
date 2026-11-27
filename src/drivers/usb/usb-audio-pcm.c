@@ -6,8 +6,8 @@
  */
 
 /*
- * Pure PCM rate generation, feedback decoding, and 24-bit sample packing
- * helpers for the USB Audio Class driver.
+ * Pure PCM rate generation, feedback decoding, and zero-copy ring packet
+ * planning helpers for the USB Audio Class driver.
  */
 
 #include <drivers/usb/usb-audio-pcm.h>
@@ -131,56 +131,84 @@ usb_audio_feedback_next(
 }
 
 /*
- * Packs S32_LE samples (upper 24 bits significant) into 3-byte LE samples.
+ * Plans zero-copy isochronous packet offsets and lengths directly on a DMA
+ * ring buffer, splitting at ring_bytes wraparound without copying.
  */
 void
-usb_audio_pack_24_from_s32(
-	const uint8_t *src_s32,
-	uint8_t *dst_24,
-	unsigned samples)
+usb_audio_plan_iso_urb(
+	uint32_t ring_pos,
+	uint32_t ring_bytes,
+	uint32_t frame_bytes,
+	unsigned packet_count,
+	const uint32_t *pkt_bytes,
+	uint32_t *buf_offset,
+	uint32_t *buf_length,
+	uint32_t *iso_offsets,
+	uint32_t *iso_lengths,
+	uint32_t *total_ring_bytes,
+	uint32_t *next_pos)
 {
 	unsigned i;
-	const uint8_t *s;
-	uint8_t *d;
+	uint32_t total;
+	uint32_t pos;
+	uint32_t rem;
+	uint32_t take;
 
-	if (src_s32 == NULL || dst_24 == NULL)
+	if (ring_bytes == 0U || frame_bytes == 0U || packet_count == 0U ||
+	    pkt_bytes == NULL || buf_offset == NULL || buf_length == NULL ||
+	    iso_offsets == NULL || iso_lengths == NULL ||
+	    total_ring_bytes == NULL || next_pos == NULL)
 		return;
 
-	s = src_s32;
-	d = dst_24;
-	for (i = 0U; i < samples; i++) {
-		d[0] = s[1];
-		d[1] = s[2];
-		d[2] = s[3];
-		s += 4U;
-		d += 3U;
-	}
-}
+	total = 0U;
+	for (i = 0U; i < packet_count; i++)
+		total += pkt_bytes[i];
 
-/*
- * Unpacks 3-byte LE samples into S32_LE samples (placed in upper 24 bits).
- */
-void
-usb_audio_unpack_24_to_s32(
-	const uint8_t *src_24,
-	uint8_t *dst_s32,
-	unsigned samples)
-{
-	unsigned i;
-	const uint8_t *s;
-	uint8_t *d;
-
-	if (src_24 == NULL || dst_s32 == NULL)
+	/* Fast path: entire URB fits contiguously without crossing ring_bytes. */
+	if (ring_pos + total <= ring_bytes) {
+		*buf_offset = ring_pos;
+		*buf_length = total;
+		pos = 0U;
+		for (i = 0U; i < packet_count; i++) {
+			iso_offsets[i] = pos;
+			iso_lengths[i] = pkt_bytes[i];
+			pos += pkt_bytes[i];
+		}
+		*total_ring_bytes = total;
+		*next_pos = (ring_pos + total) % ring_bytes;
 		return;
-
-	s = src_24;
-	d = dst_s32;
-	for (i = 0U; i < samples; i++) {
-		d[0] = 0U;
-		d[1] = s[0];
-		d[2] = s[1];
-		d[3] = s[2];
-		s += 3U;
-		d += 4U;
 	}
+
+	/* Wraparound path: point URB at full ring and wrap packet offsets at 0. */
+	*buf_offset = 0U;
+	*buf_length = ring_bytes;
+	pos = ring_pos;
+	total = 0U;
+	for (i = 0U; i < packet_count; i++) {
+		rem = ring_bytes - pos;
+		if (pkt_bytes[i] <= rem) {
+			iso_offsets[i] = pos;
+			iso_lengths[i] = pkt_bytes[i];
+			pos += pkt_bytes[i];
+			if (pos == ring_bytes)
+				pos = 0U;
+			total += pkt_bytes[i];
+		} else if (rem >= frame_bytes) {
+			take = (rem / frame_bytes) * frame_bytes;
+			iso_offsets[i] = pos;
+			iso_lengths[i] = take;
+			total += rem;
+			pos = 0U;
+		} else {
+			total += rem;
+			pos = 0U;
+			iso_offsets[i] = 0U;
+			iso_lengths[i] = pkt_bytes[i];
+			pos = pkt_bytes[i];
+			total += pkt_bytes[i];
+		}
+	}
+
+	*total_ring_bytes = total;
+	*next_pos = pos;
 }

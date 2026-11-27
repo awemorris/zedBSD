@@ -6,8 +6,8 @@
  */
 
 /*
- * Pure PCM rate generation, feedback decoding, and sample packing helpers
- * for the USB Audio Class driver.
+ * Pure PCM rate generation, feedback decoding, and zero-copy ring packet
+ * planning helpers for the USB Audio Class driver.
  */
 
 #ifndef KERN_DRIVERS_USB_AUDIO_PCM_H
@@ -61,21 +61,21 @@ usb_audio_feedback_next(
 	uint32_t *accum_q16);
 
 /*
- * Packs S32_LE samples (upper 24 bits significant) into 3-byte LE samples.
+ * Plans zero-copy isochronous packet offsets and lengths directly on a DMA
+ * ring buffer, splitting at ring_bytes wraparound without copying.
  */
 void
-usb_audio_pack_24_from_s32(
-	const uint8_t *src_s32,
-	uint8_t *dst_24,
-	unsigned samples);
-
-/*
- * Unpacks 3-byte LE samples into S32_LE samples (placed in upper 24 bits).
- */
-void
-usb_audio_unpack_24_to_s32(
-	const uint8_t *src_24,
-	uint8_t *dst_s32,
-	unsigned samples);
+usb_audio_plan_iso_urb(
+	uint32_t ring_pos,
+	uint32_t ring_bytes,
+	uint32_t frame_bytes,
+	unsigned packet_count,
+	const uint32_t *pkt_bytes,
+	uint32_t *buf_offset,
+	uint32_t *buf_length,
+	uint32_t *iso_offsets,
+	uint32_t *iso_lengths,
+	uint32_t *total_ring_bytes,
+	uint32_t *next_pos);
 
 #endif

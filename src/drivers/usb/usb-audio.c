@@ -469,9 +469,15 @@ usb_audio_build_formats(
 			if (alt->is_pcm == 0U || alt->channels == 0U || alt->channels > UAC_CHANNELS_MAX)
 				continue;
 
-			if (alt->subslot_size == 2U)
+			if (alt->subslot_size == 1U && alt->bit_resolution == 8U)
+				uapi_fmt = KERN_AUDIO_FORMAT_U8;
+			else if (alt->subslot_size == 2U && alt->bit_resolution == 16U)
 				uapi_fmt = KERN_AUDIO_FORMAT_S16_LE;
-			else if (alt->subslot_size == 3U || alt->subslot_size == 4U)
+			else if (alt->subslot_size == 3U && alt->bit_resolution == 24U)
+				uapi_fmt = KERN_AUDIO_FORMAT_S24_3LE;
+			else if (alt->subslot_size == 4U && alt->bit_resolution == 24U)
+				uapi_fmt = KERN_AUDIO_FORMAT_S24_LE;
+			else if (alt->subslot_size == 4U && alt->bit_resolution == 32U)
 				uapi_fmt = KERN_AUDIO_FORMAT_S32_LE;
 			else
 				continue;

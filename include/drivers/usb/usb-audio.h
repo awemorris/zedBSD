@@ -70,13 +70,13 @@ struct usb_audio_stream {
 	uint32_t hw_pos;
 	uint32_t frag_accum;
 
-	/* Isochronous data URBs and buffers. */
+	/* Isochronous data URBs (zero-copy directly on DMA ring). */
 	struct drv_usb_endpoint *data_ep;
 	unsigned packet_count;
 	size_t urb_bytes;
 	struct drv_usb_urb *urbs[USB_AUDIO_URBS];
-	uint8_t *buffers[USB_AUDIO_URBS];
 	struct drv_usb_iso_packet packets[USB_AUDIO_URBS][USB_AUDIO_PACKETS_MAX];
+	uint32_t submit_pos;
 	unsigned retained;
 
 	/* Feedback IN endpoint for asynchronous OUT streams. */

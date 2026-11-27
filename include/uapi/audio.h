@@ -26,6 +26,9 @@
 /* Sample encodings. */
 #define KERN_AUDIO_FORMAT_S16_LE	1U
 #define KERN_AUDIO_FORMAT_S32_LE	2U
+#define KERN_AUDIO_FORMAT_S24_3LE	3U
+#define KERN_AUDIO_FORMAT_S24_LE	4U
+#define KERN_AUDIO_FORMAT_U8		5U
 
 /* One exact hardware format; reserved must be zero. */
 struct audio_format {

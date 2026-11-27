@@ -6,9 +6,9 @@
  */
 
 /*
- * USB Audio Class streaming engine: multi-URB xHCI Isochronous pipeline,
- * worker threads, feedback endpoint handling, Bresenham rate generation,
- * and 24-bit packed <-> S32_LE ring conversion.
+ * USB Audio Class streaming engine: zero-copy multi-URB xHCI Isochronous
+ * pipeline directly on the audio DMA ring, worker threads, feedback
+ * endpoint handling, and Bresenham rate generation.
  */
 
 #include <drivers/audio/audio.h>
@@ -56,10 +56,6 @@ static void usb_audio_process_urb(struct usb_audio_stream *stream, unsigned inde
 static void usb_audio_process_fb(struct usb_audio_stream *stream);
 static void usb_audio_submit_urb(struct usb_audio_stream *stream, unsigned index);
 static void usb_audio_submit_fb(struct usb_audio_stream *stream);
-static void usb_audio_fill_out_urb(struct usb_audio_stream *stream, unsigned index, uint32_t *total_ring_bytes);
-static void usb_audio_take_in_urb(struct usb_audio_stream *stream, unsigned index);
-static void usb_audio_ring_read(struct usb_audio_stream *stream, uint8_t *dst, uint32_t bytes);
-static void usb_audio_ring_write(struct usb_audio_stream *stream, const uint8_t *src, uint32_t bytes);
 static void usb_audio_advance_hw(struct usb_audio_stream *stream, uint32_t ring_bytes);
 static int usb_audio_retire_urb(struct drv_usb_urb *urb);
 static void usb_audio_sleep_ms(unsigned milliseconds);
@@ -81,8 +77,8 @@ usb_audio_stream_init(
 }
 
 /*
- * Selects the best matching alternate setting, configures sample rate, and
- * binds the DMA ring buffer for a stream.
+ * Selects the exact matching native alternate setting, configures sample
+ * rate, and binds the DMA ring buffer for zero-copy streaming.
  */
 int
 usb_audio_stream_prepare(
@@ -124,12 +120,13 @@ usb_audio_stream_prepare(
 	stream->ring_bytes = fragment_bytes * fragment_count;
 	stream->format = *format;
 	stream->hw_pos = 0U;
+	stream->submit_pos = 0U;
 	stream->frag_accum = 0U;
 	stream->prepared = 1U;
 
 	spin_unlock_irqrestore(&stream->lock, irq);
 
-	/* Succeeded: stream prepared with selected alternate and ring. */
+	/* Succeeded: stream prepared with native alternate and DMA ring. */
 	return 0;
 }
 
@@ -208,6 +205,7 @@ usb_audio_stream_start(
 	stream->submitted_mask = 0U;
 	stream->next = 0U;
 	stream->hw_pos = 0U;
+	stream->submit_pos = 0U;
 	stream->frag_accum = 0U;
 	stream->fb_done = (stream->fb_urb != NULL) ? 1U : 0U;
 	stream->fb_submitted = 0U;
@@ -224,7 +222,7 @@ usb_audio_stream_start(
 	stream->running = 1U;
 	thread_start(stream->worker);
 
-	/* Succeeded: worker thread and URB pipeline active. */
+	/* Succeeded: worker thread and zero-copy URB pipeline active. */
 	return 0;
 }
 
@@ -349,7 +347,7 @@ usb_audio_stream_position(
 	return pos;
 }
 
-/* Finds the best AudioStreaming alternate matching the requested PCM format. */
+/* Finds the exact native AudioStreaming alternate matching the requested PCM format. */
 static const struct uac_as_alt *
 usb_audio_pick_alt(
 	const struct usb_audio_stream *stream,
@@ -357,35 +355,41 @@ usb_audio_pick_alt(
 {
 	unsigned index;
 	const struct uac_as_alt *alt;
-	const struct uac_as_alt *best;
 	uint8_t want_subslot;
+	uint8_t want_bits;
 
-	if (format->format == KERN_AUDIO_FORMAT_S16_LE)
+	if (format->format == KERN_AUDIO_FORMAT_U8) {
+		want_subslot = 1U;
+		want_bits = 8U;
+	} else if (format->format == KERN_AUDIO_FORMAT_S16_LE) {
 		want_subslot = 2U;
-	else if (format->format == KERN_AUDIO_FORMAT_S32_LE)
+		want_bits = 16U;
+	} else if (format->format == KERN_AUDIO_FORMAT_S24_3LE) {
+		want_subslot = 3U;
+		want_bits = 24U;
+	} else if (format->format == KERN_AUDIO_FORMAT_S24_LE) {
 		want_subslot = 4U;
-	else
+		want_bits = 24U;
+	} else if (format->format == KERN_AUDIO_FORMAT_S32_LE) {
+		want_subslot = 4U;
+		want_bits = 32U;
+	} else {
 		return NULL;
+	}
 
-	best = NULL;
 	for (index = 0U; index < stream->alt_count; index++) {
 		alt = &stream->alts[index];
 		if (alt->is_pcm == 0U || alt->ep_address == 0U)
 			continue;
 		if ((uint32_t)alt->channels != format->channels)
 			continue;
-		if (uac_desc_alt_supports_rate(alt, format->rate) == 0)
+		if (alt->subslot_size != want_subslot || alt->bit_resolution != want_bits)
 			continue;
-
-		if (alt->subslot_size == want_subslot)
+		if (uac_desc_alt_supports_rate(alt, format->rate) != 0)
 			return alt;
-
-		/* Maps 24-bit packed (subslot 3) to S32_LE if no 32-bit alt exists. */
-		if (format->format == KERN_AUDIO_FORMAT_S32_LE && alt->subslot_size == 3U && best == NULL)
-			best = alt;
 	}
 
-	return best;
+	return NULL;
 }
 
 /* Selects an alternate setting on the AudioStreaming interface. */
@@ -404,7 +408,7 @@ usb_audio_select_alt(
 	for (attempt = 0U; attempt < USB_AUDIO_ALT_TRIES; attempt++) {
 		error = drv_usb_interface_set_alternate(stream->usb_iface, setting);
 		if (error == 0 || error == ENODEV)
-			return (error == ENODEV) ? 0 : 0;
+			return 0;
 		if (error != EBUSY)
 			return error;
 		usb_audio_sleep_ms(USB_AUDIO_ALT_STEP_MS);
@@ -485,24 +489,25 @@ usb_audio_find_ep(
 	return NULL;
 }
 
-/* Allocates data URBs, buffers, and optional feedback URB. */
+/* Allocates data URBs and optional feedback URB without intermediate buffers. */
 static int
 usb_audio_alloc_urbs(
 	struct usb_audio_stream *stream)
 {
 	unsigned index;
+	size_t reserve_bytes;
 	int error;
+
+	reserve_bytes = stream->ring_bytes;
+	if (reserve_bytes < stream->urb_bytes)
+		reserve_bytes = stream->urb_bytes;
 
 	for (index = 0U; index < USB_AUDIO_URBS; index++) {
 		stream->urbs[index] = drv_usb_urb_alloc(stream->audio->device, stream->data_ep, stream->packet_count);
 		if (stream->urbs[index] == NULL)
 			return ENOMEM;
 
-		stream->buffers[index] = kern_calloc(1U, stream->urb_bytes);
-		if (stream->buffers[index] == NULL)
-			return ENOMEM;
-
-		error = drv_usb_urb_reserve_transfer(stream->urbs[index], stream->urb_bytes);
+		error = drv_usb_urb_reserve_transfer(stream->urbs[index], reserve_bytes);
 		if (error != 0 && error != ENOTSUP && error != EOPNOTSUPP)
 			return error;
 	}
@@ -516,7 +521,7 @@ usb_audio_alloc_urbs(
 	return 0;
 }
 
-/* Frees all URBs and transfer buffers owned by a stream. */
+/* Frees all URBs owned by a stream. */
 static void
 usb_audio_free_urbs(
 	struct usb_audio_stream *stream)
@@ -526,10 +531,7 @@ usb_audio_free_urbs(
 	for (index = 0U; index < USB_AUDIO_URBS; index++) {
 		if (stream->urbs[index] != NULL)
 			drv_usb_urb_free(stream->urbs[index]);
-		if (stream->buffers[index] != NULL)
-			kern_free(stream->buffers[index]);
 		stream->urbs[index] = NULL;
-		stream->buffers[index] = NULL;
 	}
 
 	if (stream->fb_urb != NULL) {
@@ -690,7 +692,7 @@ usb_audio_worker(
 	}
 }
 
-/* Processes a completed data URB (retires it and reads captured audio if IN). */
+/* Retires a completed data URB and advances ring position for capture IN. */
 static void
 usb_audio_process_urb(
 	struct usb_audio_stream *stream,
@@ -700,6 +702,10 @@ usb_audio_process_urb(
 	unsigned long irq;
 	unsigned submitted;
 	enum drv_usb_urb_status status;
+	enum drv_usb_iso_status pkt_status;
+	size_t actual;
+	uint32_t total_actual;
+	unsigned packet;
 	int error;
 
 	submitted = 0U;
@@ -723,8 +729,18 @@ usb_audio_process_urb(
 	if (status != DRV_USB_URB_COMPLETE)
 		return;
 
-	if (stream->capture != 0U)
-		usb_audio_take_in_urb(stream, index);
+	if (stream->capture != 0U) {
+		total_actual = 0U;
+		for (packet = 0U; packet < stream->packet_count; packet++) {
+			error = drv_usb_urb_iso_result(urb, packet, &actual, &pkt_status);
+			if (error != 0 || actual == 0U)
+				continue;
+			if (pkt_status == DRV_USB_ISO_OK || pkt_status == DRV_USB_ISO_SHORT)
+				total_actual += (uint32_t)actual;
+		}
+		if (total_actual > 0U)
+			usb_audio_advance_hw(stream, total_actual);
+	}
 }
 
 /* Decodes a completed feedback IN URB and updates the OUT packet rate. */
@@ -767,16 +783,23 @@ usb_audio_process_fb(
 		stream->fb_rate_q16 = stream->fb_nominal_q16;
 }
 
-/* Fills (for playback) and submits one data URB. */
+/* Submits one zero-copy data URB pointing directly at the DMA ring. */
 static void
 usb_audio_submit_urb(
 	struct usb_audio_stream *stream,
 	unsigned index)
 {
+	uint32_t pkt_bytes[USB_AUDIO_PACKETS_MAX];
+	uint32_t iso_offsets[USB_AUDIO_PACKETS_MAX];
+	uint32_t iso_lengths[USB_AUDIO_PACKETS_MAX];
+	uint32_t frame_bytes;
+	uint32_t frames;
+	uint32_t buf_offset;
+	uint32_t buf_length;
+	uint32_t total_ring_bytes;
+	uint32_t next_pos;
 	unsigned long irq;
 	unsigned admitted;
-	uint32_t out_ring_bytes;
-	size_t total_len;
 	unsigned packet;
 	int error;
 
@@ -793,22 +816,57 @@ usb_audio_submit_urb(
 	if (admitted == 0U)
 		return;
 
-	out_ring_bytes = 0U;
-	if (stream->capture == 0U) {
-		usb_audio_fill_out_urb(stream, index, &out_ring_bytes);
-		total_len = 0U;
-		for (packet = 0U; packet < stream->packet_count; packet++)
-			total_len += stream->packets[index][packet].length;
-	} else {
-		kern_memset(stream->packets[index], 0, sizeof(stream->packets[index]));
-		for (packet = 0U; packet < stream->packet_count; packet++) {
-			stream->packets[index][packet].offset = (size_t)packet * stream->active_alt->ep_max_packet;
-			stream->packets[index][packet].length = stream->active_alt->ep_max_packet;
+	frame_bytes = (uint32_t)stream->active_alt->channels * stream->active_alt->subslot_size;
+	for (packet = 0U; packet < stream->packet_count; packet++) {
+		if (stream->capture == 0U) {
+			if (stream->fb_ep != NULL)
+				frames = usb_audio_feedback_next(stream->fb_rate_q16, &stream->fb_accum_q16);
+			else
+				frames = usb_audio_bresenham_next(&stream->bresenham);
+
+			pkt_bytes[packet] = frames * frame_bytes;
+			if (pkt_bytes[packet] > stream->active_alt->ep_max_packet) {
+				frames = stream->active_alt->ep_max_packet / frame_bytes;
+				pkt_bytes[packet] = frames * frame_bytes;
+			}
+		} else {
+			pkt_bytes[packet] = stream->active_alt->ep_max_packet;
 		}
-		total_len = stream->urb_bytes;
+		if (pkt_bytes[packet] == 0U)
+			pkt_bytes[packet] = frame_bytes;
 	}
 
-	error = drv_usb_urb_setup(stream->urbs[index], stream->buffers[index], total_len, 0U, 0U, usb_audio_urb_cb, stream);
+	buf_offset = 0U;
+	buf_length = 0U;
+	total_ring_bytes = 0U;
+	next_pos = stream->submit_pos;
+	usb_audio_plan_iso_urb(
+		stream->submit_pos,
+		stream->ring_bytes,
+		frame_bytes,
+		stream->packet_count,
+		pkt_bytes,
+		&buf_offset,
+		&buf_length,
+		iso_offsets,
+		iso_lengths,
+		&total_ring_bytes,
+		&next_pos);
+
+	kern_memset(stream->packets[index], 0, sizeof(stream->packets[index]));
+	for (packet = 0U; packet < stream->packet_count; packet++) {
+		stream->packets[index][packet].offset = iso_offsets[packet];
+		stream->packets[index][packet].length = iso_lengths[packet];
+	}
+
+	error = drv_usb_urb_setup(
+		stream->urbs[index],
+		stream->ring + buf_offset,
+		buf_length,
+		0U,
+		0U,
+		usb_audio_urb_cb,
+		stream);
 	if (error == 0)
 		error = drv_usb_urb_setup_isochronous(stream->urbs[index], stream->packets[index], stream->packet_count);
 	if (error == 0)
@@ -816,14 +874,16 @@ usb_audio_submit_urb(
 
 	irq = spin_lock_irqsave(&stream->lock);
 
-	if (error == 0)
+	if (error == 0) {
 		stream->submitted_mask |= (1U << index);
+		stream->submit_pos = next_pos;
+	}
 	stream->submitting--;
 
 	spin_unlock_irqrestore(&stream->lock, irq);
 
-	if (error == 0 && stream->capture == 0U && out_ring_bytes > 0U)
-		usb_audio_advance_hw(stream, out_ring_bytes);
+	if (error == 0 && stream->capture == 0U && total_ring_bytes > 0U)
+		usb_audio_advance_hw(stream, total_ring_bytes);
 }
 
 /* Submits the feedback IN URB for an asynchronous OUT stream. */
@@ -856,7 +916,6 @@ usb_audio_submit_fb(
 	if (fb_len > stream->active_alt->sync_ep_max_packet && stream->active_alt->sync_ep_max_packet > 0U)
 		fb_len = stream->active_alt->sync_ep_max_packet;
 
-	kern_memset(&stream->packets[0], 0, 0U);
 	stream->packets[0][0].offset = 0U;
 	stream->packets[0][0].length = fb_len;
 
@@ -873,161 +932,6 @@ usb_audio_submit_fb(
 	stream->submitting--;
 
 	spin_unlock_irqrestore(&stream->lock, irq);
-}
-
-/* Packs outgoing playback frames from the DMA ring into an OUT URB. */
-static void
-usb_audio_fill_out_urb(
-	struct usb_audio_stream *stream,
-	unsigned index,
-	uint32_t *total_ring_bytes)
-{
-	uint8_t tmp[256];
-	uint32_t frames;
-	uint32_t usb_frame_bytes;
-	uint32_t ring_frame_bytes;
-	uint32_t pkt_usb_bytes;
-	uint32_t pkt_ring_bytes;
-	size_t offset;
-	unsigned packet;
-	unsigned samples;
-
-	usb_frame_bytes = (uint32_t)stream->active_alt->channels * stream->active_alt->subslot_size;
-	ring_frame_bytes = stream->format.channels * (stream->format.format == KERN_AUDIO_FORMAT_S16_LE ? 2U : 4U);
-	offset = 0U;
-	*total_ring_bytes = 0U;
-
-	kern_memset(stream->packets[index], 0, sizeof(stream->packets[index]));
-	for (packet = 0U; packet < stream->packet_count; packet++) {
-		if (stream->fb_ep != NULL)
-			frames = usb_audio_feedback_next(stream->fb_rate_q16, &stream->fb_accum_q16);
-		else
-			frames = usb_audio_bresenham_next(&stream->bresenham);
-
-		pkt_usb_bytes = frames * usb_frame_bytes;
-		if (pkt_usb_bytes > stream->active_alt->ep_max_packet) {
-			frames = stream->active_alt->ep_max_packet / usb_frame_bytes;
-			pkt_usb_bytes = frames * usb_frame_bytes;
-		}
-		if (offset + pkt_usb_bytes > stream->urb_bytes)
-			break;
-
-		pkt_ring_bytes = frames * ring_frame_bytes;
-		if (stream->active_alt->subslot_size == 3U && stream->format.format == KERN_AUDIO_FORMAT_S32_LE) {
-			if (pkt_ring_bytes <= sizeof(tmp)) {
-				usb_audio_ring_read(stream, tmp, pkt_ring_bytes);
-				samples = frames * stream->active_alt->channels;
-				usb_audio_pack_24_from_s32(tmp, stream->buffers[index] + offset, samples);
-			}
-		} else {
-			usb_audio_ring_read(stream, stream->buffers[index] + offset, pkt_usb_bytes);
-		}
-
-		stream->packets[index][packet].offset = offset;
-		stream->packets[index][packet].length = pkt_usb_bytes;
-		offset += pkt_usb_bytes;
-		*total_ring_bytes += pkt_ring_bytes;
-	}
-}
-
-/* Extracts captured audio packets from a completed IN URB into the DMA ring. */
-static void
-usb_audio_take_in_urb(
-	struct usb_audio_stream *stream,
-	unsigned index)
-{
-	uint8_t tmp[256];
-	struct drv_usb_urb *urb;
-	enum drv_usb_iso_status result;
-	size_t actual;
-	size_t offset;
-	size_t length;
-	uint32_t total_ring_bytes;
-	uint32_t usb_frame_bytes;
-	uint32_t ring_frame_bytes;
-	uint32_t frames;
-	unsigned packet;
-	unsigned samples;
-	int error;
-
-	urb = stream->urbs[index];
-	usb_frame_bytes = (uint32_t)stream->active_alt->channels * stream->active_alt->subslot_size;
-	ring_frame_bytes = stream->format.channels * (stream->format.format == KERN_AUDIO_FORMAT_S16_LE ? 2U : 4U);
-	total_ring_bytes = 0U;
-
-	for (packet = 0U; packet < stream->packet_count; packet++) {
-		error = drv_usb_urb_iso_result(urb, packet, &actual, &result);
-		if (error != 0 || actual == 0U)
-			continue;
-		if (result != DRV_USB_ISO_OK && result != DRV_USB_ISO_SHORT)
-			continue;
-		if (drv_usb_urb_iso_packet(urb, packet, &offset, &length) != 0)
-			continue;
-		if (actual > length)
-			actual = length;
-
-		if (stream->active_alt->subslot_size == 3U && stream->format.format == KERN_AUDIO_FORMAT_S32_LE) {
-			frames = (uint32_t)(actual / usb_frame_bytes);
-			samples = frames * stream->active_alt->channels;
-			if (frames * ring_frame_bytes <= sizeof(tmp)) {
-				usb_audio_unpack_24_to_s32(stream->buffers[index] + offset, tmp, samples);
-				usb_audio_ring_write(stream, tmp, frames * ring_frame_bytes);
-				total_ring_bytes += frames * ring_frame_bytes;
-			}
-		} else {
-			usb_audio_ring_write(stream, stream->buffers[index] + offset, (uint32_t)actual);
-			total_ring_bytes += (uint32_t)actual;
-		}
-	}
-
-	if (total_ring_bytes > 0U)
-		usb_audio_advance_hw(stream, total_ring_bytes);
-}
-
-/* Copies bytes from the playback DMA ring, wrapping at ring_bytes. */
-static void
-usb_audio_ring_read(
-	struct usb_audio_stream *stream,
-	uint8_t *dst,
-	uint32_t bytes)
-{
-	uint32_t pos;
-	uint32_t first;
-
-	if (stream->ring == NULL || stream->ring_bytes == 0U || bytes == 0U)
-		return;
-
-	pos = (stream->hw_pos + 0U) % stream->ring_bytes;
-	first = stream->ring_bytes - pos;
-	if (first > bytes)
-		first = bytes;
-
-	kern_memcpy(dst, stream->ring + pos, first);
-	if (bytes > first)
-		kern_memcpy(dst + first, stream->ring, bytes - first);
-}
-
-/* Copies bytes into the capture DMA ring, wrapping at ring_bytes. */
-static void
-usb_audio_ring_write(
-	struct usb_audio_stream *stream,
-	const uint8_t *src,
-	uint32_t bytes)
-{
-	uint32_t pos;
-	uint32_t first;
-
-	if (stream->ring == NULL || stream->ring_bytes == 0U || bytes == 0U)
-		return;
-
-	pos = stream->hw_pos % stream->ring_bytes;
-	first = stream->ring_bytes - pos;
-	if (first > bytes)
-		first = bytes;
-
-	kern_memcpy(stream->ring + pos, src, first);
-	if (bytes > first)
-		kern_memcpy(stream->ring, src + first, bytes - first);
 }
 
 /* Advances hw_pos and notifies the audio framework whenever a fragment completes. */

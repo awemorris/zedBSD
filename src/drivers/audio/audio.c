@@ -463,7 +463,10 @@ audio_format_valid(
 {
 	/* Refuses an unknown encoding. */
 	if (format->format != KERN_AUDIO_FORMAT_S16_LE &&
-	    format->format != KERN_AUDIO_FORMAT_S32_LE)
+	    format->format != KERN_AUDIO_FORMAT_S32_LE &&
+	    format->format != KERN_AUDIO_FORMAT_S24_3LE &&
+	    format->format != KERN_AUDIO_FORMAT_S24_LE &&
+	    format->format != KERN_AUDIO_FORMAT_U8)
 		return 0;
 
 	/* Refuses anything but mono or stereo. */
@@ -483,8 +486,17 @@ static uint32_t
 audio_bytes_per_frame(
 	const struct audio_format *format)
 {
-	/* A 32-bit sample takes four bytes per channel. */
-	if (format->format == KERN_AUDIO_FORMAT_S32_LE)
+	/* An 8-bit sample takes one byte per channel. */
+	if (format->format == KERN_AUDIO_FORMAT_U8)
+		return 1U * format->channels;
+
+	/* A 24-bit packed sample takes three bytes per channel. */
+	if (format->format == KERN_AUDIO_FORMAT_S24_3LE)
+		return 3U * format->channels;
+
+	/* A 24-bit-in-32 or 32-bit sample takes four bytes per channel. */
+	if (format->format == KERN_AUDIO_FORMAT_S24_LE ||
+	    format->format == KERN_AUDIO_FORMAT_S32_LE)
 		return 4U * format->channels;
 
 	/* A 16-bit sample takes two bytes per channel. */
@@ -494,8 +506,8 @@ audio_bytes_per_frame(
 /*
  * Rounds a byte position up to a whole frame.
  *
- * Every frame is 2, 4 or 8 bytes, a power of two, so the remainder is a
- * mask; a 64-bit division would need a libgcc helper on i386.
+ * Uses a bitmask for power-of-two frame sizes and 32-bit modular arithmetic
+ * for 3-byte/6-byte packed frames to avoid 64-bit division on 32-bit hosts.
  */
 static uint64_t
 audio_align_up(
@@ -503,10 +515,20 @@ audio_align_up(
 	uint32_t unit)
 {
 	uint32_t remainder;
+	uint32_t hi;
+	uint32_t lo;
+	uint32_t mod_pow32;
 
-	/* A position already on a frame boundary stays put. */
-	remainder = (uint32_t)value & (unit - 1U);
-	if (remainder == 0)
+	if ((unit & (unit - 1U)) == 0U) {
+		remainder = (uint32_t)value & (unit - 1U);
+	} else {
+		hi = (uint32_t)(value >> 32);
+		lo = (uint32_t)value;
+		mod_pow32 = ((0xffffffffU % unit) + 1U) % unit;
+		remainder = ((hi % unit) * mod_pow32 + (lo % unit)) % unit;
+	}
+
+	if (remainder == 0U)
 		return value;
 
 	/* Reports the next frame boundary. */

@@ -7,7 +7,7 @@
 
 /*
  * Host unit tests for Bresenham rate generation, feedback decoding, and
- * 24-bit packed <-> S32_LE conversion.
+ * zero-copy DMA ring URB packet planning across wraparound boundaries.
  *
  * Build and run:
  *   cc -Wall -Wextra -Werror -std=c89 -Iinclude \
@@ -24,7 +24,7 @@
 
 static void test_bresenham_44100_fs_and_hs(void);
 static void test_feedback_10_14_and_16_16(void);
-static void test_24bit_pack_unpack_roundtrip(void);
+static void test_zero_copy_ring_planning(void);
 
 int
 main(
@@ -32,7 +32,7 @@ main(
 {
 	test_bresenham_44100_fs_and_hs();
 	test_feedback_10_14_and_16_16();
-	test_24bit_pack_unpack_roundtrip();
+	test_zero_copy_ring_planning();
 	printf("usb-audio-stream-host-test: all tests passed\n");
 	return 0;
 }
@@ -102,29 +102,46 @@ test_feedback_10_14_and_16_16(
 	assert(usb_audio_decode_feedback(bad_high, sizeof(bad_high), nominal_480, &q16) != 0);
 }
 
-/* Verifies 24-bit packed <-> S32_LE roundtrip preserves upper 24 bits and sign. */
+/* Verifies zero-copy ring packet planning both inside and across wraparound. */
 static void
-test_24bit_pack_unpack_roundtrip(
+test_zero_copy_ring_planning(
 	void)
 {
-	uint8_t src_s32[12] = {
-		0x12U, 0x34U, 0x56U, 0x7fU,
-		0xffU, 0x00U, 0x00U, 0x80U,
-		0xabU, 0xcdU, 0xefU, 0x00U
-	};
-	uint8_t packed[9];
-	uint8_t dst_s32[12];
+	uint32_t pkt_bytes[4] = { 192U, 192U, 192U, 192U };
+	uint32_t iso_off[4];
+	uint32_t iso_len[4];
+	uint32_t buf_off;
+	uint32_t buf_len;
+	uint32_t total_ring;
+	uint32_t next_pos;
 
-	memset(packed, 0, sizeof(packed));
-	memset(dst_s32, 0xff, sizeof(dst_s32));
+	/* Contiguous case: no wraparound. */
+	usb_audio_plan_iso_urb(1024U, 32768U, 4U, 4U, pkt_bytes,
+	    &buf_off, &buf_len, iso_off, iso_len, &total_ring, &next_pos);
+	assert(buf_off == 1024U);
+	assert(buf_len == 768U);
+	assert(iso_off[0] == 0U && iso_off[1] == 192U && iso_off[2] == 384U && iso_off[3] == 576U);
+	assert(total_ring == 768U);
+	assert(next_pos == 1792U);
 
-	usb_audio_pack_24_from_s32(src_s32, packed, 3U);
-	assert(packed[0] == 0x34U && packed[1] == 0x56U && packed[2] == 0x7fU);
-	assert(packed[3] == 0x00U && packed[4] == 0x00U && packed[5] == 0x80U);
-	assert(packed[6] == 0xcdU && packed[7] == 0xefU && packed[8] == 0x00U);
+	/* Wraparound case: 32768 - 32480 = 288 bytes remaining before wrap. */
+	usb_audio_plan_iso_urb(32480U, 32768U, 4U, 4U, pkt_bytes,
+	    &buf_off, &buf_len, iso_off, iso_len, &total_ring, &next_pos);
+	assert(buf_off == 0U);
+	assert(buf_len == 32768U);
+	assert(iso_off[0] == 32480U && iso_len[0] == 192U);
+	assert(iso_off[1] == 32672U && iso_len[1] == 96U);
+	assert(iso_off[2] == 0U && iso_len[2] == 192U);
+	assert(iso_off[3] == 192U && iso_len[3] == 192U);
+	assert(total_ring == 672U);
+	assert(next_pos == 384U);
 
-	usb_audio_unpack_24_to_s32(packed, dst_s32, 3U);
-	assert(dst_s32[0] == 0x00U && dst_s32[1] == 0x34U && dst_s32[2] == 0x56U && dst_s32[3] == 0x7fU);
-	assert(dst_s32[4] == 0x00U && dst_s32[5] == 0x00U && dst_s32[6] == 0x00U && dst_s32[7] == 0x80U);
-	assert(dst_s32[8] == 0x00U && dst_s32[9] == 0xcdU && dst_s32[10] == 0xefU && dst_s32[11] == 0x00U);
+	/* Sub-frame tail case for S24_3LE (6-byte frame, 2 bytes remaining at 32766). */
+	usb_audio_plan_iso_urb(32766U, 32768U, 6U, 2U, pkt_bytes,
+	    &buf_off, &buf_len, iso_off, iso_len, &total_ring, &next_pos);
+	assert(buf_off == 0U);
+	assert(buf_len == 32768U);
+	assert(iso_off[0] == 0U && iso_len[0] == 192U);
+	assert(iso_off[1] == 192U && iso_len[1] == 192U);
+	assert(next_pos == 384U);
 }
