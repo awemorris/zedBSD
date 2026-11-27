@@ -1065,7 +1065,7 @@
    long page_size = sysconf(_SC_PAGESIZE);  // NOLINT(runtime/int)
 --- a/v8/src/common/code-memory-access-inl.h
 +++ b/v8/src/common/code-memory-access-inl.h
-@@ -22,10 +22,23 @@
+@@ -22,10 +22,18 @@
  #if V8_HAS_BECORE_JIT_WRITE_PROTECT
  #include <BrowserEngineCore/BEMemory.h>
  #endif
@@ -1077,24 +1077,19 @@
  namespace internal {
  
 +#if defined(V8_OS_ZEDBSD)
-+inline void ZedBsdSetCodePermissions(Address addr, size_t size, int prot) {
-+  if (size == 0) return;
-+  constexpr size_t kPage = 4096;
-+  Address start = addr & ~(kPage - 1);
-+  Address end = (addr + size + kPage - 1) & ~(kPage - 1);
-+  mprotect(reinterpret_cast<void*>(start), end - start, prot);
-+}
++V8_EXPORT_PRIVATE void ZedBsdSetCodePermissions(Address addr, size_t size,
++                                                int prot);
 +#endif
 +
  RwxMemoryWriteScope::RwxMemoryWriteScope(const char* comment) {
    if (!v8_flags.jitless || v8_flags.force_memory_protection_keys) {
      SetWritable();
-@@ -46,6 +59,12 @@
+@@ -46,6 +54,12 @@
      write_scope_.emplace("~WritableJitAllocation");
    }
  #endif
 +#if defined(V8_OS_ZEDBSD)
-+  if (write_scope_.has_value()) {
++  if (write_scope_.has_value() || page_ref_.has_value()) {
 +    ZedBsdSetCodePermissions(address_, allocation_.Size(),
 +                             PROT_READ | PROT_EXEC);
 +  }
@@ -1102,7 +1097,7 @@
  }
  
  WritableJitAllocation::WritableJitAllocation(
-@@ -61,6 +80,9 @@
+@@ -61,6 +75,9 @@
                        ? page_ref_->RegisterAllocation(addr, size, type)
                        : page_ref_->LookupAllocation(addr, size, type)),
        enforce_write_api_(enforce_write_api) {
@@ -1112,7 +1107,7 @@
  #ifdef DEBUG
    if (enforce_write_api_) {
      // Reset the write scope for debugging. We'll create fine-grained scopes in
-@@ -91,7 +113,11 @@
+@@ -91,7 +108,11 @@
      : address_(addr),
        write_scope_("WritableJitAllocation"),
        allocation_(size,
@@ -1125,7 +1120,35 @@
  
  // static
  WritableJitAllocation WritableJitAllocation::ForPatchableBaselineJIT(
-@@ -296,7 +322,14 @@
+@@ -277,11 +298,25 @@
+   memset(reinterpret_cast<void*>(address_ + offset), 0, len);
+ }
+ 
+-WritableJitPage::~WritableJitPage() = default;
++WritableJitPage::~WritableJitPage() {
++#if defined(V8_OS_ZEDBSD)
++  ZedBsdSetCodePermissions(address_, size_, PROT_READ | PROT_EXEC);
++#endif
++}
+ 
+ WritableJitPage::WritableJitPage(Address addr, size_t size)
+     : write_scope_("WritableJitPage"),
+-      page_ref_(ThreadIsolation::LookupJitPage(addr, size)) {}
++      page_ref_(ThreadIsolation::LookupJitPage(addr, size))
++#if defined(V8_OS_ZEDBSD)
++      ,
++      address_(addr),
++      size_(size)
++#endif
++{
++#if defined(V8_OS_ZEDBSD)
++  ZedBsdSetCodePermissions(address_, size_, PROT_READ | PROT_WRITE);
++#endif
++}
+ 
+ WritableJitAllocation WritableJitPage::LookupAllocationContaining(
+     Address addr) {
+@@ -296,7 +331,14 @@
    return WritableFreeSpace(addr, size, true);
  }
  
@@ -1141,7 +1164,7 @@
  
  // static
  V8_INLINE WritableFreeSpace
-@@ -306,7 +339,14 @@
+@@ -306,7 +348,14 @@
  
  V8_INLINE WritableFreeSpace::WritableFreeSpace(base::Address addr, size_t size,
                                                 bool executable)
@@ -1157,6 +1180,141 @@
  
  template <typename T, size_t offset>
  void WritableFreeSpace::WriteHeaderSlot(Tagged<T> value,
+--- a/v8/src/common/code-memory-access.cc
++++ b/v8/src/common/code-memory-access.cc
+@@ -5,6 +5,12 @@
+ #include "src/common/code-memory-access.h"
+ 
+ #include <optional>
++#if defined(V8_OS_ZEDBSD)
++#include <errno.h>
++#include <stdio.h>
++#include <sys/mman.h>
++#include <unistd.h>
++#endif
+ 
+ #include "src/common/code-memory-access-inl.h"
+ #include "src/objects/instruction-stream-inl.h"
+@@ -18,6 +24,24 @@
+ 
+ ThreadIsolation::TrustedData ThreadIsolation::trusted_data_;
+ 
++#if defined(V8_OS_ZEDBSD)
++void ZedBsdSetCodePermissions(Address addr, size_t size, int prot) {
++  if (size == 0) return;
++  constexpr size_t kPage = 4096;
++  Address start = addr & ~(kPage - 1);
++  Address end = (addr + size + kPage - 1) & ~(kPage - 1);
++  if (start <= 0x10b88a000ULL && end > 0x10b88a000ULL) {
++    fprintf(stderr, "ZEDBSD_MPROT pid=%d tid=%d start=%p len=%zu prot=%d\n",
++            getpid(), v8::base::OS::GetCurrentThreadId(),
++            reinterpret_cast<void*>(start), end - start, prot);
++  }
++  if (mprotect(reinterpret_cast<void*>(start), end - start, prot) != 0) {
++    FATAL("ZedBsdSetCodePermissions: mprotect(%p, %zu, %d) failed: errno=%d",
++          reinterpret_cast<void*>(start), end - start, prot, errno);
++  }
++}
++#endif
++
+ #if V8_HAS_PKU_JIT_WRITE_PROTECT
+ 
+ // static
+--- a/v8/src/common/code-memory-access.h
++++ b/v8/src/common/code-memory-access.h
+@@ -557,6 +557,10 @@
+  private:
+   RwxMemoryWriteScope write_scope_;
+   ThreadIsolation::JitPageReference page_ref_;
++#if defined(V8_OS_ZEDBSD)
++  Address address_;
++  size_t size_;
++#endif
+ };
+ 
+ #ifdef V8_ENABLE_WEBASSEMBLY
+--- a/v8/src/deoptimizer/x64/deoptimizer-x64.cc
++++ b/v8/src/deoptimizer/x64/deoptimizer-x64.cc
+@@ -11,6 +11,10 @@
+ #include "src/deoptimizer/deoptimizer.h"
+ #include "src/execution/isolate-data.h"
+ 
++#if defined(V8_OS_ZEDBSD)
++#include <sys/mman.h>
++#endif
++
+ namespace v8 {
+ namespace internal {
+ 
+@@ -41,6 +45,11 @@
+ // static
+ void Deoptimizer::ZapCode(Address start, Address end, RelocIterator& it) {
+   RwxMemoryWriteScope rwx_write_scope("Patch jump to deopt trampoline");
++#if defined(V8_OS_ZEDBSD)
++  if (end > start) {
++    ZedBsdSetCodePermissions(start, end - start, PROT_READ | PROT_WRITE);
++  }
++#endif
+   constexpr int kExtra = 32;
+   Assembler masm(
+       AssemblerOptions{},
+@@ -62,6 +71,11 @@
+     masm.int3();
+   }
+   FlushInstructionCache(start, end - start);
++#if defined(V8_OS_ZEDBSD)
++  if (end > start) {
++    ZedBsdSetCodePermissions(start, end - start, PROT_READ | PROT_EXEC);
++  }
++#endif
+ }
+ 
+ // static
+@@ -80,12 +94,18 @@
+   // We'll overwrite only one instruction of 5-bytes. Give enough
+   // space not to try to grow the buffer.
+   constexpr int kSize = 32;
++#if defined(V8_OS_ZEDBSD)
++  ZedBsdSetCodePermissions(pc, kSize, PROT_READ | PROT_WRITE);
++#endif
+   Assembler masm(
+       AssemblerOptions{},
+       ExternalAssemblerBuffer(reinterpret_cast<uint8_t*>(pc), kSize));
+   int offset = static_cast<int>(new_pc - pc);
+   masm.jmp_rel(offset);
+   FlushInstructionCache(pc, kSize);
++#if defined(V8_OS_ZEDBSD)
++  ZedBsdSetCodePermissions(pc, kSize, PROT_READ | PROT_EXEC);
++#endif
+ }
+ 
+ Float32 RegisterValues::GetFloatRegister(unsigned n) const {
+--- a/v8/src/flags/flag-definitions.h
++++ b/v8/src/flags/flag-definitions.h
+@@ -2661,7 +2661,11 @@
+            "number of fixpoint iterations it takes to switch to linear "
+            "ephemeron algorithm")
+ DEFINE_DEVELOPER_FLAG(trace_concurrent_marking, "trace concurrent marking")
++#if defined(V8_OS_ZEDBSD)
++DEFINE_BOOL(concurrent_sweeping, false, "use concurrent sweeping")
++#else
+ DEFINE_BOOL(concurrent_sweeping, true, "use concurrent sweeping")
++#endif
+ DEFINE_NEG_NEG_IMPLICATION(concurrent_sweeping,
+                            concurrent_array_buffer_sweeping)
+ DEFINE_BOOL(parallel_compaction, true, "use parallel compaction")
+@@ -4294,7 +4298,11 @@
+ // Threading related flags.
+ //
+ 
++#if defined(V8_OS_ZEDBSD)
++DEFINE_BOOL(single_threaded, true, "disable the use of background tasks")
++#else
+ DEFINE_BOOL(single_threaded, false, "disable the use of background tasks")
++#endif
+ DEFINE_IMPLICATION(single_threaded, single_threaded_gc)
+ DEFINE_NEG_IMPLICATION(single_threaded, concurrent_recompilation)
+ DEFINE_NEG_IMPLICATION(single_threaded, concurrent_builtin_generation)
 --- a/v8/src/heap/code-range.cc
 +++ b/v8/src/heap/code-range.cc
 @@ -172,7 +172,11 @@
@@ -1191,6 +1349,80 @@
  }
  
  const MemoryChunk* MemoryAllocator::LookupChunkContainingAddress(
+--- a/v8/src/heap/memory-chunk-layout.h
++++ b/v8/src/heap/memory-chunk-layout.h
+@@ -18,9 +18,17 @@
+   static constexpr intptr_t ObjectStartOffsetInCodePage() {
+     // The instruction stream data (so after the header) should be aligned to
+     // kCodeAlignment.
++#if defined(V8_OS_ZEDBSD)
++    // On zedBSD W^X, keep the MemoryChunk header on its own writable 4KB OS
++    // page so toggling code pages to PROT_READ | PROT_EXEC does not strip
++    // write permission from Chunk()->untrusted_main_thread_flags_.
++    return RoundUp(4096 + InstructionStream::kHeaderSize, kCodeAlignment) -
++           InstructionStream::kHeaderSize;
++#else
+     return RoundUp(sizeof(MemoryChunk) + InstructionStream::kHeaderSize,
+                    kCodeAlignment) -
+            InstructionStream::kHeaderSize;
++#endif
+   }
+ 
+   static constexpr size_t AllocatableMemoryInCodePage() {
+--- a/v8/src/heap/mutable-page.h
++++ b/v8/src/heap/mutable-page.h
+@@ -58,8 +58,12 @@
+   };
+ 
+   static PageAllocator::Permission GetCodeModificationPermission() {
++#if defined(V8_OS_ZEDBSD)
++    return PageAllocator::kReadWrite;
++#else
+     return v8_flags.jitless ? PageAllocator::kReadWrite
+                             : PageAllocator::kReadWriteExecute;
++#endif
+   }
+ 
+   // Only correct if the pointer is in the first kPageSize of the MemoryChunk.
+--- a/v8/src/heap/zapping.cc
++++ b/v8/src/heap/zapping.cc
+@@ -9,17 +9,36 @@
+ #include "src/heap/heap.h"
+ #include "src/objects/slots-inl.h"
+ 
++#if defined(V8_OS_ZEDBSD)
++#include <sys/mman.h>
++#endif
++
+ namespace v8::internal::heap {
+ 
+ void ZapCodeBlock(Address start, int size_in_bytes) {
+ #ifdef DEBUG
+   DCHECK(ShouldZapGarbage());
++#if defined(V8_OS_ZEDBSD)
++  constexpr size_t kPage = 4096;
++  Address page_start = start & ~(kPage - 1);
++  Address page_end = (start + size_in_bytes + kPage - 1) & ~(kPage - 1);
++  if (size_in_bytes > 0) {
++    mprotect(reinterpret_cast<void*>(page_start), page_end - page_start,
++             PROT_READ | PROT_WRITE);
++  }
++#endif
+   CodePageMemoryModificationScopeForDebugging code_modification_scope(
+       BasePage::FromAddress(Isolate::Current(), start));
+   DCHECK(IsAligned(start, kIntSize));
+   for (int i = 0; i < size_in_bytes / kIntSize; i++) {
+     base::Memory<int>(start + i * kIntSize) = kCodeZapValue;
+   }
++#if defined(V8_OS_ZEDBSD)
++  if (size_in_bytes > 0) {
++    mprotect(reinterpret_cast<void*>(page_start), page_end - page_start,
++             PROT_READ | PROT_EXEC);
++  }
++#endif
+ #endif
+ }
+ 
 --- a/v8/src/libsampler/sampler.cc
 +++ b/v8/src/libsampler/sampler.cc
 @@ -19,7 +19,7 @@
