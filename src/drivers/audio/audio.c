@@ -42,7 +42,7 @@
 /* The size of one ring. */
 #define AUDIO_RING_BYTES		(AUDIO_FRAGMENT_BYTES * AUDIO_FRAGMENT_COUNT)
 
-/* The ring alignment, which covers the HDA 128-byte buffer rule. */
+/* The ring alignment, which covers the HDA 128-byte buffer rule and VM page size. */
 #define AUDIO_RING_ALIGNMENT		4096U
 
 /* The longest a final close waits for written sound to play. */
@@ -58,13 +58,6 @@
  * already fetched, and stopping at the DMA position cuts that tail off.
  */
 #define AUDIO_DRAIN_TAIL_FRAGMENTS	2U
-
-/*
- * The fragments a mapped playback stream copies ahead of the hardware.
- * The DMA fetch runs ahead of the sound (see the drain tail), so the
- * fragment after the one being fetched is the nearest safe to fill.
- */
-#define AUDIO_MMAP_LEAD_FRAGMENTS	2U
 
 /* The stream index of each direction. */
 #define AUDIO_PLAYBACK			0
@@ -97,16 +90,11 @@ struct audio_stream {
 	uint32_t overruns;
 
 	/*
-	 * A mapped direction moves through the shadow ring the caller maps
-	 * instead of read or write.  frontier is the byte position, since the
-	 * trigger, up to which the shadow and the DMA ring agree: playback
-	 * copied the shadow there and silenced it, capture copied the DMA ring
-	 * out.  reported counts the fragments a position request has seen.
+	 * A mapped direction exposes the DMA ring directly to the caller
+	 * instead of read or write.  reported counts the fragments a position
+	 * or poll request has seen.
 	 */
 	unsigned mapped;
-	struct kern_pmem shadow;
-	uint8_t *shadow_address;
-	uint64_t frontier;
 	uint64_t reported;
 };
 
@@ -187,8 +175,6 @@ static int audio_dsp_ioctl(struct file *file, unsigned long command, uintptr_t a
 static int audio_dsp_poll(struct file *file, short events, short *revents);
 static int audio_dsp_mmap(struct file *file, off_t offset, size_t bytes, uint32_t prot, struct vm_device_mapping **result);
 static void audio_mapping_release(void *owner);
-static int audio_shadow_allocate(struct audio_stream *stream);
-static void audio_mmap_advance_locked(struct drv_audio_device *device, int capture);
 static int audio_mmap_start(struct drv_audio_device *device, int capture);
 static int audio_trigger(struct drv_audio_device *device, uintptr_t argument);
 static int audio_mmap_position_get(struct drv_audio_device *device, int capture, uintptr_t argument);
@@ -369,12 +355,10 @@ drv_audio_interrupt(
 	audio_stream_sync_locked(device, capture);
 
 	/*
-	 * A mapped direction moves whole fragments between the shadow and
-	 * the DMA ring here.  Each playback fragment is copied from the
-	 * shadow in full, so the DMA ring needs no separate silencing.
+	 * A mapped playback direction leaves silencing to the caller, which
+	 * owns the DMA ring directly; track released for consistency.
 	 */
 	if (stream->mapped != 0U) {
-		audio_mmap_advance_locked(device, capture);
 		if (capture == 0)
 			stream->released = stream->hardware;
 	}
@@ -865,14 +849,6 @@ audio_stream_free(
 		stream->allocated = 0U;
 	}
 
-	/*
-	 * Returns the shadow of a mapped direction.  Every mapping retains
-	 * the file, so none is left by the time close frees it.
-	 */
-	if (stream->shadow_address != NULL) {
-		(void)kern_pmem_free(&stream->shadow);
-		stream->shadow_address = NULL;
-	}
 	stream->mapped = 0U;
 
 	/* Succeeded: the direction owns no ring. */
@@ -968,7 +944,6 @@ audio_stream_stop(
 	stream->released = 0;
 	stream->interrupts = 0;
 	stream->underrun_active = 0U;
-	stream->frontier = 0;
 	stream->reported = 0;
 	waitq_wake_all(&device->waitq);
 
@@ -1908,14 +1883,14 @@ audio_dsp_poll(
 	irq = spin_lock_irqsave(&device->lock);
 
 	/*
-	 * A mapped direction is ready once its frontier has moved a fragment
-	 * the caller has not yet asked about.
+	 * A mapped direction is ready once its hardware position has moved
+	 * a fragment the caller has not yet asked about.
 	 */
 	if (device->playback_open != 0U) {
 		stream = &device->streams[AUDIO_PLAYBACK];
 		audio_stream_sync_locked(device, AUDIO_PLAYBACK);
 		if (stream->mapped != 0U)
-			bytes = stream->frontier / AUDIO_FRAGMENT_BYTES > stream->reported ?
+			bytes = stream->hardware / AUDIO_FRAGMENT_BYTES > stream->reported ?
 			    AUDIO_FRAGMENT_BYTES : 0U;
 		else
 			bytes = audio_playback_room_locked(device);
@@ -1927,7 +1902,7 @@ audio_dsp_poll(
 		stream = &device->streams[AUDIO_CAPTURE];
 		audio_stream_sync_locked(device, AUDIO_CAPTURE);
 		if (stream->mapped != 0U)
-			bytes = stream->frontier / AUDIO_FRAGMENT_BYTES > stream->reported ?
+			bytes = stream->hardware / AUDIO_FRAGMENT_BYTES > stream->reported ?
 			    AUDIO_FRAGMENT_BYTES : 0U;
 		else
 			bytes = audio_capture_available_locked(device);
@@ -1943,15 +1918,14 @@ audio_dsp_poll(
 
 
 /*
- * Maps the shadow ring of one direction.
+ * Maps the DMA ring of one direction directly into user space.
  *
  * As in OSS, the protection chooses the ring: PROT_WRITE maps playback
  * and PROT_READ alone maps capture.  The system refuses to map a device
  * opened write-only, so playback is mapped from an O_RDWR open, which
  * may map both rings.  A direction may be mapped only before read or
- * write has moved it.  The first mapping allocates the DMA ring and the
- * shadow; both stay until close, which every mapping outlives because
- * it retains the file.
+ * write has moved it.  The first mapping allocates the DMA ring, which
+ * stays until close because every mapping retains the file.
  */
 static int
 audio_dsp_mmap(
@@ -1964,6 +1938,8 @@ audio_dsp_mmap(
 	struct drv_audio_device *device;
 	struct audio_stream *stream;
 	unsigned long irq;
+	uint64_t physical;
+	uint32_t attributes;
 	uint32_t maximum;
 	int capture;
 	int busy;
@@ -2010,19 +1986,28 @@ audio_dsp_mmap(
 	if (busy != 0)
 		error = EBUSY;
 
-	/* Allocates the DMA ring and the shadow on the first mapping. */
+	/* Allocates the zero-filled DMA ring on the first mapping. */
 	if (error == 0)
 		error = audio_stream_allocate(device, capture);
-	if (error == 0)
-		error = audio_shadow_allocate(stream);
 
-	/* Hands the shadow to the VM; the mapping retains the file. */
+	/* Resolves the physical base and cache policy of the DMA ring. */
+	physical = 0;
+	attributes = 0U;
+	if (error == 0) {
+		physical = drv_dma_buffer_physical(&stream->buffer);
+		if (physical == 0)
+			error = ENOMEM;
+		else if (drv_dma_device_is_coherent(device->dma) == 0)
+			attributes = VM_DEVICE_UNCACHED_RAM;
+	}
+
+	/* Hands the DMA ring directly to the VM; the mapping retains the file. */
 	if (error == 0)
 		error = vm_device_create(file,
-		    stream->shadow.paddr,
-		    stream->shadow_address,
+		    physical,
+		    stream->buffer.address,
 		    bytes,
-		    0U,
+		    attributes,
 		    maximum,
 		    audio_mapping_release,
 		    device,
@@ -2041,12 +2026,12 @@ audio_dsp_mmap(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the caller maps the shadow ring. */
+	/* Succeeded: the caller maps the DMA ring directly. */
 	return 0;
 }
 
 /*
- * Ends one mapping.  The shadow belongs to the open and is freed at
+ * Ends one mapping.  The DMA ring belongs to the open and is freed at
  * close, which the mapping's file reference has kept from running.
  */
 static void
@@ -2056,86 +2041,8 @@ audio_mapping_release(
 	(void)owner;
 }
 
-/* Allocates a silent shadow ring the VM can map. */
-static int
-audio_shadow_allocate(
-	struct audio_stream *stream)
-{
-	int error;
-
-	/* An earlier mapping of this open already has one. */
-	if (stream->shadow_address != NULL)
-		return 0;
-
-	/* Allocates whole pages that have a kernel address. */
-	error = kern_pmem_alloc(AUDIO_RING_BYTES, KERN_PAGE_SIZE, &stream->shadow);
-	if (error != 0)
-		return error;
-
-	stream->shadow_address = kern_pmem_to_kernel(stream->shadow.paddr);
-	if (stream->shadow_address == NULL) {
-		(void)kern_pmem_free(&stream->shadow);
-		return ENOMEM;
-	}
-
-	/* A new mapping reads as silence. */
-	kern_memset(stream->shadow_address, 0, AUDIO_RING_BYTES);
-
-	/* Succeeded: the direction owns a shadow until close. */
-	return 0;
-}
-
 /*
- * Moves a mapped direction's frontier to where its interrupts put it.
- *
- * Playback copies each fragment from the shadow into the DMA ring a lead
- * ahead of the hardware and silences it in the shadow, so a writer that
- * falls behind is heard as silence, not as the sound of a ring ago.
- * Capture copies each completed fragment out to the shadow.  A frontier
- * more than a ring behind skips to the last ring.  The device lock is
- * held.
- */
-static void
-audio_mmap_advance_locked(
-	struct drv_audio_device *device,
-	int capture)
-{
-	struct audio_stream *stream;
-	uint8_t *ring;
-	uint64_t target;
-	uint32_t offset;
-
-	/* Playback runs a lead ahead of the completed fragments; capture follows them. */
-	stream = &device->streams[capture];
-	ring = stream->buffer.address;
-	target = stream->interrupts * AUDIO_FRAGMENT_BYTES;
-	if (capture == 0)
-		target += AUDIO_MMAP_LEAD_FRAGMENTS * AUDIO_FRAGMENT_BYTES;
-
-	/* Only the last ring of a long gap still has a place in the ring. */
-	if (target > stream->frontier + AUDIO_RING_BYTES)
-		stream->frontier = target - AUDIO_RING_BYTES;
-
-	/* Moves one whole fragment at a time. */
-	while (stream->frontier < target) {
-		offset = (uint32_t)(stream->frontier % AUDIO_RING_BYTES);
-		if (capture == 0) {
-			kern_memcpy(ring + offset, stream->shadow_address + offset,
-			    AUDIO_FRAGMENT_BYTES);
-			kern_memset(stream->shadow_address + offset, 0,
-			    AUDIO_FRAGMENT_BYTES);
-		} else {
-			kern_memcpy(stream->shadow_address + offset, ring + offset,
-			    AUDIO_FRAGMENT_BYTES);
-		}
-
-		stream->frontier += AUDIO_FRAGMENT_BYTES;
-	}
-}
-
-/*
- * Starts a mapped direction.  Playback first takes the lead fragments the
- * caller filled before the trigger, so they are the first to play.
+ * Starts a mapped direction directly on its DMA ring.
  */
 static int
 audio_mmap_start(
@@ -2146,21 +2053,19 @@ audio_mmap_start(
 	unsigned long irq;
 	int error;
 
-	/* Takes the first fragments while the hardware is still stopped. */
+	/* Resets the mapping counters while the hardware is still stopped. */
 	stream = &device->streams[capture];
 	irq = spin_lock_irqsave(&device->lock);
 
-	stream->frontier = 0;
 	stream->reported = 0;
 	if (capture == 0) {
 		stream->interrupts = 0;
-		audio_mmap_advance_locked(device, capture);
 		stream->released = 0;
 	}
 
 	spin_unlock_irqrestore(&device->lock, irq);
 
-	/* Starts the hardware on the prepared ring. */
+	/* Starts the hardware on the DMA ring. */
 	error = audio_stream_start(device, capture);
 	if (error != 0) {
 		audio_stream_stop(device, capture);
@@ -2251,15 +2156,15 @@ audio_mmap_position_get(
 	if (stream->mapped == 0U)
 		return EINVAL;
 
-	/* Samples the frontier and counts the fragments it moved since last asked. */
+	/* Samples the hardware position and counts the fragments it moved since last asked. */
 	kern_memset(&position, 0, sizeof(position));
 	irq = spin_lock_irqsave(&device->lock);
 
 	audio_stream_sync_locked(device, capture);
-	fragments = stream->frontier / AUDIO_FRAGMENT_BYTES;
-	position.bytes = stream->frontier;
+	fragments = stream->hardware / AUDIO_FRAGMENT_BYTES;
+	position.bytes = stream->hardware;
 	position.fragments = (uint32_t)(fragments - stream->reported);
-	position.offset = (uint32_t)(stream->frontier % AUDIO_RING_BYTES);
+	position.offset = (uint32_t)(stream->hardware % AUDIO_RING_BYTES);
 	stream->reported = fragments;
 
 	spin_unlock_irqrestore(&device->lock, irq);
@@ -2275,12 +2180,11 @@ audio_caps_get(
 {
 	struct audio_caps caps;
 
-	/* The mapping is a shadow copied one fragment per interrupt. */
+	/* The mapping exposes the DMA ring directly without a shadow copy. */
 	kern_memset(&caps, 0, sizeof(caps));
-	caps.caps = KERN_AUDIO_CAP_MMAP | KERN_AUDIO_CAP_TRIGGER |
-	    KERN_AUDIO_CAP_MMAP_COPY;
+	caps.caps = KERN_AUDIO_CAP_MMAP | KERN_AUDIO_CAP_TRIGGER;
 	caps.mmap_bytes = AUDIO_RING_BYTES;
-	caps.mmap_lead_bytes = AUDIO_MMAP_LEAD_FRAGMENTS * AUDIO_FRAGMENT_BYTES;
+	caps.mmap_lead_bytes = 0U;
 
 	/* Publishes the report. */
 	return copyout(&caps, argument, sizeof(caps));

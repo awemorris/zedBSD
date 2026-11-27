@@ -71,6 +71,7 @@ int drv_dma_device_destroy(struct drv_dma_device *device);
 unsigned drv_dma_device_address_bits(const struct drv_dma_device *device);
 size_t drv_dma_device_max_segment_size(const struct drv_dma_device *device);
 int drv_dma_device_is_coherent(const struct drv_dma_device *device);
+uint64_t drv_dma_buffer_physical(const struct drv_dma_buffer *buffer);
 
 int drv_dma_alloc_coherent(struct drv_dma_device *device, size_t size,
 			   size_t alignment, struct drv_dma_buffer *buffer);

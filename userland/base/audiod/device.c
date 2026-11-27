@@ -539,22 +539,47 @@ feedback_played(
 }
 
 /*
- * Mixes into the mapped ring up to a few fragments ahead of the frontier,
- * the position up to which the device has taken the ring.  If audiod fell
- * behind the frontier, it starts again at the frontier.
+ * Mixes into the mapped ring up to a few fragments ahead of the hardware
+ * position, and silences bytes the hardware has already consumed so an
+ * underrun loops silence rather than stale audio.  If audiod fell behind
+ * the hardware position, it starts again at the next fragment boundary.
  */
 static void
 fill_mapped(
 	struct audiod_device *device)
 {
 	struct audio_mmap_position position;
+	uint64_t clear_from;
+	uint64_t clear_bytes;
 	uint64_t target;
+	uint32_t offset;
+	uint32_t first;
 
 	position.bytes = 0;
 	(void)ioctl(device->dsp, KERN_AUDIO_GET_OPTR, &position);
+
+	/* Silences the range the hardware has consumed since the last check. */
+	if (position.bytes > device->consumed) {
+		clear_bytes = position.bytes - device->consumed;
+		if (clear_bytes >= device->map_bytes) {
+			memset(device->map, 0, device->map_bytes);
+		} else {
+			clear_from = device->consumed;
+			offset = (uint32_t)(clear_from % device->map_bytes);
+			first = device->map_bytes - offset;
+			if (first > clear_bytes)
+				first = (uint32_t)clear_bytes;
+			memset(device->map + offset, 0, first);
+			if (clear_bytes > first)
+				memset(device->map, 0, (size_t)(clear_bytes - first));
+		}
+	}
+
 	device->consumed = position.bytes;
-	if (device->written < position.bytes)
-		device->written = position.bytes;
+	if (device->written < position.bytes) {
+		device->written = ((position.bytes + device->fragment_bytes - 1U) /
+		    device->fragment_bytes) * device->fragment_bytes;
+	}
 	feedback_played(device);
 	target = position.bytes + audiod_route_fill_fragments() * device->fragment_bytes;
 	while (device->written < target) {

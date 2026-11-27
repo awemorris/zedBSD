@@ -278,6 +278,24 @@ drv_dma_device_is_coherent(
 }
 
 /*
+ * Returns the CPU physical address of an allocated coherent DMA buffer.
+ */
+uint64_t
+drv_dma_buffer_physical(
+	const struct drv_dma_buffer *buffer)
+{
+	const struct dma_allocation *allocation;
+
+	/* A null or uninitialized buffer has no physical address. */
+	if (buffer == NULL || buffer->private_data[0] == 0)
+		return 0;
+
+	/* Reads the physical address retained by the DMA allocation. */
+	allocation = (const struct dma_allocation *)buffer->private_data[0];
+	return (uint64_t)allocation->memory.paddr;
+}
+
+/*
  * Implements the drv dma alloc coherent operation.
  */
 int
