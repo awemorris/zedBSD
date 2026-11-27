@@ -434,6 +434,11 @@ CONFIG_DRIVER_USB_BT              ?= n
 #  - Depends: CONFIG_DRIVER_CAMERA
 CONFIG_DRIVER_USB_UVC             ?= n
 
+# [USB Audio Class (UAC) driver]
+#  - Depends: CONFIG_DRIVER_USB
+#  - Depends: CONFIG_DRIVER_AUDIO
+CONFIG_DRIVER_USB_AUDIO           ?= n
+
 ################################################
 # Bluetooth
 ################################################

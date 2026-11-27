@@ -50,6 +50,7 @@ CONFIG_DRIVER_USB_UASP            := y
 CONFIG_DRIVER_USB_CCID            := y
 CONFIG_DRIVER_USB_BT              := y
 CONFIG_DRIVER_USB_UVC             := y
+CONFIG_DRIVER_USB_AUDIO           := y
 CONFIG_DRIVER_BT                  := y
 CONFIG_DRIVER_INPUT_BRIDGE        := y
 CONFIG_KERN_THERMAL               := n

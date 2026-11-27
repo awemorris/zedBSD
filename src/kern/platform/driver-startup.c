@@ -107,6 +107,10 @@
 #include <drivers/usb/usb-uvc.h>
 #endif
 
+#if CONFIG_DRIVER_USB_AUDIO
+#include <drivers/usb/usb-audio.h>
+#endif
+
 #if CONFIG_DRIVER_PCI_INTEL_AX211
 #include <drivers/wifi/intel-ax211/pci-intel-ax211.h>
 #endif
@@ -293,6 +297,11 @@ kern_driver_startup_usb_devices(
 #if CONFIG_DRIVER_USB_UVC
 	if (drv_usb_uvc_driver_register() != 0)
 		kern_logf("usb: video class driver registration failed\n");
+#endif
+
+#if CONFIG_DRIVER_USB_AUDIO
+	if (drv_usb_audio_driver_register() != 0)
+		kern_logf("usb: audio class driver registration failed\n");
 #endif
 
 	return 0;

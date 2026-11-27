@@ -1224,6 +1224,16 @@ KERN_SOURCES += \
 	src/drivers/usb/usb-uvc-payload.c
 endif
 
+# [USB Audio Class (UAC) driver]
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_AUDIO)),)
+KERN_CPPFLAGS += -DCONFIG_DRIVER_USB_AUDIO=1
+KERN_SOURCES += \
+	src/drivers/usb/usb-audio.c \
+	src/drivers/usb/usb-audio-desc.c \
+	src/drivers/usb/usb-audio-pcm.c \
+	src/drivers/usb/usb-audio-stream.c
+endif
+
 # [Generic Bluetooth HCI]
 ifneq ($(filter y,$(CONFIG_DRIVER_BT)),)
 KERN_CPPFLAGS += -DCONFIG_DRIVER_BT=1
