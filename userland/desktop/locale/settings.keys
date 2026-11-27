@@ -92,3 +92,6 @@ msg	Sound service
 msg	Device
 msg	No output devices
 msg	No input devices
+msg	Audio Format
+msg	Format
+msg	No audio formats

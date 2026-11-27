@@ -1267,6 +1267,9 @@ struct se_sound {
 	size_t device_count;
 	uint32_t output_id;
 	uint32_t input_id;
+	struct kl_audio_format_info formats[KL_AUDIO_FORMATS_MAX];
+	size_t format_count;
+	struct kl_audio_format_info active_format;
 	int value;
 	int muted;
 	int dragging;
@@ -1669,6 +1672,7 @@ void se_power_drag(struct se_app *app, int index, int x, unsigned phase);
 #define SE_SOUND_MUTE		7
 #define SE_SOUND_OUTPUT_BASE	100
 #define SE_SOUND_INPUT_BASE	200
+#define SE_SOUND_FORMAT_BASE	300
 void se_sound_open(struct se_app *app);
 void se_sound_poll(struct se_app *app, uint64_t now);
 int se_sound_wait(const struct se_app *app);

@@ -80,6 +80,7 @@
 #define VOLUME_KEY_MUTED	"sound.muted"
 #define VOLUME_KEY_OUTPUT	"sound.output"
 #define VOLUME_KEY_INPUT	"sound.input"
+#define VOLUME_KEY_FORMAT	"sound.format"
 
 /*
  * The volume's side of the system bar: audiod's link in libkeiland (made
@@ -102,6 +103,8 @@ struct volume_view {
 	struct kl_backend_audio_state state;
 	struct kl_backend_audio_endpoint endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
 	size_t endpoint_count;
+	struct kl_backend_audio_format formats[KL_BACKEND_AUDIO_FORMATS_MAX];
+	size_t format_count;
 	unsigned value;
 	unsigned muted;
 	unsigned open;
@@ -119,11 +122,13 @@ struct volume_view {
 	unsigned applied;
 	unsigned restored;
 	unsigned route_restored;
+	unsigned format_restored;
 	unsigned kept;
 	unsigned kept_value;
 	unsigned kept_muted;
 	char kept_output[KL_BACKEND_AUDIO_KEY_MAX];
 	char kept_input[KL_BACKEND_AUDIO_KEY_MAX];
+	char kept_format[32];
 };
 
 /*
@@ -147,6 +152,7 @@ static void volume_send(struct kwl_server *server);
 static void volume_send_fired(void *context, struct kwl_timer *timer);
 static void volume_restore(struct kwl_server *server);
 static void volume_restore_route(struct kwl_server *server);
+static void volume_restore_format(struct kwl_server *server);
 static const char *volume_endpoint_key(uint32_t id);
 static uint32_t volume_endpoint_id(const char *key, unsigned kind);
 static int volume_sound(void);
@@ -191,7 +197,9 @@ kwl_volume_tick(
 			if (!volume_view.state.reachable) {
 				volume_view.applied = 0U;
 				volume_view.route_restored = 0U;
+				volume_view.format_restored = 0U;
 				volume_view.endpoint_count = 0U;
+				volume_view.format_count = 0U;
 			}
 		}
 
@@ -202,6 +210,16 @@ kwl_volume_tick(
 			if (volume_view.state.reachable && !volume_view.route_restored) {
 				volume_view.route_restored = 1U;
 				volume_restore_route(server);
+			}
+		}
+
+		/* Formats updated: keep local copy and restore saved format once. */
+		if ((changed & KL_BACKEND_AUDIO_CHANGED_FORMATS) != 0U) {
+			volume_view.format_count = kl_backend_audio_get_formats(
+			    volume_view.audio, volume_view.formats, KL_BACKEND_AUDIO_FORMATS_MAX);
+			if (volume_view.state.reachable && !volume_view.format_restored) {
+				volume_view.format_restored = 1U;
+				volume_restore_format(server);
 			}
 		}
 
@@ -297,6 +315,16 @@ kwl_volume_keep(
 		if (in_key != NULL && strcmp(in_key, volume_view.kept_input) != 0) {
 			kwl_settings_store_report(server->settings, VOLUME_KEY_INPUT, in_key);
 			(void)snprintf(volume_view.kept_input, sizeof(volume_view.kept_input), "%s", in_key);
+		}
+		if (volume_view.state.format != 0U && volume_view.state.rate != 0U) {
+			char fmt_text[32];
+
+			(void)snprintf(fmt_text, sizeof(fmt_text), "%u:%u:%u",
+			    volume_view.state.format, volume_view.state.channels, volume_view.state.rate);
+			if (strcmp(fmt_text, volume_view.kept_format) != 0) {
+				kwl_settings_store_report(server->settings, VOLUME_KEY_FORMAT, fmt_text);
+				(void)snprintf(volume_view.kept_format, sizeof(volume_view.kept_format), "%s", fmt_text);
+			}
 		}
 	}
 
@@ -480,6 +508,42 @@ kwl_volume_request_route(
 	if (error != 0)
 		return error;
 	return 0;
+}
+
+/*
+ * Copies the hardware formats supported by the active audio device.
+ */
+size_t
+kwl_volume_audio_formats(
+	struct kl_backend_audio_format *formats,
+	size_t capacity)
+{
+	size_t count;
+
+	if (formats == NULL)
+		return 0U;
+	count = volume_view.format_count;
+	if (count > capacity)
+		count = capacity;
+	if (count > 0U)
+		memcpy(formats, volume_view.formats, count * sizeof(formats[0]));
+	return count;
+}
+
+/*
+ * Switches the active /dev/dspN hardware format a client asked for.
+ */
+int
+kwl_volume_request_format(
+	struct kwl_server *server,
+	uint32_t format,
+	uint32_t channels,
+	uint32_t rate)
+{
+	UNUSED_PARAMETER(server);
+	if (volume_view.audio == NULL || !volume_view.state.reachable)
+		return ENODEV;
+	return kl_backend_audio_set_format(volume_view.audio, format, channels, rate);
 }
 
 /*
@@ -1128,6 +1192,36 @@ volume_restore_route(
 		if (in_id == 0U)
 			in_id = volume_view.state.input_id;
 		(void)kl_backend_audio_set_route(volume_view.audio, out_id, in_id);
+	}
+}
+
+/* Restores saved hardware format from settings when audiod connects. */
+static void
+volume_restore_format(
+	struct kwl_server *server)
+{
+	struct kwl_settings_entry *entry;
+	unsigned format;
+	unsigned channels;
+	unsigned rate;
+	size_t i;
+
+	if (server->settings == NULL)
+		return;
+	entry = kwl_settings_store_find(server->settings, VOLUME_KEY_FORMAT);
+	if (entry == NULL || !entry->start_chosen || entry->start[0] == '\0')
+		return;
+	(void)snprintf(volume_view.kept_format, sizeof(volume_view.kept_format), "%.*s",
+	    (int)(sizeof(volume_view.kept_format) - 1U), entry->start);
+	if (sscanf(entry->start, "%u:%u:%u", &format, &channels, &rate) != 3)
+		return;
+	for (i = 0U; i < volume_view.format_count; i++) {
+		if (volume_view.formats[i].format == format &&
+		    volume_view.formats[i].channels == channels &&
+		    volume_view.formats[i].rate == rate) {
+			(void)kl_backend_audio_set_format(volume_view.audio, format, channels, rate);
+			break;
+		}
 	}
 }
 

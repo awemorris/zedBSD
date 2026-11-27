@@ -399,3 +399,9 @@ msg	Device	デバイス
 msg	No output devices	出力デバイスがありません
 # userland/desktop/locale/settings.keys:94
 msg	No input devices	入力デバイスがありません
+# userland/desktop/locale/settings.keys:95
+msg	Audio Format	音声フォーマット
+# userland/desktop/locale/settings.keys:96
+msg	Format	フォーマット
+# userland/desktop/locale/settings.keys:97
+msg	No audio formats	音声フォーマットがありません

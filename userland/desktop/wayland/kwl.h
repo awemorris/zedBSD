@@ -3065,9 +3065,11 @@ void kwl_volume_report(unsigned *restored, unsigned *available, unsigned *value,
 int kwl_volume_request(struct kwl_server *server, unsigned value, unsigned muted);
 int kwl_volume_request_channels(struct kwl_server *server, unsigned left, unsigned right, unsigned muted);
 int kwl_volume_request_route(struct kwl_server *server, uint32_t output_id, uint32_t input_id);
+int kwl_volume_request_format(struct kwl_server *server, uint32_t format, uint32_t channels, uint32_t rate);
 int kwl_volume_feedback(void);
 void kwl_volume_audio_state(struct kl_backend_audio_state *state);
 size_t kwl_volume_audio_endpoints(struct kl_backend_audio_endpoint *endpoints, size_t capacity);
+size_t kwl_volume_audio_formats(struct kl_backend_audio_format *formats, size_t capacity);
 int kwl_volume_button(struct kwl_server *server, uint32_t button, uint32_t state);
 int kwl_volume_key(struct kwl_server *server, uint32_t key, uint32_t state);
 int kwl_volume_motion(struct kwl_server *server);

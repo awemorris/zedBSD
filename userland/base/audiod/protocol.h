@@ -87,6 +87,8 @@
 #define AUDIOD_CALL_STATE		21U
 #define AUDIOD_ENDPOINT_VOLUME_REPORT	22U
 #define AUDIOD_MEDIA_RELEASE		23U
+#define AUDIOD_FORMAT_LIST		24U
+#define AUDIOD_FORMAT_SET		25U
 
 /* Replies and events. */
 #define AUDIOD_WELCOME		64U
@@ -105,6 +107,7 @@
 #define AUDIOD_MEDIA_HELD	77U
 #define AUDIOD_ENDPOINT_REMOVED	78U
 #define AUDIOD_ENDPOINT_VOLUME	79U
+#define AUDIOD_FORMAT_INFO	80U
 
 /* SUBSCRIBE's bits: the device volume (every version), the endpoints and the routes (version 2). */
 #define AUDIOD_SUBSCRIBE_VOLUME		0x1U
@@ -336,6 +339,24 @@ struct audiod_endpoint_volume {
 	uint32_t left;
 	uint32_t right;
 	uint32_t muted;
+};
+
+/* FORMAT_SET: asks audiod to switch the active /dev/dspN hardware format. */
+struct audiod_format_set {
+	struct audiod_header header;
+	uint32_t format;
+	uint32_t channels;
+	uint32_t rate;
+	uint32_t reserved;
+};
+
+/* FORMAT_INFO (FORMAT_LIST answers and change events): one supported /dev/dspN format. */
+struct audiod_format_info {
+	struct audiod_header header;
+	uint32_t format;
+	uint32_t channels;
+	uint32_t rate;
+	uint32_t active;
 };
 
 /* Carries the shared memory descriptor with SCM_RIGHTS. */

@@ -337,6 +337,32 @@ kl_backend_audio_set_route(
 	return ENOTSUP;
 }
 
+size_t
+kl_backend_audio_get_formats(
+	const struct kl_backend_audio *audio,
+	struct kl_backend_audio_format *formats,
+	size_t capacity)
+{
+	UNUSED_PARAMETER(audio);
+	UNUSED_PARAMETER(formats);
+	UNUSED_PARAMETER(capacity);
+	return 0U;
+}
+
+int
+kl_backend_audio_set_format(
+	struct kl_backend_audio *audio,
+	uint32_t format,
+	uint32_t channels,
+	uint32_t rate)
+{
+	UNUSED_PARAMETER(audio);
+	UNUSED_PARAMETER(format);
+	UNUSED_PARAMETER(channels);
+	UNUSED_PARAMETER(rate);
+	return ENOTSUP;
+}
+
 /* Reads monotonic time for device retries independently of wall clock changes. */
 static uint64_t
 audio_milliseconds(

@@ -209,6 +209,7 @@ static const struct wl_message system_audio_requests[] = {
 	{ "set_volume", "uuuu", system_plain_types },
 	{ "feedback", "u", system_plain_types },
 	{ "set_route", "2uuu", system_plain_types },
+	{ "set_format", "3uuuu", system_plain_types },
 };
 
 /* The events of kl_system_audio_v1. */
@@ -218,15 +219,16 @@ static const struct wl_message system_audio_events[] = {
 	{ "result", "uuu", system_plain_types },
 	{ "device", "2uuuss", system_plain_types },
 	{ "route", "2uu", system_plain_types },
+	{ "format", "3uuuu", system_plain_types },
 };
 
-/* kl_system_audio_v1: four requests and five events (device/route since version 2).  It lives for the program. */
+/* kl_system_audio_v1: five requests and six events (device/route since 2, format since 3).  It lives for the program. */
 const struct wl_interface kl_system_audio_v1_interface = {
 	KL_SYSTEM_AUDIO_NAME,
-	KL_SYSTEM_AUDIO_SINCE_DEVICES,
-	4,
-	system_audio_requests,
+	KL_SYSTEM_AUDIO_SINCE_FORMAT,
 	5,
+	system_audio_requests,
+	6,
 	system_audio_events
 };
 

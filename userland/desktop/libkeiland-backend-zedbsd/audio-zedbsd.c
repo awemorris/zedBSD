@@ -60,6 +60,7 @@
 #define AUDIO_OP_VOLUME		1U
 #define AUDIO_OP_FEEDBACK	2U
 #define AUDIO_OP_ROUTE		3U
+#define AUDIO_OP_FORMAT		4U
 
 /*
  * The thread's following of audiod: the connection (-1 while none), the
@@ -75,6 +76,7 @@ struct audio_link {
 	uint32_t serial;
 	uint32_t protocol_version;
 	uint32_t list_serial;
+	uint32_t format_list_serial;
 	uint64_t retry_ms;
 	uint8_t pending[AUDIO_PENDING];
 	size_t pending_used;
@@ -83,6 +85,10 @@ struct audio_link {
 	size_t endpoint_count;
 	struct kl_backend_audio_endpoint next_endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
 	size_t next_endpoint_count;
+	struct kl_backend_audio_format formats[KL_BACKEND_AUDIO_FORMATS_MAX];
+	size_t format_count;
+	struct kl_backend_audio_format next_formats[KL_BACKEND_AUDIO_FORMATS_MAX];
+	size_t next_format_count;
 	unsigned changed;
 };
 
@@ -94,6 +100,8 @@ struct audio_view {
 	struct kl_backend_audio_state state;
 	struct kl_backend_audio_endpoint endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
 	size_t endpoint_count;
+	struct kl_backend_audio_format formats[KL_BACKEND_AUDIO_FORMATS_MAX];
+	size_t format_count;
 	unsigned connected;
 };
 
@@ -125,6 +133,9 @@ struct audio_op {
 	unsigned muted;
 	uint32_t output_id;
 	uint32_t input_id;
+	uint32_t format;
+	uint32_t channels;
+	uint32_t rate;
 };
 
 static void audio_step(void *owner);
@@ -354,6 +365,55 @@ kl_backend_audio_set_route(
 }
 
 /*
+ * Copies the hardware formats audiod last reported for the active device.
+ */
+size_t
+kl_backend_audio_get_formats(
+	const struct kl_backend_audio *audio,
+	struct kl_backend_audio_format *formats,
+	size_t capacity)
+{
+	size_t count;
+
+	if (audio == NULL || formats == NULL)
+		return 0U;
+	count = audio->view.format_count;
+	if (count > capacity)
+		count = capacity;
+	if (count > 0U)
+		memcpy(formats, audio->view.formats, count * sizeof(formats[0]));
+	return count;
+}
+
+/*
+ * Asks audiod to switch the active /dev/dspN hardware format (FORMAT_SET).
+ */
+int
+kl_backend_audio_set_format(
+	struct kl_backend_audio *audio,
+	uint32_t format,
+	uint32_t channels,
+	uint32_t rate)
+{
+	struct audio_op *request;
+
+	if (audio == NULL || format == 0U || channels == 0U || rate == 0U)
+		return EINVAL;
+	if (!audio->view.connected)
+		return ENOTCONN;
+	request = calloc(1U, sizeof(*request));
+	if (request == NULL)
+		return ENOMEM;
+	request->op.run = audio_op_run;
+	request->kind = AUDIO_OP_FORMAT;
+	request->format = format;
+	request->channels = channels;
+	request->rate = rate;
+	kl_daemon_link_submit(&audio->link, &request->op);
+	return 0;
+}
+
+/*
  * Tells whether audiod runs: 1 when its socket is there, 0 when it is not.
  *
  * Nothing connects and nothing waits; an audiod that runs may still have no
@@ -458,12 +518,17 @@ audio_publish(
 	if (record->inner.changed == 0U && connected == record->published.connected)
 		return 0;
 
-	/* The state, endpoints, whether requests can go, and the changes not taken yet. */
+	/* The state, endpoints, formats, whether requests can go, and the changes not taken yet. */
 	record->published.state = record->inner.state;
 	record->published.endpoint_count = record->inner.endpoint_count;
 	if (record->inner.endpoint_count > 0U) {
 		memcpy(record->published.endpoints, record->inner.endpoints,
 		    record->inner.endpoint_count * sizeof(record->published.endpoints[0]));
+	}
+	record->published.format_count = record->inner.format_count;
+	if (record->inner.format_count > 0U) {
+		memcpy(record->published.formats, record->inner.formats,
+		    record->inner.format_count * sizeof(record->published.formats[0]));
 	}
 	record->published.connected = connected;
 	record->published_changed |= record->inner.changed;
@@ -482,6 +547,7 @@ audio_op_run(
 	struct kl_backend_audio *record;
 	struct audiod_volume volume;
 	struct audiod_route_set route_set;
+	struct audiod_format_set format_set;
 	struct audiod_header header;
 	struct audio_op *request;
 	struct audio_link *audio;
@@ -520,6 +586,21 @@ audio_op_run(
 		route_set.output = request->output_id;
 		route_set.input = request->input_id;
 		(void)audio_send(audio, &route_set, sizeof(route_set));
+		return;
+	}
+
+	/* FORMAT_SET for active /dev/dspN (version 2 only). */
+	if (request->kind == AUDIO_OP_FORMAT) {
+		if (audio->protocol_version < AUDIOD_PROTOCOL_VERSION_2)
+			return;
+		memset(&format_set, 0, sizeof(format_set));
+		format_set.header.type = AUDIOD_FORMAT_SET;
+		format_set.header.length = sizeof(format_set);
+		format_set.header.serial = audio->serial++;
+		format_set.format = request->format;
+		format_set.channels = request->channels;
+		format_set.rate = request->rate;
+		(void)audio_send(audio, &format_set, sizeof(format_set));
 		return;
 	}
 
@@ -652,13 +733,19 @@ audio_drop(
 		audio->state.device = 0U;
 		audio->state.output_id = 0U;
 		audio->state.input_id = 0U;
+		audio->state.format = 0U;
 		audio->changed |= KL_BACKEND_AUDIO_CHANGED_REACHABLE;
 	}
 	if (audio->endpoint_count != 0U)
 		audio->changed |= KL_BACKEND_AUDIO_CHANGED_ENDPOINTS;
+	if (audio->format_count != 0U)
+		audio->changed |= KL_BACKEND_AUDIO_CHANGED_FORMATS;
 	audio->endpoint_count = 0U;
 	audio->next_endpoint_count = 0U;
 	audio->list_serial = 0U;
+	audio->format_count = 0U;
+	audio->next_format_count = 0U;
+	audio->format_list_serial = 0U;
 
 	/* Succeeded: the subscription waits to reconnect with empty pending input. */
 	return;
@@ -752,6 +839,7 @@ audio_message(
 	struct audiod_endpoint_info ep_info;
 	struct audiod_endpoint_removed ep_removed;
 	struct audiod_route_info route_info;
+	struct audiod_format_info fmt_info;
 	struct audiod_header header;
 	struct audiod_header list_req;
 	struct kl_backend_audio_endpoint endpoint;
@@ -771,11 +859,12 @@ audio_message(
 			audio->state.device = 1U;
 
 		/* Keeps the format reported by the daemon. */
+		audio->state.format = welcome.format;
 		audio->state.rate = welcome.rate;
 		audio->state.channels = welcome.channels;
 		audio->changed |= KL_BACKEND_AUDIO_CHANGED_REACHABLE;
 
-		/* Version 2: ask for the initial endpoint and route lists. */
+		/* Version 2: ask for the initial endpoint, route, and format lists. */
 		if (welcome.version >= AUDIOD_PROTOCOL_VERSION_2) {
 			audio->next_endpoint_count = 0U;
 			audio->list_serial = audio->serial++;
@@ -789,6 +878,14 @@ audio_message(
 			list_req.type = AUDIOD_ROUTE_LIST;
 			list_req.length = sizeof(list_req);
 			list_req.serial = audio->serial++;
+			(void)audio_send(audio, &list_req, sizeof(list_req));
+
+			audio->next_format_count = 0U;
+			audio->format_list_serial = audio->serial++;
+			memset(&list_req, 0, sizeof(list_req));
+			list_req.type = AUDIOD_FORMAT_LIST;
+			list_req.length = sizeof(list_req);
+			list_req.serial = audio->format_list_serial;
 			(void)audio_send(audio, &list_req, sizeof(list_req));
 		}
 		return;
@@ -826,13 +923,21 @@ audio_message(
 		return;
 	}
 
-	/* DONE for ENDPOINT_LIST: commit the accumulated endpoint list. */
+	/* DONE for ENDPOINT_LIST or FORMAT_LIST: commit the accumulated list. */
 	if (header.type == AUDIOD_DONE && header.serial != 0U && header.serial == audio->list_serial) {
 		memcpy(audio->endpoints, audio->next_endpoints,
 		    audio->next_endpoint_count * sizeof(audio->endpoints[0]));
 		audio->endpoint_count = audio->next_endpoint_count;
 		audio->list_serial = 0U;
 		audio->changed |= KL_BACKEND_AUDIO_CHANGED_ENDPOINTS;
+		return;
+	}
+	if (header.type == AUDIOD_DONE && header.serial != 0U && header.serial == audio->format_list_serial) {
+		memcpy(audio->formats, audio->next_formats,
+		    audio->next_format_count * sizeof(audio->formats[0]));
+		audio->format_count = audio->next_format_count;
+		audio->format_list_serial = 0U;
+		audio->changed |= KL_BACKEND_AUDIO_CHANGED_FORMATS;
 		return;
 	}
 
@@ -844,13 +949,47 @@ audio_message(
 		return;
 	}
 
+	/* FORMAT_INFO: either part of FORMAT_LIST or an async format change. */
+	if (header.type == AUDIOD_FORMAT_INFO && length >= sizeof(fmt_info)) {
+		memcpy(&fmt_info, bytes, sizeof(fmt_info));
+		if (header.serial != 0U && header.serial == audio->format_list_serial) {
+			if (audio->next_format_count < KL_BACKEND_AUDIO_FORMATS_MAX) {
+				audio->next_formats[audio->next_format_count].format = fmt_info.format;
+				audio->next_formats[audio->next_format_count].channels = fmt_info.channels;
+				audio->next_formats[audio->next_format_count].rate = fmt_info.rate;
+				audio->next_format_count++;
+			}
+			if (fmt_info.active) {
+				audio->state.format = fmt_info.format;
+				audio->state.channels = fmt_info.channels;
+				audio->state.rate = fmt_info.rate;
+			}
+		} else {
+			audio->state.format = fmt_info.format;
+			audio->state.channels = fmt_info.channels;
+			audio->state.rate = fmt_info.rate;
+			audio->changed |= KL_BACKEND_AUDIO_CHANGED_FORMAT;
+		}
+		return;
+	}
+
 	/* ROUTE_INFO: track the active media output and input endpoints. */
 	if (header.type == AUDIOD_ROUTE_INFO && length >= sizeof(route_info)) {
 		memcpy(&route_info, bytes, sizeof(route_info));
 		if (route_info.route == AUDIOD_ROUTE_MEDIA) {
+			int route_changed = (audio->state.output_id != route_info.output);
 			audio->state.output_id = route_info.output;
 			audio->state.input_id = route_info.input;
 			audio->changed |= KL_BACKEND_AUDIO_CHANGED_ROUTE;
+			if (route_changed && header.serial == 0U && audio->protocol_version >= AUDIOD_PROTOCOL_VERSION_2) {
+				audio->next_format_count = 0U;
+				audio->format_list_serial = audio->serial++;
+				memset(&list_req, 0, sizeof(list_req));
+				list_req.type = AUDIOD_FORMAT_LIST;
+				list_req.length = sizeof(list_req);
+				list_req.serial = audio->format_list_serial;
+				(void)audio_send(audio, &list_req, sizeof(list_req));
+			}
 		}
 	}
 

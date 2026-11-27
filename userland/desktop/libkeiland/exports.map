@@ -206,8 +206,11 @@
 		kl_system_audio_get_state;
 		kl_system_audio_get_devices;
 		kl_system_audio_get_route;
+		kl_system_audio_get_formats;
+		kl_system_audio_get_format;
 		kl_system_audio_set_volume;
 		kl_system_audio_set_route;
+		kl_system_audio_set_format;
 		kl_system_audio_feedback;
 		kl_system_power_get_state;
 		kl_system_power_action;

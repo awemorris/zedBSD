@@ -476,6 +476,7 @@ struct kl_backend_audio;
 #define KL_BACKEND_AUDIO_KEY_MAX	32U
 #define KL_BACKEND_AUDIO_NAME_MAX	32U
 #define KL_BACKEND_AUDIO_ENDPOINTS_MAX	32U
+#define KL_BACKEND_AUDIO_FORMATS_MAX	32U
 #define KL_BACKEND_AUDIO_KIND_OUTPUT	0U
 #define KL_BACKEND_AUDIO_KIND_INPUT	1U
 
@@ -486,6 +487,13 @@ struct kl_backend_audio_endpoint {
 	unsigned endpoint_class;
 	char key[KL_BACKEND_AUDIO_KEY_MAX];
 	char name[KL_BACKEND_AUDIO_NAME_MAX];
+};
+
+/* One hardware PCM format supported by the active audio device. */
+struct kl_backend_audio_format {
+	uint32_t format;
+	uint32_t channels;
+	uint32_t rate;
 };
 
 /* What the sound service last reported. */
@@ -499,6 +507,7 @@ struct kl_backend_audio_state {
 	unsigned muted;		/* 0 or 1 */
 	uint32_t output_id;	/* active media output endpoint id, 0 if none */
 	uint32_t input_id;	/* active media input endpoint id, 0 if none */
+	uint32_t format;	/* active hardware sample encoding (AUDIOD_FORMAT_*) */
 };
 
 /* What kl_backend_audio_update found changed. */
@@ -506,6 +515,8 @@ struct kl_backend_audio_state {
 #define KL_BACKEND_AUDIO_CHANGED_VOLUME		2U	/* the volume or mute changed */
 #define KL_BACKEND_AUDIO_CHANGED_ENDPOINTS	4U	/* the endpoint list changed */
 #define KL_BACKEND_AUDIO_CHANGED_ROUTE		8U	/* the active media route changed */
+#define KL_BACKEND_AUDIO_CHANGED_FORMATS	16U	/* the supported format list changed */
+#define KL_BACKEND_AUDIO_CHANGED_FORMAT		32U	/* the active hardware format changed */
 
 /*
  * Starts following the volume.  Returns NULL only without memory.
@@ -564,6 +575,18 @@ size_t kl_backend_audio_get_endpoints(const struct kl_backend_audio *audio,
  */
 int kl_backend_audio_set_route(struct kl_backend_audio *audio,
     uint32_t output_id, uint32_t input_id);
+
+/*
+ * Copies the hardware formats supported by the active device, up to capacity.
+ */
+size_t kl_backend_audio_get_formats(const struct kl_backend_audio *audio,
+    struct kl_backend_audio_format *formats, size_t capacity);
+
+/*
+ * Asks the sound service to switch the active /dev/dspN hardware format.
+ */
+int kl_backend_audio_set_format(struct kl_backend_audio *audio,
+    uint32_t format, uint32_t channels, uint32_t rate);
 
 /*
  * Tells whether the sound service runs: 1 when it does, 0 when it does

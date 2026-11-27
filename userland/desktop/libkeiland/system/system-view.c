@@ -331,9 +331,11 @@ system_view_audio_state(
 	struct system_view *view,
 	const struct kl_audio_state *state)
 {
-	/* The state, pending; also reset pending device list for this batch. */
+	/* The state, pending; also reset pending device/format lists for this batch. */
 	view->audio_pending = *state;
 	view->audio_devices_pending_count = 0U;
+	view->audio_formats_pending_count = 0U;
+	memset(&view->audio_format_pending, 0, sizeof(view->audio_format_pending));
 	view->audio_touched = 1U;
 }
 
@@ -367,6 +369,24 @@ system_view_audio_route(
 }
 
 /*
+ * Keeps one supported hardware format pending until its done.
+ */
+void
+system_view_audio_format(
+	struct system_view *view,
+	const struct kl_audio_format_info *format,
+	unsigned active)
+{
+	if (view->audio_formats_pending_count < KL_AUDIO_FORMATS_MAX) {
+		view->audio_formats_pending[view->audio_formats_pending_count] = *format;
+		view->audio_formats_pending_count++;
+	}
+	if (active)
+		view->audio_format_pending = *format;
+	view->audio_touched = 1U;
+}
+
+/*
  * Puts the sound's pending state into effect.
  */
 void
@@ -379,22 +399,33 @@ system_view_audio_done(
 	if (!view->audio_touched)
 		return;
 
-	/* The state, devices, and route, told when any changed. */
+	/* The state, devices, route, and formats, told when any changed. */
 	view->audio_touched = 0U;
 	differs = memcmp(&view->audio, &view->audio_pending, sizeof(view->audio)) != 0 ||
 	    view->audio_output_id != view->audio_output_pending ||
 	    view->audio_input_id != view->audio_input_pending ||
+	    memcmp(&view->audio_format, &view->audio_format_pending, sizeof(view->audio_format)) != 0 ||
 	    view->audio_device_count != view->audio_devices_pending_count ||
 	    (view->audio_device_count > 0U &&
 	    memcmp(view->audio_devices, view->audio_devices_pending,
-		view->audio_device_count * sizeof(view->audio_devices[0])) != 0);
+		view->audio_device_count * sizeof(view->audio_devices[0])) != 0) ||
+	    view->audio_format_count != view->audio_formats_pending_count ||
+	    (view->audio_format_count > 0U &&
+	    memcmp(view->audio_formats, view->audio_formats_pending,
+		view->audio_format_count * sizeof(view->audio_formats[0])) != 0);
 	view->audio = view->audio_pending;
 	view->audio_output_id = view->audio_output_pending;
 	view->audio_input_id = view->audio_input_pending;
+	view->audio_format = view->audio_format_pending;
 	view->audio_device_count = view->audio_devices_pending_count;
 	if (view->audio_device_count > 0U) {
 		memcpy(view->audio_devices, view->audio_devices_pending,
 		    view->audio_device_count * sizeof(view->audio_devices[0]));
+	}
+	view->audio_format_count = view->audio_formats_pending_count;
+	if (view->audio_format_count > 0U) {
+		memcpy(view->audio_formats, view->audio_formats_pending,
+		    view->audio_format_count * sizeof(view->audio_formats[0]));
 	}
 	if (differs != 0)
 		view->changed |= KL_SYSTEM_CHANGED_AUDIO;

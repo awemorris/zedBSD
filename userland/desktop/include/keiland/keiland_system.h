@@ -1247,6 +1247,7 @@ size_t kl_system_network_get_saved(const struct kl_system *system, char (*ssids)
 #define KL_AUDIO_DEVICE_KEY_MAX		32U
 #define KL_AUDIO_DEVICE_NAME_MAX	32U
 #define KL_AUDIO_DEVICES_MAX		32U
+#define KL_AUDIO_FORMATS_MAX		32U
 #define KL_AUDIO_KIND_OUTPUT		0U
 #define KL_AUDIO_KIND_INPUT		1U
 
@@ -1257,6 +1258,13 @@ struct kl_audio_device {
 	unsigned endpoint_class;
 	char key[KL_AUDIO_DEVICE_KEY_MAX];
 	char name[KL_AUDIO_DEVICE_NAME_MAX];
+};
+
+/* One hardware PCM format supported by the active audio device. */
+struct kl_audio_format_info {
+	unsigned format;
+	unsigned channels;
+	unsigned rate;
 };
 
 /*
@@ -1285,6 +1293,21 @@ int kl_system_audio_set_volume(struct kl_system *system, unsigned left, unsigned
  * Returns 0 when asked, or ENOTSUP.
  */
 int kl_system_audio_set_route(struct kl_system *system, uint32_t output_id, uint32_t input_id, uint32_t *request);
+
+/*
+ * Copies up to capacity hardware formats supported by the active device.
+ */
+size_t kl_system_audio_get_formats(const struct kl_system *system, struct kl_audio_format_info *formats, size_t capacity);
+
+/*
+ * Copies the active hardware format of the sound device.
+ */
+void kl_system_audio_get_format(const struct kl_system *system, struct kl_audio_format_info *format);
+
+/*
+ * Asks to switch the active /dev/dspN hardware format.  Returns 0 when asked, or ENOTSUP.
+ */
+int kl_system_audio_set_format(struct kl_system *system, unsigned format, unsigned channels, unsigned rate, uint32_t *request);
 
 /*
  * Asks for the short feedback sound at the device volume.  Returns 0 when

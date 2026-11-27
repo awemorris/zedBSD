@@ -335,6 +335,50 @@ se_sound_draw(
 					    (float)(x + width - INPUT_PAD), (float)row_y - 0.5f, 1.0f, SE_COLOR_SEPARATOR);
 			}
 		}
+
+		/* The audio format card: selectable /dev/dspN hardware PCM formats. */
+		card += height + INPUT_GAP;
+		{
+			size_t fmt_count = app->sound.format_count;
+			int fmt_rows = fmt_count > 0U ? (int)fmt_count : 1;
+
+			height = se_card_height(fmt_rows, 1);
+			row_y = se_card_begin(app, canvas, x, card, width, height, kl_tr("Audio Format"), NULL);
+			if (fmt_count == 0U) {
+				(void)se_row_value(app, canvas, x, row_y, width, kl_tr("Format"), kl_tr("No audio formats"), 1);
+			} else {
+				kl_text_metrics(app->text, INPUT_TEXT_TITLE, &line);
+				for (i = 0U; i < fmt_count; i++) {
+					const char *enc;
+					char label[48];
+					int active;
+					int last;
+
+					switch (app->sound.formats[i].format) {
+					case 1U: enc = "S16_LE"; break;
+					case 2U: enc = "S32_LE"; break;
+					case 3U: enc = "S24_3LE"; break;
+					case 4U: enc = "S24_LE"; break;
+					case 5U: enc = "U8"; break;
+					default: enc = "PCM"; break;
+					}
+					(void)snprintf(label, sizeof(label), "%s %u Hz %uch",
+					    enc, app->sound.formats[i].rate, app->sound.formats[i].channels);
+					active = (app->sound.formats[i].format == app->sound.active_format.format &&
+					    app->sound.formats[i].channels == app->sound.active_format.channels &&
+					    app->sound.formats[i].rate == app->sound.active_format.rate);
+					last = (i + 1U == fmt_count);
+					(void)kl_text_draw_fit(app->text, canvas, x + INPUT_PAD + 2, row_y + 10 + line.ascent,
+					    label, INPUT_TEXT_TITLE, 1, width - 120, SE_COLOR_TEXT);
+					se_toggle_draw(app, canvas, x + width - INPUT_PAD - 44, row_y + 8,
+					    active, running, SE_SOUND_FORMAT_BASE + (int)i);
+					row_y += 40;
+					if (!last)
+						kl_canvas_line(canvas, (float)(x + INPUT_PAD), (float)row_y - 0.5f,
+						    (float)(x + width - INPUT_PAD), (float)row_y - 0.5f, 1.0f, SE_COLOR_SEPARATOR);
+				}
+			}
+		}
 	}
 
 	/* What the volume is, and why it cannot be changed now. */

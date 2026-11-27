@@ -359,6 +359,12 @@ struct system_view {
 	uint32_t audio_input_id;
 	uint32_t audio_output_pending;
 	uint32_t audio_input_pending;
+	struct kl_audio_format_info audio_formats[KL_AUDIO_FORMATS_MAX];
+	size_t audio_format_count;
+	struct kl_audio_format_info audio_formats_pending[KL_AUDIO_FORMATS_MAX];
+	size_t audio_formats_pending_count;
+	struct kl_audio_format_info audio_format;
+	struct kl_audio_format_info audio_format_pending;
 };
 
 /*
@@ -453,6 +459,7 @@ void system_view_details_done(struct system_view *view);
 void system_view_audio_state(struct system_view *view, const struct kl_audio_state *state);
 void system_view_audio_device(struct system_view *view, const struct kl_audio_device *device);
 void system_view_audio_route(struct system_view *view, uint32_t output_id, uint32_t input_id);
+void system_view_audio_format(struct system_view *view, const struct kl_audio_format_info *format, unsigned active);
 void system_view_audio_done(struct system_view *view);
 void system_view_power_state(struct system_view *view, const struct kl_power_state *state);
 void system_view_sharing_state(struct system_view *view, const struct kl_sharing_state *state);

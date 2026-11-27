@@ -351,6 +351,7 @@ handle_message(
 		struct audiod_stream_create2 create2;
 		struct audiod_volume volume;
 		struct audiod_subscribe subscribe;
+		struct audiod_format_set format_set;
 	} request;
 	uint32_t role;
 	int endpoint;
@@ -565,6 +566,60 @@ handle_message(
 		if ((client->subscribed & AUDIOD_SUBSCRIBE_VOLUME) != 0U)
 			audiod_route_send_volume(client);
 		return;
+
+	case AUDIOD_FORMAT_LIST:
+		{
+			struct audiod_format_info info;
+			uint32_t i;
+
+			if (length != sizeof(request.header)) {
+				error = EINVAL;
+				break;
+			}
+			for (i = 0U; i < audiod_device.format_count; i++) {
+				memset(&info, 0, sizeof(info));
+				info.header.type = AUDIOD_FORMAT_INFO;
+				info.header.length = sizeof(info);
+				info.header.serial = request.header.serial;
+				info.format = audiod_device.formats[i].format;
+				info.channels = audiod_device.formats[i].channels;
+				info.rate = audiod_device.formats[i].rate;
+				info.active = (info.format == audiod_device.format &&
+				    info.channels == audiod_device.channels &&
+				    info.rate == audiod_device.rate) ? 1U : 0U;
+				send_message(client, &info, sizeof(info), -1);
+			}
+			send_result(client, &request.header, 0);
+			return;
+		}
+
+	case AUDIOD_FORMAT_SET:
+		if (length != sizeof(request.format_set)) {
+			error = EINVAL;
+			break;
+		}
+		error = audiod_device_set_format(&audiod_device,
+		    request.format_set.format,
+		    request.format_set.channels,
+		    request.format_set.rate);
+		if (error == 0) {
+			struct audiod_format_info info;
+			struct audiod_client *sub;
+
+			memset(&info, 0, sizeof(info));
+			info.header.type = AUDIOD_FORMAT_INFO;
+			info.header.length = sizeof(info);
+			info.format = audiod_device.format;
+			info.channels = audiod_device.channels;
+			info.rate = audiod_device.rate;
+			info.active = 1U;
+			for (sub = audiod_clients; sub != NULL; sub = sub->next) {
+				if (sub->version >= AUDIOD_PROTOCOL_VERSION_2 &&
+				    (sub->subscribed & AUDIOD_SUBSCRIBE_ROUTES) != 0U)
+					send_message(sub, &info, sizeof(info), -1);
+			}
+		}
+		break;
 
 	default:
 		error = EINVAL;

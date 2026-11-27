@@ -71,6 +71,8 @@ se_sound_open(
 	kl_system_audio_get_state(app->system, &sound->state);
 	sound->device_count = kl_system_audio_get_devices(app->system, sound->devices, KL_AUDIO_DEVICES_MAX);
 	kl_system_audio_get_route(app->system, &sound->output_id, &sound->input_id);
+	sound->format_count = kl_system_audio_get_formats(app->system, sound->formats, KL_AUDIO_FORMATS_MAX);
+	kl_system_audio_get_format(app->system, &sound->active_format);
 	if (sound->state.reachable) {
 		sound->value = (int)sound->state.left;
 		sound->muted = (int)sound->state.muted;
@@ -105,7 +107,10 @@ se_sound_poll(
 	/* A new report. */
 	if ((app->system_changed & KL_SYSTEM_CHANGED_AUDIO) != 0U) {
 		struct kl_audio_device prev_devices[KL_AUDIO_DEVICES_MAX];
+		struct kl_audio_format_info prev_formats[KL_AUDIO_FORMATS_MAX];
+		struct kl_audio_format_info prev_active_format;
 		size_t prev_count;
+		size_t prev_fmt_count;
 		uint32_t prev_out;
 		uint32_t prev_in;
 
@@ -116,11 +121,17 @@ se_sound_poll(
 		prev_count = sound->device_count;
 		if (prev_count > 0U)
 			memcpy(prev_devices, sound->devices, prev_count * sizeof(prev_devices[0]));
+		prev_fmt_count = sound->format_count;
+		if (prev_fmt_count > 0U)
+			memcpy(prev_formats, sound->formats, prev_fmt_count * sizeof(prev_formats[0]));
+		prev_active_format = sound->active_format;
 		prev_out = sound->output_id;
 		prev_in = sound->input_id;
 		kl_system_audio_get_state(app->system, &sound->state);
 		sound->device_count = kl_system_audio_get_devices(app->system, sound->devices, KL_AUDIO_DEVICES_MAX);
 		kl_system_audio_get_route(app->system, &sound->output_id, &sound->input_id);
+		sound->format_count = kl_system_audio_get_formats(app->system, sound->formats, KL_AUDIO_FORMATS_MAX);
+		kl_system_audio_get_format(app->system, &sound->active_format);
 		se_log("SOUND report reachable=%u device=%u value=%u muted=%u", sound->state.reachable, sound->state.device, sound->state.left, sound->state.muted);
 
 		/* A report shows the volume (set here or in the system bar), unless a drag or a held volume leads. */
@@ -143,6 +154,10 @@ se_sound_poll(
 			changed = 1;
 		else if (prev_count != sound->device_count ||
 		    (prev_count > 0U && memcmp(prev_devices, sound->devices, prev_count * sizeof(prev_devices[0])) != 0))
+			changed = 1;
+		else if (memcmp(&prev_active_format, &sound->active_format, sizeof(prev_active_format)) != 0 ||
+		    prev_fmt_count != sound->format_count ||
+		    (prev_fmt_count > 0U && memcmp(prev_formats, sound->formats, prev_fmt_count * sizeof(prev_formats[0])) != 0))
 			changed = 1;
 		if (changed != 0 &&
 		    (app->page == SE_PAGE_SOUND ||
@@ -274,6 +289,24 @@ se_sound_press(
 			    app->sound.output_id, app->sound.input_id, NULL);
 			se_log("SOUND select input=%u key=%s",
 			    app->sound.input_id, app->sound.devices[i].key);
+		}
+		return;
+	}
+
+	if (index >= SE_SOUND_FORMAT_BASE &&
+	    index < SE_SOUND_FORMAT_BASE + (int)KL_AUDIO_FORMATS_MAX) {
+		i = (size_t)(index - SE_SOUND_FORMAT_BASE);
+		if (i < app->sound.format_count) {
+			app->sound.active_format = app->sound.formats[i];
+			app->dirty = 1;
+			(void)kl_system_audio_set_format(app->system,
+			    app->sound.active_format.format,
+			    app->sound.active_format.channels,
+			    app->sound.active_format.rate, NULL);
+			se_log("SOUND select format=%u channels=%u rate=%u",
+			    app->sound.active_format.format,
+			    app->sound.active_format.channels,
+			    app->sound.active_format.rate);
 		}
 	}
 }

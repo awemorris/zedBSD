@@ -156,6 +156,7 @@ struct system_audio_listener {
 	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
 	void (*device)(void *data, struct wl_proxy *proxy, uint32_t id, uint32_t kind, uint32_t endpoint_class, const char *key, const char *name);
 	void (*route)(void *data, struct wl_proxy *proxy, uint32_t output_id, uint32_t input_id);
+	void (*format)(void *data, struct wl_proxy *proxy, uint32_t format, uint32_t channels, uint32_t rate, uint32_t active);
 };
 
 /* The listener of kl_system_power_v1's events, in their order. */
@@ -359,6 +360,7 @@ static void system_audio_state(void *data, struct wl_proxy *proxy, uint32_t reac
 static void system_audio_done(void *data, struct wl_proxy *proxy, uint32_t serial);
 static void system_audio_device(void *data, struct wl_proxy *proxy, uint32_t id, uint32_t kind, uint32_t endpoint_class, const char *key, const char *name);
 static void system_audio_route(void *data, struct wl_proxy *proxy, uint32_t output_id, uint32_t input_id);
+static void system_audio_format(void *data, struct wl_proxy *proxy, uint32_t format, uint32_t channels, uint32_t rate, uint32_t active);
 static void system_power_state(void *data, struct wl_proxy *proxy, uint32_t source, int32_t percent, uint32_t charging, uint32_t actions);
 static void system_power_done(void *data, struct wl_proxy *proxy, uint32_t serial);
 static void system_device(void *data, struct wl_proxy *proxy, const char *id, uint32_t kind, uint32_t state, const char *name, const char *location);
@@ -421,7 +423,8 @@ static const struct system_audio_listener system_audio_listener = {
 	system_audio_done,
 	system_result,
 	system_audio_device,
-	system_audio_route
+	system_audio_route,
+	system_audio_format
 };
 
 /* The power object's callbacks. */
@@ -3281,6 +3284,67 @@ kl_system_audio_set_route(
 }
 
 /*
+ * Copies up to capacity hardware formats supported by the active device.
+ */
+size_t
+kl_system_audio_get_formats(
+	const struct kl_system *system,
+	struct kl_audio_format_info *formats,
+	size_t capacity)
+{
+	size_t count;
+
+	if (system == NULL || formats == NULL)
+		return 0U;
+	count = system->view.audio_format_count;
+	if (count > capacity)
+		count = capacity;
+	if (count > 0U)
+		memcpy(formats, system->view.audio_formats, count * sizeof(formats[0]));
+	return count;
+}
+
+/*
+ * Copies the active hardware format.
+ */
+void
+kl_system_audio_get_format(
+	const struct kl_system *system,
+	struct kl_audio_format_info *format)
+{
+	if (format == NULL)
+		return;
+	if (system == NULL) {
+		memset(format, 0, sizeof(*format));
+		return;
+	}
+	*format = system->view.audio_format;
+}
+
+/*
+ * Asks to switch the active /dev/dspN hardware format.
+ */
+int
+kl_system_audio_set_format(
+	struct kl_system *system,
+	unsigned format,
+	unsigned channels,
+	unsigned rate,
+	uint32_t *request)
+{
+	uint32_t number;
+
+	if (system->audio == NULL || system->lost ||
+	    wl_proxy_get_version(system->audio) < KL_SYSTEM_AUDIO_SINCE_FORMAT)
+		return ENOTSUP;
+
+	number = system_number(system, request);
+	wl_proxy_marshal(system->audio, KL_SYSTEM_AUDIO_SET_FORMAT, number,
+	    (uint32_t)format, (uint32_t)channels, (uint32_t)rate);
+	return 0;
+}
+
+/*
  * Asks for each channel's volume and the mute.
  */
 int
@@ -4902,6 +4966,28 @@ system_audio_route(
 
 	system = data;
 	system_view_audio_route(&system->view, output_id, input_id);
+}
+
+/* Keeps one supported hardware format, in effect at its done. */
+static void
+system_audio_format(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t format,
+	uint32_t channels,
+	uint32_t rate,
+	uint32_t active)
+{
+	struct kl_system *system;
+	struct kl_audio_format_info info;
+
+	UNUSED_PARAMETER(proxy);
+
+	system = data;
+	info.format = format;
+	info.channels = channels;
+	info.rate = rate;
+	system_view_audio_format(&system->view, &info, active);
 }
 
 /* Puts the sound's state into effect. */

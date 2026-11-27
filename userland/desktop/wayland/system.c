@@ -248,6 +248,8 @@ struct system_state {
 	struct kl_backend_audio_state audio;
 	struct kl_backend_audio_endpoint audio_endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
 	size_t audio_endpoint_count;
+	struct kl_backend_audio_format audio_formats[KL_BACKEND_AUDIO_FORMATS_MAX];
+	size_t audio_format_count;
 	unsigned audio_told;
 	struct kl_backend_power_state power;
 	unsigned power_started;
@@ -611,22 +613,35 @@ kwl_system_tick(
 	/* The sound as volume.c has it, told to every sound object when it changed. */
 	{
 		struct kl_backend_audio_endpoint endpoints[KL_BACKEND_AUDIO_ENDPOINTS_MAX];
+		struct kl_backend_audio_format formats[KL_BACKEND_AUDIO_FORMATS_MAX];
 		size_t endpoint_count;
+		size_t format_count;
 		int ep_differs;
+		int fmt_differs;
 
 		kwl_volume_audio_state(&audio);
 		endpoint_count = kwl_volume_audio_endpoints(endpoints, KL_BACKEND_AUDIO_ENDPOINTS_MAX);
+		format_count = kwl_volume_audio_formats(formats, KL_BACKEND_AUDIO_FORMATS_MAX);
 		differs = memcmp(&audio, &system_state.audio, sizeof(audio));
 		ep_differs = endpoint_count != system_state.audio_endpoint_count ||
 		    (endpoint_count > 0U &&
 		    memcmp(endpoints, system_state.audio_endpoints,
 			endpoint_count * sizeof(endpoints[0])) != 0);
-		if (differs != 0 || ep_differs || !system_state.audio_told) {
+		fmt_differs = format_count != system_state.audio_format_count ||
+		    (format_count > 0U &&
+		    memcmp(formats, system_state.audio_formats,
+			format_count * sizeof(formats[0])) != 0);
+		if (differs != 0 || ep_differs || fmt_differs || !system_state.audio_told) {
 			system_state.audio = audio;
 			system_state.audio_endpoint_count = endpoint_count;
 			if (endpoint_count > 0U) {
 				memcpy(system_state.audio_endpoints, endpoints,
 				    endpoint_count * sizeof(endpoints[0]));
+			}
+			system_state.audio_format_count = format_count;
+			if (format_count > 0U) {
+				memcpy(system_state.audio_formats, formats,
+				    format_count * sizeof(formats[0]));
 			}
 			system_state.audio_told = 1U;
 			system_tell(server, KWL_SYSTEM_AUDIO, system_audio_state, KL_SYSTEM_AUDIO_EVENT_DONE);
@@ -1772,6 +1787,23 @@ system_audio_request(
 		output_id = system_word(bytes, 4U);
 		input_id = system_word(bytes, 8U);
 		error = kwl_volume_request_route(object->client->server, output_id, input_id);
+		system_result(object, KL_SYSTEM_AUDIO_EVENT_RESULT, number, system_result_of(error));
+		return 0;
+	}
+
+	/* Set active /dev/dspN hardware format (since version 3). */
+	if (opcode == KL_SYSTEM_AUDIO_SET_FORMAT) {
+		uint32_t format;
+		uint32_t channels;
+		uint32_t rate;
+
+		if (size != 16U)
+			return EPROTO;
+		number = system_word(bytes, 0U);
+		format = system_word(bytes, 4U);
+		channels = system_word(bytes, 8U);
+		rate = system_word(bytes, 12U);
+		error = kwl_volume_request_format(object->client->server, format, channels, rate);
 		system_result(object, KL_SYSTEM_AUDIO_EVENT_RESULT, number, system_result_of(error));
 		return 0;
 	}
@@ -3752,6 +3784,26 @@ system_audio_state(
 		route_words[0] = state.output_id;
 		route_words[1] = state.input_id;
 		(void)kwl_emit(object->client, object->id, KL_SYSTEM_AUDIO_EVENT_ROUTE, route_words, sizeof(route_words));
+	}
+
+	/* Version 3: emit supported hardware formats and active flag. */
+	if (object->version >= KL_SYSTEM_AUDIO_SINCE_FORMAT) {
+		struct kl_backend_audio_format formats[KL_BACKEND_AUDIO_FORMATS_MAX];
+		uint32_t fmt_words[4];
+		size_t fmt_count;
+		size_t fmt_index;
+
+		fmt_count = kwl_volume_audio_formats(formats, KL_BACKEND_AUDIO_FORMATS_MAX);
+		for (fmt_index = 0U; fmt_index < fmt_count; fmt_index++) {
+			fmt_words[0] = formats[fmt_index].format;
+			fmt_words[1] = formats[fmt_index].channels;
+			fmt_words[2] = formats[fmt_index].rate;
+			fmt_words[3] = (formats[fmt_index].format == state.format &&
+			    formats[fmt_index].channels == state.channels &&
+			    formats[fmt_index].rate == state.rate) ? 1U : 0U;
+			(void)kwl_emit(object->client, object->id, KL_SYSTEM_AUDIO_EVENT_FORMAT,
+			    fmt_words, sizeof(fmt_words));
+		}
 	}
 }
 

@@ -36,8 +36,9 @@ static void fill_written(struct audiod_device *device);
 static void read_capture(struct audiod_device *device);
 static void finish_drains(struct audiod_device *device);
 static int allocate_buffers(struct audiod_device *device);
-static void open_output_unit(struct audiod_device *device, unsigned unit);
+static void open_output_unit(struct audiod_device *device, unsigned unit, const struct audio_format *wanted);
 static void close_output_unit(struct audiod_device *device);
+static void probe_device_formats(struct audiod_device *device, const struct audio_format *current);
 static void feedback_track(struct audiod_device *device, uint64_t period_byte);
 static void feedback_played(struct audiod_device *device);
 
@@ -65,7 +66,7 @@ audiod_device_open(
 	device->fragment_count = 8;
 
 	/* Opens /dev/dsp0 and /dev/mixer0 when present. */
-	open_output_unit(device, 0U);
+	open_output_unit(device, 0U, NULL);
 	if (device->dsp >= 0 && device->capture) {
 		device->capture_dsp = device->dsp;
 		device->capture_unit = 0;
@@ -187,7 +188,7 @@ audiod_device_switch_output(
 	device->written = 0;
 	device->consumed = 0;
 
-	open_output_unit(device, unit);
+	open_output_unit(device, unit, NULL);
 	if (device->dsp < 0)
 		return ENOENT;
 
@@ -263,6 +264,103 @@ audiod_device_switch_input(
 	device->capture_dsp = fd;
 	device->capture_unit = (int)unit;
 	device->capture = 1;
+	return 0;
+}
+
+/*
+ * Switches the active /dev/dspN hardware format (format, channels, rate).
+ */
+int
+audiod_device_set_format(
+	struct audiod_device *device,
+	uint32_t format,
+	uint32_t channels,
+	uint32_t rate)
+{
+	struct audiod_client *client;
+	struct audiod_stream *stream;
+	struct audio_format wanted;
+	char path[32];
+	uint32_t left;
+	uint32_t right;
+	uint32_t muted;
+	uint32_t i;
+	int unit;
+	int old_capture_shared;
+	int found;
+	int error;
+
+	if (device->dsp < 0 || device->unit < 0)
+		return ENODEV;
+	if (device->format == format && device->channels == channels && device->rate == rate)
+		return 0;
+
+	found = 0;
+	for (i = 0U; i < device->format_count; i++) {
+		if (device->formats[i].format == format &&
+		    device->formats[i].channels == channels &&
+		    device->formats[i].rate == rate) {
+			found = 1;
+			break;
+		}
+	}
+	if (!found)
+		return EINVAL;
+
+	unit = device->unit;
+	audiod_device_get_volume(device, &left, &right, &muted);
+
+	old_capture_shared = (device->capture_dsp >= 0 && device->capture_dsp == device->dsp);
+	if (old_capture_shared && device->capture_unit >= 0) {
+		(void)snprintf(path, sizeof(path), "/dev/dsp%d", device->capture_unit);
+		device->capture_dsp = open(path, O_RDONLY | O_NONBLOCK);
+		if (device->capture_dsp < 0) {
+			device->capture = 0;
+			device->capture_started = 0;
+			device->capture_unit = -1;
+		}
+	}
+
+	close_output_unit(device);
+	if (device->capture_unit == unit && device->capture_dsp >= 0) {
+		(void)close(device->capture_dsp);
+		device->capture_dsp = -1;
+	}
+
+	device->written = 0;
+	device->consumed = 0;
+	memset(&wanted, 0, sizeof(wanted));
+	wanted.format = format;
+	wanted.channels = channels;
+	wanted.rate = rate;
+	open_output_unit(device, (unsigned)unit, &wanted);
+	if (device->dsp < 0)
+		return ENODEV;
+
+	if (device->capture_unit == unit && device->capture) {
+		if (device->capture_dsp >= 0 && device->capture_dsp != device->dsp)
+			(void)close(device->capture_dsp);
+		device->capture_dsp = device->dsp;
+	}
+
+	device->frame_bytes = audiod_frame_bytes(device->format, device->channels);
+	device->period_frames = device->fragment_bytes / device->frame_bytes;
+	error = allocate_buffers(device);
+	if (error != 0)
+		return ENOMEM;
+
+	free(device->feedback);
+	device->feedback = NULL;
+	device->feedback_length = 0U;
+	device->feedback_next = 0U;
+	(void)audiod_feedback_make(device);
+
+	audiod_device_set_volume(device, left, right, muted);
+
+	for (client = audiod_clients; client != NULL; client = client->next) {
+		for (stream = client->streams; stream != NULL; stream = stream->next)
+			audiod_stream_rates(stream, device);
+	}
 	return 0;
 }
 
@@ -691,11 +789,79 @@ allocate_buffers(
 	return 0;
 }
 
+/* Probes supported hardware formats on an unopened/untriggered /dev/dspN fd. */
+static void
+probe_device_formats(
+	struct audiod_device *device,
+	const struct audio_format *current)
+{
+	static const uint32_t encodings[] = {
+		KERN_AUDIO_FORMAT_S16_LE,
+		KERN_AUDIO_FORMAT_S24_3LE,
+		KERN_AUDIO_FORMAT_S24_LE,
+		KERN_AUDIO_FORMAT_S32_LE,
+		KERN_AUDIO_FORMAT_U8
+	};
+	static const uint32_t rates[] = {
+		44100U, 48000U, 88200U, 96000U, 176400U, 192000U, 384000U
+	};
+	struct audio_format probe;
+	size_t ei;
+	size_t ri;
+	uint32_t k;
+	int dup;
+
+	device->format_count = 0U;
+	if (current->channels == 2U && device->format_count < AUDIOD_FORMATS_MAX) {
+		device->formats[device->format_count].format = current->format;
+		device->formats[device->format_count].channels = current->channels;
+		device->formats[device->format_count].rate = current->rate;
+		device->format_count++;
+	}
+
+	for (ei = 0U; ei < sizeof(encodings) / sizeof(encodings[0]); ei++) {
+		for (ri = 0U; ri < sizeof(rates) / sizeof(rates[0]); ri++) {
+			if (device->format_count >= AUDIOD_FORMATS_MAX)
+				break;
+			dup = 0;
+			for (k = 0U; k < device->format_count; k++) {
+				if (device->formats[k].format == encodings[ei] &&
+				    device->formats[k].channels == 2U &&
+				    device->formats[k].rate == rates[ri]) {
+					dup = 1;
+					break;
+				}
+			}
+			if (dup)
+				continue;
+			memset(&probe, 0, sizeof(probe));
+			probe.format = encodings[ei];
+			probe.channels = 2U;
+			probe.rate = rates[ri];
+			if (ioctl(device->dsp, KERN_AUDIO_SET_FORMAT, &probe) == 0 &&
+			    probe.format == encodings[ei] &&
+			    probe.channels == 2U &&
+			    probe.rate == rates[ri]) {
+				device->formats[device->format_count].format = probe.format;
+				device->formats[device->format_count].channels = probe.channels;
+				device->formats[device->format_count].rate = probe.rate;
+				device->format_count++;
+			}
+		}
+	}
+
+	/* Restore the active format. */
+	probe = *current;
+	probe.reserved = 0U;
+	(void)ioctl(device->dsp, KERN_AUDIO_SET_FORMAT, &probe);
+}
+
 /* Opens /dev/dspN and /dev/mixerN for playback (and checks capture capability). */
 static void
 open_output_unit(
 	struct audiod_device *device,
-	unsigned unit)
+	unsigned unit,
+	const struct audio_format *wanted)
 {
 	struct audio_format format;
 	struct audio_buffer_info info;
@@ -710,6 +876,11 @@ open_output_unit(
 	device->dsp = open(path, O_RDWR | O_NONBLOCK);
 	if (device->dsp >= 0) {
 		memset(&format, 0, sizeof(format));
+		if (wanted != NULL) {
+			format = *wanted;
+			format.reserved = 0U;
+			(void)ioctl(device->dsp, KERN_AUDIO_SET_FORMAT, &format);
+		}
 		error = ioctl(device->dsp, KERN_AUDIO_GET_FORMAT, &format);
 		if (error == 0 && format.channels != 2U) {
 			format.format = KERN_AUDIO_FORMAT_S16_LE;
@@ -720,6 +891,9 @@ open_output_unit(
 			(void)ioctl(device->dsp, KERN_AUDIO_GET_FORMAT, &format);
 		}
 
+		if (error == 0 && format.channels == 2U)
+			probe_device_formats(device, &format);
+
 		error = -1;
 		if (format.channels == 2U)
 			error = ioctl(device->dsp, KERN_AUDIO_GET_BUFFER, &info);
@@ -727,6 +901,7 @@ open_output_unit(
 		if (error != 0) {
 			close(device->dsp);
 			device->dsp = -1;
+			device->format_count = 0U;
 		} else {
 			device->unit = (int)unit;
 			device->format = format.format;

@@ -84,6 +84,15 @@ struct audiod_client {
 	struct audiod_stream *streams;
 };
 
+/* The most hardware formats cached for the active /dev/dspN device. */
+#define AUDIOD_FORMATS_MAX	32U
+
+struct audiod_hw_format {
+	uint32_t format;
+	uint32_t channels;
+	uint32_t rate;
+};
+
 /* The device side: format, period and progress. */
 struct audiod_device {
 	int dsp;			/* -1 without a device */
@@ -94,6 +103,8 @@ struct audiod_device {
 	uint32_t format;
 	uint32_t channels;
 	uint32_t rate;
+	struct audiod_hw_format formats[AUDIOD_FORMATS_MAX];
+	uint32_t format_count;
 	uint32_t frame_bytes;
 	uint32_t period_frames;
 	uint32_t fragment_bytes;
@@ -191,6 +202,7 @@ int audiod_device_open(struct audiod_device *device);
 int audiod_device_probe(unsigned unit, int *has_output, int *has_input);
 int audiod_device_switch_output(struct audiod_device *device, unsigned unit);
 int audiod_device_switch_input(struct audiod_device *device, unsigned unit);
+int audiod_device_set_format(struct audiod_device *device, uint32_t format, uint32_t channels, uint32_t rate);
 int audiod_device_fd(const struct audiod_device *device, short *events);
 int audiod_device_capture_fd(const struct audiod_device *device, short *events);
 int audiod_device_timeout_ms(const struct audiod_device *device);
