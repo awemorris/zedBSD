@@ -1001,7 +1001,6 @@ KERN_SOURCES += \
 	src/drivers/gpu/ghci/capset.c \
 	src/drivers/gpu/ghci/display.c \
 	src/drivers/gpu/ghci/display-scan.c \
-	src/drivers/gpu/ghci/adv7511.c \
 	src/drivers/gpu/ghci/compiler/gsi1-compile.c \
 	src/drivers/gpu/ghci/compiler/gsi1-encode.c \
 	src/drivers/gpu/ghci/compiler/gsi1-io.c \
