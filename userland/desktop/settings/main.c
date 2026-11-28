@@ -146,6 +146,7 @@ static void main_state_update(void);
 static void main_about_window(void);
 static void main_handed_over(void);
 static void main_appearance_changed(void *data, unsigned appearance);
+static unsigned main_part_pixels(const struct kl_rect *logical, unsigned count, unsigned scale, struct kl_rect *pixels, int max_width, int max_height);
 
 /*
  * Runs Settings.
@@ -224,8 +225,10 @@ main(
 
 	/* The interface, and what About shows of the window: the graphics device and the screen (the machine's names come from the desktop, ws188-p002). */
 	main_app.now = se_clock();
+	main_app.scale = main_window.scale;
 	main_about_window();
 	se_ui_init(&main_app, &main_text, options.page);
+	se_fields_set_scale(main_window.scale);
 	if (options.welcome)
 		se_welcome_start(&main_app);
 
@@ -574,6 +577,16 @@ main_loop(
 			main_app.dirty = 1;
 		}
 
+		/* A new scale: the canvas and the fields take it, and a frame is drawn. */
+		if (main_window.rescaled != 0) {
+			main_window.rescaled = 0;
+			main_app.scale = main_window.scale;
+			kl_canvas_set_scale(&main_canvas, main_window.scale);
+			se_fields_set_scale(main_window.scale);
+			main_app.dirty = 1;
+			se_log("SCALE scale=%u", main_window.scale);
+		}
+
 		/* Nothing changed: no frame. */
 		if (main_app.dirty == 0 &&
 		    main_app.hover_moved == 0 &&
@@ -627,7 +640,20 @@ main_frame(void)
 		se_glass_refresh(&main_glass, &main_app);
 
 		/* Shown in the window, by the parts it changed when it was drawn within the lit regions alone (BUG-226). */
-		result = se_present_frame(&main_present, main_pixels, (size_t)main_present.extent.width, main_app.frame_parts, main_app.frame_part_count);
+		{
+			struct kl_rect pixel_parts[SE_DAMAGE_PARTS];
+			const struct kl_rect *parts;
+			unsigned part_count;
+
+			parts = main_app.frame_parts;
+			part_count = main_app.frame_part_count;
+			if (part_count != 0U && main_app.scale != KL_SCALE_BASE) {
+				part_count = main_part_pixels(main_app.frame_parts, part_count, main_app.scale, pixel_parts,
+				    (int)main_present.extent.width, (int)main_present.extent.height);
+				parts = pixel_parts;
+			}
+			result = se_present_frame(&main_present, main_pixels, (size_t)main_present.extent.width, parts, part_count);
+		}
 		shown = se_clock();
 
 		/* A slow frame is logged (a diagnostic: where the time of a frame goes, and how much of the window it drew). */
@@ -746,10 +772,11 @@ main_canvas_make(void)
 	if (main_pixels == NULL)
 		return -1;
 
-	/* The canvas over it. */
+	/* The canvas over it, at the window's scale. */
 	error = kl_canvas_init(&main_canvas, main_pixels, (size_t)main_present.extent.width, (int)main_present.extent.width, (int)main_present.extent.height);
 	if (error != 0)
 		return -1;
+	kl_canvas_set_scale(&main_canvas, main_window.scale);
 
 	/* Succeeded: frames can be drawn. */
 	return 0;
@@ -1041,4 +1068,44 @@ main_appearance_changed(
 	se_palette_set(appearance);
 	main_app.dirty = 1;
 	se_log("APPEARANCE appearance=%u", appearance);
+}
+
+/* Turns logical damage rectangles into pixel rectangles, rounded outward and clamped to the swapchain. */
+static unsigned
+main_part_pixels(
+	const struct kl_rect *logical,
+	unsigned count,
+	unsigned scale,
+	struct kl_rect *pixels,
+	int max_width,
+	int max_height)
+{
+	unsigned index;
+	int left;
+	int top;
+	int right;
+	int bottom;
+
+	/* Each rectangle. */
+	for (index = 0U; index < count; index++) {
+		left = (logical[index].x * (int)scale) / (int)KL_SCALE_BASE;
+		top = (logical[index].y * (int)scale) / (int)KL_SCALE_BASE;
+		right = ((logical[index].x + logical[index].width) * (int)scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		bottom = ((logical[index].y + logical[index].height) * (int)scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		if (left < 0)
+			left = 0;
+		if (top < 0)
+			top = 0;
+		if (right > max_width)
+			right = max_width;
+		if (bottom > max_height)
+			bottom = max_height;
+		pixels[index].x = left;
+		pixels[index].y = top;
+		pixels[index].width = right > left ? right - left : 0;
+		pixels[index].height = bottom > top ? bottom - top : 0;
+	}
+
+	/* Succeeded: how many. */
+	return count;
 }

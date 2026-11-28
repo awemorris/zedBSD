@@ -39,6 +39,7 @@ static void window_touch(struct se_window *window, const struct kl_window_event 
 static void window_touch_place(struct se_window *window, double x, double y);
 static void window_touch_button(struct se_window *window, uint32_t serial, int pressed);
 static uint32_t window_modifiers(unsigned modifiers);
+static int window_units(unsigned scale, double pixels);
 
 /*
  * Connects to the compositor and makes the window, configured.
@@ -80,10 +81,18 @@ se_window_open(
 	if (window->kui == NULL)
 		return -1;
 
-	/* The connection and the surface, the size, the state and the screen's mode the first configure left. */
+	/* Follow the compositor's scale. */
+	error = kl_window_follow_scale(window->kui);
+	if (error != 0)
+		se_log("WINDOW scale follow=refused errno=%d", error);
+
+	/* The connection and the surface, the size, the scale, the state and the screen's mode the first configure left. */
 	window->display = kl_app_display(window->app);
 	window->surface = kl_window_surface(window->kui);
 	kl_window_size(window->kui, &window->width, &window->height);
+	window->scale = kl_window_scale(window->kui);
+	if (window->scale == 0U)
+		window->scale = KL_SCALE_BASE;
 	window->maximized = kl_window_maximized(window->kui);
 	error = kl_window_output_mode(window->kui, &window->output_width, &window->output_height, &window->output_refresh);
 	if (error != 0)
@@ -288,8 +297,8 @@ window_event(
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
 		/* The pointer's new place, as a motion. */
-		window->pointer_x = (int)event->x;
-		window->pointer_y = (int)event->y;
+		window->pointer_x = window_units(window->scale, event->x);
+		window->pointer_y = window_units(window->scale, event->y);
 		(void)se_window_push(window, SE_EVENT_MOTION);
 		break;
 	case KL_WINDOW_LEAVE:
@@ -342,6 +351,13 @@ window_event(
 		kl_window_size(window->kui, &window->width, &window->height);
 		window->maximized = kl_window_maximized(window->kui);
 		window->resized = 1;
+		break;
+	case KL_WINDOW_SCALE:
+		/* The display's scale changed. */
+		window->scale = kl_window_scale(window->kui);
+		if (window->scale == 0U)
+			window->scale = KL_SCALE_BASE;
+		window->rescaled = 1;
 		break;
 	case KL_WINDOW_CLOSE:
 		window->closed = 1;
@@ -401,10 +417,10 @@ window_axis(
 	if (event->axis_source == KL_AXIS_SOURCE_FINGER)
 		source = SE_SOURCE_FINGER;
 
-	/* Only the vertical axis scrolls the window; its distance in the window's pixels, its fraction kept. */
+	/* Only the vertical axis scrolls the window; its distance in the window's units, its fraction kept. */
 	if (event->dy == 0.0)
 		return;
-	distance = event->dy * WINDOW_SCROLL_SCALE / WINDOW_KL_SCROLL_SCALE + window->axis_remainder;
+	distance = event->dy * WINDOW_SCROLL_SCALE / WINDOW_KL_SCROLL_SCALE * (double)KL_SCALE_BASE / (double)window->scale + window->axis_remainder;
 	whole = (int)distance;
 	window->axis_remainder = distance - (double)whole;
 	if (whole == 0)
@@ -473,8 +489,8 @@ window_touch_place(
 	struct se_event *input;
 
 	/* The finger's place is the pointer's, a move the finger made. */
-	window->pointer_x = (int)x;
-	window->pointer_y = (int)y;
+	window->pointer_x = window_units(window->scale, x);
+	window->pointer_y = window_units(window->scale, y);
 	input = se_window_push(window, SE_EVENT_MOTION);
 	if (input != NULL)
 		input->touch = 1;
@@ -543,4 +559,21 @@ window_text(
 		return;
 	(void)snprintf(input->text, sizeof(input->text), "%s", event->text);
 	input->before = event->before;
+}
+
+/* Turns pixels from the window into logical units at the window's scale. */
+static int
+window_units(
+	unsigned scale,
+	double pixels)
+{
+	double units;
+
+	/* At 100 % the pixels are the units. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return (int)pixels;
+	units = pixels * (double)KL_SCALE_BASE / (double)scale;
+	if (units >= 0.0)
+		return (int)(units + 0.5);
+	return (int)(units - 0.5);
 }

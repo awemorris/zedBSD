@@ -75,6 +75,9 @@ struct mu_window {
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	uint32_t logical_width;
+	uint32_t logical_height;
+	unsigned scale;
 	struct kl_canvas canvas;
 	int canvas_made;
 	struct kl_text text;
@@ -131,6 +134,10 @@ static void mu_look(struct mu_window *music, uint64_t now_us);
 static void mu_reload(struct mu_window *music, uint64_t now_us);
 static char *mu_copy(const char *text);
 static int mu_resize(struct mu_window *music);
+static double mu_units(unsigned scale, double pixels);
+static int mu_pixel(int units, unsigned scale);
+static void mu_logical_size(struct mu_window *music);
+static void mu_part_pixels(const struct mu_window *music, const struct kl_rect *logical, unsigned count, struct kl_rect *pixels);
 static void mu_draw(struct mu_window *music, uint64_t now_us);
 static int mu_wait(const struct mu_window *music, uint64_t now_us);
 
@@ -219,6 +226,14 @@ main(
 		return 1;
 	}
 
+	/* Follow the compositor's scale. */
+	error = kl_window_follow_scale(music.window);
+	if (error != 0)
+		mu_log("SCALE follow=refused errno=%d", error);
+	music.scale = kl_window_scale(music.window);
+	if (music.scale == 0U)
+		music.scale = KL_SCALE_BASE;
+
 	/*
 	 * The pointer's motions merged, and each frame drawn once the
 	 * compositor took the last one (ws210-p014 F2): the pointer crossing
@@ -237,6 +252,7 @@ main(
 		mu_view_release(&music.view);
 		return 1;
 	}
+	kl_ui_set_scale(music.ui, music.scale);
 
 	/* The menu and the style (opaque until the first frame finds whether the window can stand on glass). */
 	(void)kl_window_set_menu(music.window, mu_menu, sizeof(mu_menu) / sizeof(mu_menu[0]));
@@ -557,7 +573,7 @@ mu_input(
 	 * (2026-10-12 user).
 	 */
 	if (event->kind == KL_WINDOW_MOTION) {
-		taken = kl_ui_pointer_motion(music->ui, event->x, event->y);
+		taken = kl_ui_pointer_motion(music->ui, mu_units(music->scale, event->x), mu_units(music->scale, event->y));
 		if (taken && music->buttons_held != 0U)
 			music->dirty = 1;
 		else if (taken)
@@ -589,10 +605,21 @@ mu_input(
 	}
 
 	/* The window's own. */
-	if (event->kind == KL_WINDOW_RESIZE)
+	if (event->kind == KL_WINDOW_RESIZE) {
 		music->resized = 1;
-	else if (event->kind == KL_WINDOW_CLOSE)
+	} else if (event->kind == KL_WINDOW_SCALE) {
+		music->scale = kl_window_scale(music->window);
+		if (music->scale == 0U)
+			music->scale = KL_SCALE_BASE;
+		kl_ui_set_scale(music->ui, music->scale);
+		if (music->canvas_made) {
+			kl_canvas_set_scale(&music->canvas, music->scale);
+			mu_logical_size(music);
+		}
+		music->dirty = 1;
+	} else if (event->kind == KL_WINDOW_CLOSE) {
 		music->view.quit = 1;
+	}
 }
 
 /* Carries out the view's requests with the player. */
@@ -1215,6 +1242,8 @@ mu_resize(
 	status = kl_canvas_init(&music->canvas, music->pixels, (size_t)music->width, (int)music->width, (int)music->height);
 	if (status != 0)
 		return -1;
+	kl_canvas_set_scale(&music->canvas, music->scale);
+	mu_logical_size(music);
 
 	/* Succeeded: drawn again at the new size. */
 	music->canvas_made = 1;
@@ -1279,7 +1308,7 @@ mu_draw(
 	music->dirty = 0;
 	if (part_count == 0U) {
 		kl_ui_begin(music->ui, now_us);
-		mu_view_draw(&music->view, music->ui, &music->style, (int)music->width, (int)music->height, now_us);
+		mu_view_draw(&music->view, music->ui, &music->style, (int)music->logical_width, (int)music->logical_height, now_us);
 		music->moving = kl_ui_end(music->ui, now_us);
 	}
 
@@ -1287,7 +1316,7 @@ mu_draw(
 	for (index = 0; index < part_count; index++) {
 		kl_canvas_clip_push(&music->canvas, &parts[index]);
 		kl_ui_begin(music->ui, now_us);
-		mu_view_draw(&music->view, music->ui, &music->style, (int)music->width, (int)music->height, now_us);
+		mu_view_draw(&music->view, music->ui, &music->style, (int)music->logical_width, (int)music->logical_height, now_us);
 		music->moving = kl_ui_end(music->ui, now_us);
 		kl_canvas_clip_pop(&music->canvas);
 	}
@@ -1295,7 +1324,14 @@ mu_draw(
 
 	/* The glass's panels for the frame; a compositor without glass leaves the window opaque from the next one. */
 	if (music->view.glass) {
-		count = mu_view_panels(&music->view, (int)music->width, (int)music->height, panels, MU_PANELS_MAX);
+		count = mu_view_panels(&music->view, (int)music->logical_width, (int)music->logical_height, panels, MU_PANELS_MAX);
+		for (index = 0U; index < (unsigned)count; index++) {
+			panels[index].x = mu_pixel(panels[index].x, music->scale);
+			panels[index].y = mu_pixel(panels[index].y, music->scale);
+			panels[index].width = mu_pixel(panels[index].width, music->scale);
+			panels[index].height = mu_pixel(panels[index].height, music->scale);
+			panels[index].radius = (float)mu_pixel((int)(panels[index].radius + 0.5f), music->scale);
+		}
 		error = kl_window_set_glass(music->window, panels, count);
 		if (error != 0) {
 			mu_log("GLASS failed error=%d", error);
@@ -1306,7 +1342,14 @@ mu_draw(
 	}
 
 	/* The frame shown, by its parts alone when it was drawn so. */
-	status = kl_window_present_parts(music->window, music->pixels, (size_t)music->width, parts, part_count);
+	if (part_count != 0U && music->scale != KL_SCALE_BASE) {
+		struct kl_rect pixel_parts[KL_FRAME_PARTS_MAX];
+
+		mu_part_pixels(music, parts, part_count, pixel_parts);
+		status = kl_window_present_parts(music->window, music->pixels, (size_t)music->width, pixel_parts, part_count);
+	} else {
+		status = kl_window_present_parts(music->window, music->pixels, (size_t)music->width, parts, part_count);
+	}
 	if (status == EAGAIN)
 		music->resized = 1;
 
@@ -1360,4 +1403,83 @@ mu_wait(
 	if (pace > 0 && pace < wait)
 		wait = pace;
 	return wait;
+}
+
+/* Turns pixels from the window into logical units at the window's scale. */
+static double
+mu_units(
+	unsigned scale,
+	double pixels)
+{
+	/* At 100 % the pixels are the units. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return pixels;
+	return pixels * (double)KL_SCALE_BASE / (double)scale;
+}
+
+/* Turns a logical length into pixels at the window's scale. */
+static int
+mu_pixel(
+	int units,
+	unsigned scale)
+{
+	/* At 100 % the units are the pixels. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return units;
+	if (units >= 0)
+		return (units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE;
+	return -((-units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE);
+}
+
+/* Computes the logical size of the canvas. */
+static void
+mu_logical_size(
+	struct mu_window *music)
+{
+	struct kl_rect pixels;
+	struct kl_rect units;
+
+	/* Convert pixel canvas size to logical units. */
+	pixels.x = 0;
+	pixels.y = 0;
+	pixels.width = (int)music->width;
+	pixels.height = (int)music->height;
+	kl_canvas_logical(&music->canvas, &pixels, &units);
+	music->logical_width = (uint32_t)units.width;
+	music->logical_height = (uint32_t)units.height;
+}
+
+/* Turns logical damage rectangles into pixel rectangles. */
+static void
+mu_part_pixels(
+	const struct mu_window *music,
+	const struct kl_rect *logical,
+	unsigned count,
+	struct kl_rect *pixels)
+{
+	unsigned index;
+	int left;
+	int top;
+	int right;
+	int bottom;
+
+	/* Each rectangle, rounded outward and clamped to the pixel canvas. */
+	for (index = 0U; index < count; index++) {
+		left = (logical[index].x * (int)music->scale) / (int)KL_SCALE_BASE;
+		top = (logical[index].y * (int)music->scale) / (int)KL_SCALE_BASE;
+		right = ((logical[index].x + logical[index].width) * (int)music->scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		bottom = ((logical[index].y + logical[index].height) * (int)music->scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		if (left < 0)
+			left = 0;
+		if (top < 0)
+			top = 0;
+		if (right > (int)music->width)
+			right = (int)music->width;
+		if (bottom > (int)music->height)
+			bottom = (int)music->height;
+		pixels[index].x = left;
+		pixels[index].y = top;
+		pixels[index].width = right > left ? right - left : 0;
+		pixels[index].height = bottom > top ? bottom - top : 0;
+	}
 }

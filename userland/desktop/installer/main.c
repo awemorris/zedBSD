@@ -59,6 +59,7 @@ static void main_key(struct inst_app *app, uint32_t code, unsigned modifiers);
 static int main_frame(struct inst_app *app);
 static int main_resize(struct inst_app *app);
 static int main_canvas_make(struct inst_app *app);
+static void main_logical_size(struct inst_app *app);
 static void main_log_controls(struct inst_app *app);
 static void main_language_changed(void *data, const char *language);
 
@@ -138,6 +139,14 @@ main(
 		return 1;
 	}
 
+	/* Follow the compositor's scale. */
+	error = kl_window_follow_scale(app->window);
+	if (error != 0)
+		inst_log("SCALE follow=refused errno=%d", error);
+	app->scale = kl_window_scale(app->window);
+	if (app->scale == 0U)
+		app->scale = KL_SCALE_BASE;
+
 	/* The input and the content's scroll. */
 	app->ui = kl_ui_create();
 	error = kl_scroll_init(&app->scroll, KL_SCROLL_Y);
@@ -148,6 +157,7 @@ main(
 		kl_text_close(&app->text);
 		return 1;
 	}
+	kl_ui_set_scale(app->ui, app->scale);
 
 	/* The widgets' style, and the wizard at its start. */
 	app->style.text = &app->text;
@@ -424,6 +434,17 @@ main_event(
 	case KL_WINDOW_RESIZE:
 		app->resized = 1;
 		break;
+	case KL_WINDOW_SCALE:
+		app->scale = kl_window_scale(app->window);
+		if (app->scale == 0U)
+			app->scale = KL_SCALE_BASE;
+		kl_ui_set_scale(app->ui, app->scale);
+		if (app->canvas_made) {
+			kl_canvas_set_scale(&app->canvas, app->scale);
+			main_logical_size(app);
+		}
+		app->dirty = 1;
+		break;
 	case KL_WINDOW_CLOSE:
 		app->closed = 1;
 		break;
@@ -581,11 +602,31 @@ main_canvas_make(
 	status = kl_canvas_init(&app->canvas, app->pixels, (size_t)app->width, (int)app->width, (int)app->height);
 	if (status != 0)
 		return -1;
+	kl_canvas_set_scale(&app->canvas, app->scale);
+	main_logical_size(app);
 	app->canvas_made = 1;
 	app->style.canvas = &app->canvas;
 
 	/* Succeeded. */
 	return 0;
+}
+
+/* Computes the logical size of the canvas for layout. */
+static void
+main_logical_size(
+	struct inst_app *app)
+{
+	struct kl_rect pixels;
+	struct kl_rect units;
+
+	/* Convert pixel canvas size to logical units. */
+	pixels.x = 0;
+	pixels.y = 0;
+	pixels.width = (int)app->width;
+	pixels.height = (int)app->height;
+	kl_canvas_logical(&app->canvas, &pixels, &units);
+	app->logical_width = (uint32_t)units.width;
+	app->logical_height = (uint32_t)units.height;
 }
 
 /*

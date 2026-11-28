@@ -405,3 +405,15 @@ msg	Audio Format	音声フォーマット
 msg	Format	フォーマット
 # userland/desktop/locale/settings.keys:97
 msg	No audio formats	音声フォーマットがありません
+# userland/desktop/settings/page-display.c:scale
+msg	Scale	拡大率
+msg	Choose how large text and controls are drawn on each display.	ディスプレイごとの文字と操作部品の大きさを選びます。
+msg	Recommended	推奨
+msg	This display only supports 100% scale.	このディスプレイは 100% の拡大率のみ対応しています。
+msg	Scale is controlled by the primary display while mirroring.	ミラー表示中は主ディスプレイの拡大率に従います。
+msg	The scale cannot be changed while a mode change or game is active.	解像度の変更中またはゲーム表示中は拡大率を変えられません。
+msg	This display is not currently shown.	このディスプレイは現在表示されていません。
+msg	That scale cannot be used on this display.	その拡大率はこのディスプレイでは使えません。
+msg	This display does not support that scale.	このディスプレイはその拡大率に対応していません。
+msg	The scale could not be changed.	拡大率を変えられませんでした。
+msg	This desktop cannot change the scale.	このデスクトップでは拡大率を変えられません。

@@ -59,7 +59,9 @@ struct se_window {
 	/* The size the compositor asked for and whether it changed since taken; whether it asked to close and the window is maximized. */
 	uint32_t width;
 	uint32_t height;
+	unsigned scale;
 	int resized;
+	int rescaled;
 	int closed;
 	int maximized;
 
@@ -142,6 +144,7 @@ struct se_glass {
 	int on;
 	struct se_panel shown[SE_PANELS];
 	size_t shown_count;
+	unsigned shown_scale;
 	int sent;
 };
 

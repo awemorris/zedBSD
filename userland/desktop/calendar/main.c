@@ -63,6 +63,9 @@ struct cal_window {
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	uint32_t logical_width;
+	uint32_t logical_height;
+	unsigned scale;
 	struct kl_canvas canvas;
 	int canvas_made;
 	struct kl_text text;
@@ -128,6 +131,10 @@ static void cal_slow_frame(const struct cal_window *calendar, uint64_t started, 
 static int cal_wait(const struct cal_window *calendar, uint64_t now_us);
 static void cal_store_start(void);
 static void cal_remind(struct cal_window *calendar);
+static double cal_units(unsigned scale, double pixels);
+static int cal_pixel(int units, unsigned scale);
+static void cal_logical_size(struct cal_window *calendar);
+static void cal_part_pixels(const struct cal_window *calendar, const struct kl_rect *logical, unsigned count, struct kl_rect *pixels);
 
 /*
  * Runs Calendar.
@@ -197,6 +204,14 @@ main(
 		return 1;
 	}
 
+	/* Follow the compositor's scale. */
+	error = kl_window_follow_scale(calendar.window);
+	if (error != 0)
+		cal_log("SCALE follow=refused errno=%d", error);
+	calendar.scale = kl_window_scale(calendar.window);
+	if (calendar.scale == 0U)
+		calendar.scale = KL_SCALE_BASE;
+
 	/*
 	 * The pointer's motions merged, and each frame drawn once the
 	 * compositor took the last one (ws210-p014 F2): the pointer crossing
@@ -215,6 +230,7 @@ main(
 		cal_view_release(&calendar.view);
 		return 1;
 	}
+	kl_ui_set_scale(calendar.ui, calendar.scale);
 
 	/* The menu and the style (opaque until the first frame finds whether the window can stand on glass). */
 	(void)kl_window_set_menu(calendar.window, cal_menu, sizeof(cal_menu) / sizeof(cal_menu[0]));
@@ -461,7 +477,7 @@ cal_input(
 		 * its part (BUG-226), held button or not; a button held still over
 		 * the same widget draws nothing.
 		 */
-		redraw = kl_ui_pointer_motion(calendar->ui, event->x, event->y);
+		redraw = kl_ui_pointer_motion(calendar->ui, cal_units(calendar->scale, event->x), cal_units(calendar->scale, event->y));
 		if (calendar->buttons_held != 0U && calendar->view.dragging >= 0)
 			cal_dirty(calendar, "drag");
 		else if (redraw)
@@ -494,7 +510,7 @@ cal_input(
 			calendar->keyed = 0;
 
 		/* The left button presses the widgets. */
-		redraw = kl_ui_pointer_motion(calendar->ui, event->x, event->y);
+		redraw = kl_ui_pointer_motion(calendar->ui, cal_units(calendar->scale, event->x), cal_units(calendar->scale, event->y));
 		if (event->code == KL_BUTTON_LEFT)
 			(void)kl_ui_pointer_button(calendar->ui, event->pressed, event->arrival_us);
 
@@ -523,10 +539,10 @@ cal_input(
 			cal_log("KINETIC fling source=finger");
 		break;
 	case KL_WINDOW_TOUCH_DOWN:
-		(void)kl_ui_touch_down(calendar->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_down(calendar->ui, event->id, event->time_us, event->arrival_us, cal_units(calendar->scale, event->x), cal_units(calendar->scale, event->y));
 		break;
 	case KL_WINDOW_TOUCH_MOTION:
-		(void)kl_ui_touch_motion(calendar->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_motion(calendar->ui, event->id, event->time_us, event->arrival_us, cal_units(calendar->scale, event->x), cal_units(calendar->scale, event->y));
 		break;
 	case KL_WINDOW_TOUCH_UP:
 		(void)kl_ui_touch_up(calendar->ui, event->id, event->time_us, event->arrival_us);
@@ -553,6 +569,17 @@ cal_input(
 		break;
 	case KL_WINDOW_RESIZE:
 		calendar->resized = 1;
+		break;
+	case KL_WINDOW_SCALE:
+		calendar->scale = kl_window_scale(calendar->window);
+		if (calendar->scale == 0U)
+			calendar->scale = KL_SCALE_BASE;
+		kl_ui_set_scale(calendar->ui, calendar->scale);
+		if (calendar->canvas_made) {
+			kl_canvas_set_scale(&calendar->canvas, calendar->scale);
+			cal_logical_size(calendar);
+		}
+		cal_dirty(calendar, "scale");
 		break;
 	case KL_WINDOW_CLOSE:
 		calendar->view.quit = 1;
@@ -591,7 +618,7 @@ cal_button_cell(
 		return 0;
 
 	/* The cell under the pointer. */
-	found = cal_view_cell_at(&calendar->view, event->x, event->y, rect);
+	found = cal_view_cell_at(&calendar->view, cal_units(calendar->scale, event->x), cal_units(calendar->scale, event->y), rect);
 	return found;
 }
 
@@ -695,6 +722,8 @@ cal_resize(
 	status = kl_canvas_init(&calendar->canvas, calendar->pixels, (size_t)calendar->width, (int)calendar->width, (int)calendar->height);
 	if (status != 0)
 		return -1;
+	kl_canvas_set_scale(&calendar->canvas, calendar->scale);
+	cal_logical_size(calendar);
 
 	/* Succeeded: drawn again at the new size. */
 	calendar->canvas_made = 1;
@@ -818,7 +847,7 @@ cal_draw(
 	calendar->dirty = 0;
 	if (part_count == 0U) {
 		kl_ui_begin(calendar->ui, now_us);
-		cal_view_draw(&calendar->view, calendar->ui, &calendar->style, (int)calendar->width, (int)calendar->height, now_us);
+		cal_view_draw(&calendar->view, calendar->ui, &calendar->style, (int)calendar->logical_width, (int)calendar->logical_height, now_us);
 		calendar->moving = kl_ui_end(calendar->ui, now_us);
 	}
 
@@ -826,7 +855,7 @@ cal_draw(
 	for (index = 0; index < part_count; index++) {
 		kl_canvas_clip_push(&calendar->canvas, &parts[index]);
 		kl_ui_begin(calendar->ui, now_us);
-		cal_view_draw(&calendar->view, calendar->ui, &calendar->style, (int)calendar->width, (int)calendar->height, now_us);
+		cal_view_draw(&calendar->view, calendar->ui, &calendar->style, (int)calendar->logical_width, (int)calendar->logical_height, now_us);
 		calendar->moving = kl_ui_end(calendar->ui, now_us);
 		kl_canvas_clip_pop(&calendar->canvas);
 	}
@@ -843,7 +872,7 @@ cal_draw(
 	for (index = 0; index < (unsigned)redraw_count; index++) {
 		kl_canvas_clip_push(&calendar->canvas, &redraw[index]);
 		kl_ui_begin(calendar->ui, now_us);
-		cal_view_draw(&calendar->view, calendar->ui, &calendar->style, (int)calendar->width, (int)calendar->height, now_us);
+		cal_view_draw(&calendar->view, calendar->ui, &calendar->style, (int)calendar->logical_width, (int)calendar->logical_height, now_us);
 		calendar->moving = kl_ui_end(calendar->ui, now_us);
 		kl_canvas_clip_pop(&calendar->canvas);
 		if (part_count != 0U)
@@ -867,7 +896,14 @@ cal_draw(
 
 	/* The glass's panels for the frame; a compositor without glass leaves the window opaque from the next one. */
 	if (calendar->view.glass) {
-		count = cal_view_panels(&calendar->view, (int)calendar->width, (int)calendar->height, panels, CAL_PANELS_MAX);
+		count = cal_view_panels(&calendar->view, (int)calendar->logical_width, (int)calendar->logical_height, panels, CAL_PANELS_MAX);
+		for (index = 0U; index < (unsigned)count; index++) {
+			panels[index].x = cal_pixel(panels[index].x, calendar->scale);
+			panels[index].y = cal_pixel(panels[index].y, calendar->scale);
+			panels[index].width = cal_pixel(panels[index].width, calendar->scale);
+			panels[index].height = cal_pixel(panels[index].height, calendar->scale);
+			panels[index].radius = (float)cal_pixel((int)(panels[index].radius + 0.5f), calendar->scale);
+		}
 		error = kl_window_set_glass(calendar->window, panels, count);
 		if (error != 0) {
 			cal_log("GLASS failed error=%d", error);
@@ -879,7 +915,14 @@ cal_draw(
 
 	/* The frame shown, by its parts alone when it was drawn so (BUG-221). */
 	drawn = kl_clock_us();
-	status = kl_window_present_parts(calendar->window, calendar->pixels, (size_t)calendar->width, parts, part_count);
+	if (part_count != 0U && calendar->scale != KL_SCALE_BASE) {
+		struct kl_rect pixel_parts[KL_FRAME_PARTS_MAX];
+
+		cal_part_pixels(calendar, parts, part_count, pixel_parts);
+		status = kl_window_present_parts(calendar->window, calendar->pixels, (size_t)calendar->width, pixel_parts, part_count);
+	} else {
+		status = kl_window_present_parts(calendar->window, calendar->pixels, (size_t)calendar->width, parts, part_count);
+	}
 	if (status == EAGAIN)
 		calendar->resized = 1;
 	if (redraw_count != 0U && part_count != 0U)
@@ -1098,4 +1141,83 @@ cal_remind(
 
 	/* Looked up to now. */
 	calendar->reminded_minute = minute;
+}
+
+/* Turns pixels from the window into logical units at the window's scale. */
+static double
+cal_units(
+	unsigned scale,
+	double pixels)
+{
+	/* At 100 % the pixels are the units. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return pixels;
+	return pixels * (double)KL_SCALE_BASE / (double)scale;
+}
+
+/* Turns a logical length into pixels at the window's scale. */
+static int
+cal_pixel(
+	int units,
+	unsigned scale)
+{
+	/* At 100 % the units are the pixels. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return units;
+	if (units >= 0)
+		return (units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE;
+	return -((-units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE);
+}
+
+/* Computes the logical size of the canvas. */
+static void
+cal_logical_size(
+	struct cal_window *calendar)
+{
+	struct kl_rect pixels;
+	struct kl_rect units;
+
+	/* Convert pixel canvas size to logical units. */
+	pixels.x = 0;
+	pixels.y = 0;
+	pixels.width = (int)calendar->width;
+	pixels.height = (int)calendar->height;
+	kl_canvas_logical(&calendar->canvas, &pixels, &units);
+	calendar->logical_width = (uint32_t)units.width;
+	calendar->logical_height = (uint32_t)units.height;
+}
+
+/* Turns logical damage rectangles into pixel rectangles. */
+static void
+cal_part_pixels(
+	const struct cal_window *calendar,
+	const struct kl_rect *logical,
+	unsigned count,
+	struct kl_rect *pixels)
+{
+	unsigned index;
+	int left;
+	int top;
+	int right;
+	int bottom;
+
+	/* Each rectangle, rounded outward and clamped to the pixel canvas. */
+	for (index = 0U; index < count; index++) {
+		left = (logical[index].x * (int)calendar->scale) / (int)KL_SCALE_BASE;
+		top = (logical[index].y * (int)calendar->scale) / (int)KL_SCALE_BASE;
+		right = ((logical[index].x + logical[index].width) * (int)calendar->scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		bottom = ((logical[index].y + logical[index].height) * (int)calendar->scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		if (left < 0)
+			left = 0;
+		if (top < 0)
+			top = 0;
+		if (right > (int)calendar->width)
+			right = (int)calendar->width;
+		if (bottom > (int)calendar->height)
+			bottom = (int)calendar->height;
+		pixels[index].x = left;
+		pixels[index].y = top;
+		pixels[index].width = right > left ? right - left : 0;
+		pixels[index].height = bottom > top ? bottom - top : 0;
+	}
 }

@@ -76,6 +76,9 @@ struct ph_window {
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	uint32_t logical_width;
+	uint32_t logical_height;
+	unsigned scale;
 	struct kl_canvas canvas;
 	int canvas_made;
 	struct kl_text text;
@@ -163,6 +166,10 @@ static void ph_marks_answer(struct ph_window *photos, int error);
 static void ph_marks_finish(struct ph_window *photos);
 static void ph_remove_start(struct ph_window *photos, const char *id, uint64_t now_us);
 static int ph_resize(struct ph_window *photos);
+static double ph_units(unsigned scale, double pixels);
+static int ph_pixel(int units, unsigned scale);
+static void ph_logical_size(struct ph_window *photos);
+static void ph_part_pixels(const struct ph_window *photos, const struct kl_rect *logical, unsigned count, struct kl_rect *pixels);
 static void ph_draw(struct ph_window *photos, uint64_t now_us);
 static void ph_draw_view(struct ph_window *photos, uint64_t now_us);
 static int ph_wait(const struct ph_window *photos, uint64_t now_us);
@@ -258,6 +265,14 @@ main(
 		return 1;
 	}
 
+	/* Follow the compositor's scale. */
+	error = kl_window_follow_scale(photos.window);
+	if (error != 0)
+		ph_log("SCALE follow=refused errno=%d", error);
+	photos.scale = kl_window_scale(photos.window);
+	if (photos.scale == 0U)
+		photos.scale = KL_SCALE_BASE;
+
 	/*
 	 * The pointer's motions merged, and each frame drawn once the
 	 * compositor took the last one (ws210-p014 F2): the pointer crossing
@@ -278,6 +293,7 @@ main(
 		ph_view_release(&photos.view);
 		return 1;
 	}
+	kl_ui_set_scale(photos.ui, photos.scale);
 
 	/* The menu and the style (opaque until the first frame finds whether the window can stand on glass). */
 	(void)kl_window_set_menu(photos.window, ph_menu, sizeof(ph_menu) / sizeof(ph_menu[0]));
@@ -854,7 +870,7 @@ ph_input(
 	 * part alone, or the whole window while a button is held.
 	 */
 	if (event->kind == KL_WINDOW_MOTION) {
-		taken = kl_ui_pointer_motion(photos->ui, event->x, event->y);
+		taken = kl_ui_pointer_motion(photos->ui, ph_units(photos->scale, event->x), ph_units(photos->scale, event->y));
 		if (taken && photos->buttons_held != 0U)
 			photos->dirty = 1;
 		else if (taken)
@@ -886,10 +902,21 @@ ph_input(
 	}
 
 	/* The window's own. */
-	if (event->kind == KL_WINDOW_RESIZE)
+	if (event->kind == KL_WINDOW_RESIZE) {
 		photos->resized = 1;
-	else if (event->kind == KL_WINDOW_CLOSE)
+	} else if (event->kind == KL_WINDOW_SCALE) {
+		photos->scale = kl_window_scale(photos->window);
+		if (photos->scale == 0U)
+			photos->scale = KL_SCALE_BASE;
+		kl_ui_set_scale(photos->ui, photos->scale);
+		if (photos->canvas_made) {
+			kl_canvas_set_scale(&photos->canvas, photos->scale);
+			ph_logical_size(photos);
+		}
+		photos->dirty = 1;
+	} else if (event->kind == KL_WINDOW_CLOSE) {
 		photos->view.quit = 1;
+	}
 }
 
 /*
@@ -1482,6 +1509,8 @@ ph_resize(
 	status = kl_canvas_init(&photos->canvas, photos->pixels, (size_t)photos->width, (int)photos->width, (int)photos->height);
 	if (status != 0)
 		return -1;
+	kl_canvas_set_scale(&photos->canvas, photos->scale);
+	ph_logical_size(photos);
 
 	/* Succeeded: drawn again at the new size. */
 	photos->canvas_made = 1;
@@ -1559,7 +1588,14 @@ ph_draw(
 
 	/* The glass's panels for the frame; a compositor without glass leaves the window opaque from the next one. */
 	if (photos->view.glass) {
-		count = ph_view_panels(&photos->view, (int)photos->width, (int)photos->height, panels, PH_PANELS_MAX);
+		count = ph_view_panels(&photos->view, (int)photos->logical_width, (int)photos->logical_height, panels, PH_PANELS_MAX);
+		for (index = 0U; index < (unsigned)count; index++) {
+			panels[index].x = ph_pixel(panels[index].x, photos->scale);
+			panels[index].y = ph_pixel(panels[index].y, photos->scale);
+			panels[index].width = ph_pixel(panels[index].width, photos->scale);
+			panels[index].height = ph_pixel(panels[index].height, photos->scale);
+			panels[index].radius = (float)ph_pixel((int)(panels[index].radius + 0.5f), photos->scale);
+		}
 		error = kl_window_set_glass(photos->window, panels, count);
 		if (error != 0) {
 			ph_log("GLASS failed error=%d", error);
@@ -1570,7 +1606,14 @@ ph_draw(
 	}
 
 	/* The frame shown, by its parts alone when it was drawn so. */
-	status = kl_window_present_parts(photos->window, photos->pixels, (size_t)photos->width, parts, part_count);
+	if (part_count != 0U && photos->scale != KL_SCALE_BASE) {
+		struct kl_rect pixel_parts[KL_FRAME_PARTS_MAX];
+
+		ph_part_pixels(photos, parts, part_count, pixel_parts);
+		status = kl_window_present_parts(photos->window, photos->pixels, (size_t)photos->width, pixel_parts, part_count);
+	} else {
+		status = kl_window_present_parts(photos->window, photos->pixels, (size_t)photos->width, parts, part_count);
+	}
 	if (status == EAGAIN)
 		photos->resized = 1;
 
@@ -1612,7 +1655,7 @@ ph_draw_view(
 
 	/* The view; what it changed while it drew is drawn in the next frame. */
 	kl_ui_begin(photos->ui, now_us);
-	ph_view_draw(&photos->view, photos->ui, &photos->style, (int)photos->width, (int)photos->height, now_us);
+	ph_view_draw(&photos->view, photos->ui, &photos->style, (int)photos->logical_width, (int)photos->logical_height, now_us);
 	if (open != photos->view.open || chosen != photos->view.chosen || list != photos->view.list || album != photos->view.album ||
 	    adding != photos->view.adding)
 		photos->dirty = 1;
@@ -1744,4 +1787,83 @@ ph_wait(
 	if (pace > 0 && pace < wait)
 		wait = pace;
 	return wait;
+}
+
+/* Turns pixels from the window into logical units at the window's scale. */
+static double
+ph_units(
+	unsigned scale,
+	double pixels)
+{
+	/* At 100 % the pixels are the units. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return pixels;
+	return pixels * (double)KL_SCALE_BASE / (double)scale;
+}
+
+/* Turns a logical length into pixels at the window's scale. */
+static int
+ph_pixel(
+	int units,
+	unsigned scale)
+{
+	/* At 100 % the units are the pixels. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return units;
+	if (units >= 0)
+		return (units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE;
+	return -((-units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE);
+}
+
+/* Computes the logical size of the canvas. */
+static void
+ph_logical_size(
+	struct ph_window *photos)
+{
+	struct kl_rect pixels;
+	struct kl_rect units;
+
+	/* Convert pixel canvas size to logical units. */
+	pixels.x = 0;
+	pixels.y = 0;
+	pixels.width = (int)photos->width;
+	pixels.height = (int)photos->height;
+	kl_canvas_logical(&photos->canvas, &pixels, &units);
+	photos->logical_width = (uint32_t)units.width;
+	photos->logical_height = (uint32_t)units.height;
+}
+
+/* Turns logical damage rectangles into pixel rectangles. */
+static void
+ph_part_pixels(
+	const struct ph_window *photos,
+	const struct kl_rect *logical,
+	unsigned count,
+	struct kl_rect *pixels)
+{
+	unsigned index;
+	int left;
+	int top;
+	int right;
+	int bottom;
+
+	/* Each rectangle, rounded outward and clamped to the pixel canvas. */
+	for (index = 0U; index < count; index++) {
+		left = (logical[index].x * (int)photos->scale) / (int)KL_SCALE_BASE;
+		top = (logical[index].y * (int)photos->scale) / (int)KL_SCALE_BASE;
+		right = ((logical[index].x + logical[index].width) * (int)photos->scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		bottom = ((logical[index].y + logical[index].height) * (int)photos->scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		if (left < 0)
+			left = 0;
+		if (top < 0)
+			top = 0;
+		if (right > (int)photos->width)
+			right = (int)photos->width;
+		if (bottom > (int)photos->height)
+			bottom = (int)photos->height;
+		pixels[index].x = left;
+		pixels[index].y = top;
+		pixels[index].width = right > left ? right - left : 0;
+		pixels[index].height = bottom > top ? bottom - top : 0;
+	}
 }

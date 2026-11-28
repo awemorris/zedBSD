@@ -96,7 +96,6 @@ static void ui_rect_union(struct kl_rect *into, const struct kl_rect *rect);
 static void ui_draw_frame(struct se_app *app, struct kl_canvas *canvas, const struct kl_rect *part);
 static void ui_redraw_region(struct se_app *app, unsigned kind, int index);
 static void ui_focus(struct se_app *app, int focused);
-static void ui_clear_rect(struct kl_canvas *canvas, const struct kl_rect *rect);
 static void ui_key(struct se_app *app, const struct se_event *event);
 static void ui_step_page(struct se_app *app, int direction);
 static void ui_scroll_page(struct se_app *app, int amount);
@@ -397,6 +396,8 @@ se_ui_draw(
 	struct kl_canvas *canvas)
 {
 	struct kl_rect parts[SE_DAMAGE_PARTS];
+	struct kl_rect whole_pixels;
+	struct kl_rect whole_units;
 	int part_count;
 	int index;
 
@@ -428,9 +429,14 @@ se_ui_draw(
 	app->drawn_hover_index = app->hover_index;
 	app->hover_moved = 0;
 
-	/* The panes' places at this size. */
-	app->width = canvas->width;
-	app->height = canvas->height;
+	/* The panes' places at this logical size. */
+	whole_pixels.x = 0;
+	whole_pixels.y = 0;
+	whole_pixels.width = canvas->width;
+	whole_pixels.height = canvas->height;
+	kl_canvas_logical(canvas, &whole_pixels, &whole_units);
+	app->width = whole_units.width;
+	app->height = whole_units.height;
 	ui_layout(app);
 
 	/* The whole frame, or each part of it clipped to that part. */
@@ -1845,13 +1851,11 @@ ui_draw_frame(
 	/* The window's ground: clear on glass (the desktop shows between the panes), else a quiet light gradient. */
 	whole.x = 0;
 	whole.y = 0;
-	whole.width = canvas->width;
-	whole.height = canvas->height;
+	whole.width = app->width;
+	whole.height = app->height;
 	if (part != NULL)
 		kl_canvas_clip_push(canvas, part);
-	if (app->glass != 0 && part != NULL) {
-		ui_clear_rect(canvas, part);
-	} else if (app->glass != 0) {
+	if (app->glass != 0) {
 		kl_canvas_clear(canvas);
 	} else {
 		kl_canvas_gradient(canvas, &whole, SE_COLOR_BACKGROUND_TOP, SE_COLOR_BACKGROUND_BOTTOM);
@@ -2034,40 +2038,4 @@ ui_focus(
 
 	/* The chosen page's row is drawn again in its new colours. */
 	ui_redraw_region(app, SE_HIT_PAGE_ROW, (int)app->page);
-}
-
-/* Makes a rectangle of the canvas transparent (the glass shows through), within the canvas. */
-static void
-ui_clear_rect(
-	struct kl_canvas *canvas,
-	const struct kl_rect *rect)
-{
-	uint32_t *row;
-	int left;
-	int top;
-	int right;
-	int bottom;
-	int y;
-
-	/* The rectangle within the canvas. */
-	left = rect->x;
-	top = rect->y;
-	right = rect->x + rect->width;
-	bottom = rect->y + rect->height;
-	if (left < 0)
-		left = 0;
-	if (top < 0)
-		top = 0;
-	if (right > canvas->width)
-		right = canvas->width;
-	if (bottom > canvas->height)
-		bottom = canvas->height;
-	if (left >= right || top >= bottom)
-		return;
-
-	/* Each of its rows, transparent black (premultiplied). */
-	for (y = top; y < bottom; y++) {
-		row = canvas->pixels + (size_t)y * canvas->stride;
-		memset(row + left, 0, sizeof(row[0]) * (size_t)(right - left));
-	}
 }

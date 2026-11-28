@@ -680,6 +680,20 @@ se_fields_input(
 }
 
 /*
+ * Tells the fields' input the window's scale so that kl_ui_window_text
+ * reports the caret in pixels.
+ */
+void
+se_fields_set_scale(
+	unsigned scale)
+{
+	/* Nothing before se_fields_open. */
+	if (widgets_ui == NULL)
+		return;
+	kl_ui_set_scale(widgets_ui, scale);
+}
+
+/*
  * Reports the fields' input, for the window's text input (main.c,
  * kl_ui_window_text); NULL before se_fields_open.
  */

@@ -313,6 +313,9 @@ struct inst_app {
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	uint32_t logical_width;
+	uint32_t logical_height;
+	unsigned scale;
 	struct kl_canvas canvas;
 	int canvas_made;
 	struct kl_text text;

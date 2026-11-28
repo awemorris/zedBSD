@@ -651,6 +651,11 @@ struct se_display {
 	unsigned card_seconds;
 	char resolution_message[SE_MESSAGE];
 	int resolution_bad;
+	unsigned scale_told[KL_DISPLAYS_MAX];
+	struct kl_display_scale scale[KL_DISPLAYS_MAX];
+	uint32_t scale_request;
+	char scale_message[SE_MESSAGE];
+	int scale_bad;
 	char message[SE_MESSAGE];
 	int message_bad;
 	int taken;
@@ -1318,10 +1323,11 @@ struct se_touch_scroll {
  * One lives for the whole run.
  */
 struct se_app {
-	/* The fonts, the window's size, the time of the input being handled, and whether a new frame is due. */
+	/* The fonts, the window's size and scale, the time of the input being handled, and whether a new frame is due. */
 	struct kl_text *text;
 	int width;
 	int height;
+	unsigned scale;
 	uint64_t now;
 	int dirty;
 
@@ -1624,6 +1630,7 @@ void se_fields_close(void);
 void se_fields_begin(uint64_t now_us);
 int se_fields_end(uint64_t now_us);
 void se_fields_input(const struct se_event *event);
+void se_fields_set_scale(unsigned scale);
 struct kl_ui *se_fields_ui(void);
 int se_field_key(struct kl_field *field, const struct se_event *event);
 unsigned se_field_draw(struct se_app *app, struct kl_canvas *canvas, struct kl_field *field, const struct kl_rect *rect, const char *placeholder, unsigned kind, int focused);

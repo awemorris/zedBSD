@@ -599,15 +599,15 @@ displays_output(
 		flags |= KL_SYSTEM_DISPLAY_ANCHOR | KL_SYSTEM_DISPLAY_SHOWN;
 		x = compose->output_x;
 		y = compose->output_y;
-		width = server->width;
-		height = server->height;
+		width = server->pixel_width;
+		height = server->pixel_height;
 		refresh = server->refresh;
 	} else if (head != NULL) {
 		flags |= KL_SYSTEM_DISPLAY_SHOWN;
 		x = head->x;
 		y = head->y;
-		width = head->width;
-		height = head->height;
+		width = head->pixel_width;
+		height = head->pixel_height;
 		refresh = head->refresh;
 	} else {
 		/* Shown nowhere: its own mode, at the place kept for it. */

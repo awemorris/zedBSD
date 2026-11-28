@@ -23,7 +23,8 @@
 #include <errno.h>
 #include <string.h>
 
-static int glass_same(const struct se_glass *glass, const struct se_panel *panels, size_t count);
+static int glass_same(const struct se_glass *glass, const struct se_panel *panels, size_t count, unsigned scale);
+static int glass_pixel(int units, unsigned scale);
 
 /*
  * Makes the window glass when it can be: returns 1 when it is, 0 when it
@@ -89,18 +90,18 @@ se_glass_refresh(
 
 	/* The frame's panels, unless they are the ones the compositor has. */
 	count = se_ui_panels(app, panels, SE_PANELS);
-	same = glass_same(glass, panels, count);
+	same = glass_same(glass, panels, count, app->scale);
 	if (same != 0)
 		return;
 
-	/* Each panel in the compositor's terms. */
+	/* Each panel in the compositor's terms (pixels). */
 	memset(sent, 0, sizeof(sent));
 	for (index = 0; index < count; index++) {
-		sent[index].x = panels[index].rect.x;
-		sent[index].y = panels[index].rect.y;
-		sent[index].width = panels[index].rect.width;
-		sent[index].height = panels[index].rect.height;
-		sent[index].radius = panels[index].radius;
+		sent[index].x = glass_pixel(panels[index].rect.x, app->scale);
+		sent[index].y = glass_pixel(panels[index].rect.y, app->scale);
+		sent[index].width = glass_pixel(panels[index].rect.width, app->scale);
+		sent[index].height = glass_pixel(panels[index].rect.height, app->scale);
+		sent[index].radius = (float)glass_pixel((int)(panels[index].radius + 0.5f), app->scale);
 		sent[index].kind = KL_GLASS_CARD;
 	}
 
@@ -114,6 +115,7 @@ se_glass_refresh(
 	/* Remembered, to send again only what changes. */
 	memcpy(glass->shown, panels, sizeof(panels[0]) * count);
 	glass->shown_count = count;
+	glass->shown_scale = app->scale;
 	glass->sent = 1;
 	se_log("GLASS panels count=%lu", (unsigned long)count);
 }
@@ -138,14 +140,17 @@ static int
 glass_same(
 	const struct se_glass *glass,
 	const struct se_panel *panels,
-	size_t count)
+	size_t count,
+	unsigned scale)
 {
 	size_t index;
 
-	/* Nothing sent yet, or another count. */
+	/* Nothing sent yet, or another count or scale. */
 	if (glass->sent == 0)
 		return 0;
 	if (glass->shown_count != count)
+		return 0;
+	if (glass->shown_scale != scale)
 		return 0;
 
 	/* Any panel with another place, radius or kind. */
@@ -163,4 +168,18 @@ glass_same(
 
 	/* The same list. */
 	return 1;
+}
+
+/* Turns a logical length into pixels at the window's scale. */
+static int
+glass_pixel(
+	int units,
+	unsigned scale)
+{
+	/* At 100 % the units are the pixels. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return units;
+	if (units >= 0)
+		return (units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE;
+	return -((-units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE);
 }

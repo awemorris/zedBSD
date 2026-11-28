@@ -76,7 +76,7 @@
  * density asks for (1), or is shown at 100 % (0) while the default is only
  * offered as the recommended step.
  */
-#define KWL_SCALE_AUTO_TAKEN		0
+#define KWL_SCALE_AUTO_TAKEN		1
 
 /*
  * The densities a display's physical size may give: one outside them is

@@ -105,6 +105,9 @@ struct vp_player {
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	uint32_t logical_width;
+	uint32_t logical_height;
+	unsigned scale;
 	uint64_t resized_us;
 	uint32_t presented_width;
 	uint32_t presented_height;
@@ -221,6 +224,8 @@ static void vp_states(struct vp_player *player);
 static void vp_choose(struct vp_player *player);
 static void vp_chosen(void *data, struct kl_file_chooser *chooser, unsigned result, const char *path, size_t filter);
 static int vp_resize(struct vp_player *player);
+static double vp_units(unsigned scale, double pixels);
+static void vp_logical_size(struct vp_player *player);
 static void vp_draw(struct vp_player *player, uint64_t now_us);
 static int vp_played_out(struct vp_player *player, double clock, uint64_t now_us);
 static void vp_log_clock(struct vp_player *player, double clock, int played_out, uint64_t now_us);
@@ -302,6 +307,15 @@ main(
 		kl_app_close(player.app);
 		return 1;
 	}
+
+	/* Follow the compositor's scale. */
+	error = kl_window_follow_scale(player.window);
+	if (error != 0)
+		vp_log("SCALE follow=refused errno=%d", error);
+	player.scale = kl_window_scale(player.window);
+	if (player.scale == 0U)
+		player.scale = KL_SCALE_BASE;
+	kl_ui_set_scale(player.ui, player.scale);
 
 	/* The window shows a video: in full screen the compositor may show it without composing (game mode, ws122-p005b). */
 	(void)kl_window_set_content_type(player.window, KL_CONTENT_VIDEO);
@@ -564,14 +578,14 @@ vp_input(
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
 		player->bar_until = now + vp_bar_time(player);
-		(void)kl_ui_pointer_motion(player->ui, event->x, event->y);
+		(void)kl_ui_pointer_motion(player->ui, vp_units(player->scale, event->x), vp_units(player->scale, event->y));
 		break;
 	case KL_WINDOW_LEAVE:
 		(void)kl_ui_pointer_leave(player->ui);
 		break;
 	case KL_WINDOW_BUTTON:
 		player->bar_until = now + vp_bar_time(player);
-		(void)kl_ui_pointer_motion(player->ui, event->x, event->y);
+		(void)kl_ui_pointer_motion(player->ui, vp_units(player->scale, event->x), vp_units(player->scale, event->y));
 		if (event->code == KL_BUTTON_LEFT)
 			(void)kl_ui_pointer_button(player->ui, event->pressed, event->arrival_us);
 
@@ -586,10 +600,10 @@ vp_input(
 		break;
 	case KL_WINDOW_TOUCH_DOWN:
 		player->bar_until = now + vp_bar_time(player);
-		(void)kl_ui_touch_down(player->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_down(player->ui, event->id, event->time_us, event->arrival_us, vp_units(player->scale, event->x), vp_units(player->scale, event->y));
 		break;
 	case KL_WINDOW_TOUCH_MOTION:
-		(void)kl_ui_touch_motion(player->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_motion(player->ui, event->id, event->time_us, event->arrival_us, vp_units(player->scale, event->x), vp_units(player->scale, event->y));
 		break;
 	case KL_WINDOW_TOUCH_UP:
 		(void)kl_ui_touch_up(player->ui, event->id, event->time_us, event->arrival_us);
@@ -629,6 +643,17 @@ vp_input(
 		break;
 	case KL_WINDOW_RESIZE:
 		player->resized = 1;
+		break;
+	case KL_WINDOW_SCALE:
+		player->scale = kl_window_scale(player->window);
+		if (player->scale == 0U)
+			player->scale = KL_SCALE_BASE;
+		kl_ui_set_scale(player->ui, player->scale);
+		if (player->canvas_made) {
+			kl_canvas_set_scale(&player->canvas, player->scale);
+			vp_logical_size(player);
+		}
+		player->dirty = 1;
 		break;
 	case KL_WINDOW_CLOSE:
 		player->quit = 1;
@@ -862,6 +887,8 @@ vp_resize(
 	status = kl_canvas_init(&player->canvas, player->pixels, (size_t)player->width, (int)player->width, (int)player->height);
 	if (status != 0)
 		return -1;
+	kl_canvas_set_scale(&player->canvas, player->scale);
+	vp_logical_size(player);
 
 	/* Succeeded: drawn again at the new size, from now. */
 	player->resized_us = kl_clock_us();
@@ -1528,8 +1555,8 @@ vp_draw_bar(
 
 	/* The bar, dark over the picture. */
 	bar.x = 0;
-	bar.y = (int)player->height - VP_BAR_HEIGHT;
-	bar.width = (int)player->width;
+	bar.y = (int)player->logical_height - VP_BAR_HEIGHT;
+	bar.width = (int)player->logical_width;
 	bar.height = VP_BAR_HEIGHT;
 	kl_canvas_fill(&player->canvas, &bar, KL_RGBA(0x000000, 160));
 
@@ -1552,13 +1579,13 @@ vp_draw_bar(
 	(void)snprintf(times, sizeof(times), "%s / %s", now_text, length_text);
 	kl_text_metrics(&player->text, 14U, &line);
 	width = kl_text_width(&player->text, times, strlen(times), 14U, 0);
-	(void)kl_text_draw(&player->text, &player->canvas, (int)player->width - width - 16, bar.y + (VP_BAR_HEIGHT + line.ascent - line.descent) / 2,
+	(void)kl_text_draw(&player->text, &player->canvas, (int)player->logical_width - width - 16, bar.y + (VP_BAR_HEIGHT + line.ascent - line.descent) / 2,
 	    times, strlen(times), 14U, 0, KL_RGB(0xffffff));
 
 	/* The position: it follows the clock, and a drag seeks (not more often than VP_SEEK_US). */
 	slider.x = button.x + button.width + 16;
 	slider.y = bar.y + 12;
-	slider.width = (int)player->width - slider.x - width - 32;
+	slider.width = (int)player->logical_width - slider.x - width - 32;
 	slider.height = 32;
 	if (slider.width < 40 || duration <= 0.0)
 		return;
@@ -1697,4 +1724,34 @@ vp_double_click(
 	player->click_x = (int32_t)event->x;
 	player->click_y = (int32_t)event->y;
 	return 0;
+}
+
+/* Turns pixels from the window into logical units at the window's scale. */
+static double
+vp_units(
+	unsigned scale,
+	double pixels)
+{
+	/* At 100 % the pixels are the units. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return pixels;
+	return pixels * (double)KL_SCALE_BASE / (double)scale;
+}
+
+/* Computes the logical size of the canvas. */
+static void
+vp_logical_size(
+	struct vp_player *player)
+{
+	struct kl_rect pixels;
+	struct kl_rect units;
+
+	/* Convert pixel canvas size to logical units. */
+	pixels.x = 0;
+	pixels.y = 0;
+	pixels.width = (int)player->width;
+	pixels.height = (int)player->height;
+	kl_canvas_logical(&player->canvas, &pixels, &units);
+	player->logical_width = (uint32_t)units.width;
+	player->logical_height = (uint32_t)units.height;
 }

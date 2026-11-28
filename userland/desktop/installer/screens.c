@@ -192,15 +192,15 @@ screen_ground(
 	theme = app->style.theme;
 	whole.x = 0;
 	whole.y = 0;
-	whole.width = (int)app->width;
-	whole.height = (int)app->height;
+	whole.width = (int)app->logical_width;
+	whole.height = (int)app->logical_height;
 	kl_canvas_gradient(&app->canvas, &whole, theme->ground_top, theme->ground_bottom);
 
 	/* The panel. */
 	panel->x = SCREEN_MARGIN;
 	panel->y = SCREEN_MARGIN;
-	panel->width = (int)app->width - 2 * SCREEN_MARGIN;
-	panel->height = (int)app->height - 2 * SCREEN_MARGIN;
+	panel->width = (int)app->logical_width - 2 * SCREEN_MARGIN;
+	panel->height = (int)app->logical_height - 2 * SCREEN_MARGIN;
 	kl_panel(&app->style, panel, 0);
 }
 
@@ -528,8 +528,8 @@ screen_dialog(
 	/* The dialog over the window; Enter chooses the main button, Esc the last. */
 	whole.x = 0;
 	whole.y = 0;
-	whole.width = (int)app->width;
-	whole.height = (int)app->height;
+	whole.width = (int)app->logical_width;
+	whole.height = (int)app->logical_height;
 	chosen = kl_dialog(app->ui, &app->style, SCREEN_ID_DIALOG, &whole, title, body, labels, count);
 	if (chosen >= 0)
 		inst_dialog_answer(app, chosen);

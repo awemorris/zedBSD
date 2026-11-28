@@ -1946,6 +1946,12 @@ view_keep_under(
 	size_t row;
 	int error;
 
+	/* Desk-only shortcut uses pixel-exact copy at 100 % scale. */
+	if (style->canvas->scale != 0U && style->canvas->scale != KL_SCALE_BASE) {
+		view->desk_valid = 0;
+		return;
+	}
+
 	/* Within the canvas, or not kept. */
 	if (area->x < 0 ||
 	    area->y < 0 ||

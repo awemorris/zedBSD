@@ -79,6 +79,15 @@
 #define DISPLAY_NETDISP_CANCEL	6101
 
 /*
+ * The scales' controls: a display's steps from DISPLAY_SCALES (DISPLAY_STRIDE
+ * a display), and its Use Recommended at DISPLAY_SCALE_RECOMMENDED plus
+ * the display's index.
+ */
+#define DISPLAY_SCALES		7000
+#define DISPLAY_SCALE_RECOMMENDED 9000
+#define DISPLAY_SCALE_WIDTH	116
+
+/*
  * A display's part of the resolutions' card: its label's row, a line of
  * a reason or a trial, a size's tile and the space between the tiles,
  * its narrowest, and the room of the refreshes' label.
@@ -173,6 +182,20 @@ static void display_mode_text(const struct kl_display_mode *mode, char *text, si
 static void display_resolution_said(struct se_display *display, int error);
 static void display_resolution_message(struct se_display *display, const char *text, int bad);
 static const char *display_verb_word(unsigned verb);
+static int display_scale(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+static int display_scale_listed(const struct se_display *display, unsigned index);
+static int display_scale_height(const struct se_display *display, unsigned index, int width);
+static int display_scale_part(struct se_app *app, struct kl_canvas *canvas, unsigned index, int x, int y, int width);
+static void display_scale_tile(struct se_app *app, struct kl_canvas *canvas, unsigned index, unsigned slot, int x, int y, int width);
+static const char *display_scale_reason(unsigned why);
+static int display_scale_columns(int width);
+static int display_scale_free(const struct se_app *app, unsigned index);
+static int display_take_scales(struct se_app *app);
+static void display_scale_log(const struct se_display *display, unsigned index);
+static void display_scale_press(struct se_app *app, int index);
+static void display_send_scale(struct se_app *app, unsigned index, unsigned scale96);
+static void display_scale_said(struct se_display *display, int error);
+static void display_scale_message(struct se_display *display, const char *text, int bad);
 
 /*
  * Draws the Display page: the displays' card and, for a built-in panel,
@@ -241,8 +264,9 @@ se_display_draw(
 		y += 30;
 	}
 
-	/* The displays' resolutions, their angles (ws217-p004), then the light of a built-in panel, when the desktop can set it. */
+	/* The displays' resolutions, their scales, their angles (ws217-p004), then the light of a built-in panel, when the desktop can set it. */
 	y = display_resolution(app, canvas, x, y + DISPLAY_GAP, width);
+	y = display_scale(app, canvas, x, y, width);
 	y = display_rotation(app, canvas, x, y, width);
 	y = display_light(app, canvas, x, y, width);
 
@@ -426,6 +450,12 @@ se_display_press(
 	/* A display turned off or on, at once (ws113-p014). */
 	if (index >= DISPLAY_SHOWN && (size_t)(index - DISPLAY_SHOWN) < display->count) {
 		display_send_shown(app, (unsigned)(index - DISPLAY_SHOWN));
+		return;
+	}
+
+	/* A display's scale or Use Recommended: applied at once. */
+	if (index >= DISPLAY_SCALES) {
+		display_scale_press(app, index);
 		return;
 	}
 
@@ -678,6 +708,18 @@ se_display_result(
 		/* The popup goes, and the card says why. */
 		display_trial_close(app);
 		display_resolution_said(display, error);
+		return 1;
+	}
+
+	/* A scale set or reset: only its failure is told; the snapshot that follows shows the new scale. */
+	if (display->scale_request != 0U && request == display->scale_request) {
+		display->scale_request = 0U;
+		se_log("DISPLAY scale result errno=%d", error);
+		app->dirty = 1;
+		if (error == 0)
+			display_scale_message(display, "", 0);
+		else
+			display_scale_said(display, error);
 		return 1;
 	}
 
@@ -977,11 +1019,18 @@ display_rects(
 		if ((draft->flags & KL_DISPLAY_OFF) != 0U && display->draft_mode == KL_DISPLAYS_EXTENDED)
 			continue;
 
-		/* Its draft place and size; the mirror's at the origin. */
+		/* Its draft place and logical size; the mirror's at the origin. */
 		rects[count].x = draft->x;
 		rects[count].y = draft->y;
-		rects[count].width = draft->width;
-		rects[count].height = draft->height;
+		if (display->scale_told[index] != 0U &&
+		    display->scale[index].width > 0U &&
+		    display->scale[index].height > 0U) {
+			rects[count].width = display->scale[index].width;
+			rects[count].height = display->scale[index].height;
+		} else {
+			rects[count].width = draft->width;
+			rects[count].height = draft->height;
+		}
 		if (display->draft_mode == KL_DISPLAYS_MIRROR) {
 			rects[count].x = 0;
 			rects[count].y = 0;
@@ -1044,7 +1093,7 @@ display_spread(
 				continue;
 			draft->x = (int32_t)right;
 			draft->y = 0;
-			right += draft->width;
+			right += rects[slot].width;
 		}
 	}
 }
@@ -1070,6 +1119,7 @@ display_take(
 	int changed;
 	int turned;
 	int resized;
+	int scaled;
 	int differs;
 	int index;
 
@@ -1130,6 +1180,9 @@ display_take(
 		changed = 1;
 	resized = display_take_resolutions(app);
 	if (resized)
+		changed = 1;
+	scaled = display_take_scales(app);
+	if (scaled)
 		changed = 1;
 	if (changed != 0 && app->page == SE_PAGE_DISPLAY)
 		app->dirty = 1;
@@ -2626,4 +2679,477 @@ display_verb_word(
 
 	/* Not a verb. */
 	return "none";
+}
+
+/*
+ * Draws the Scale card for every shown display whose scales the desktop
+ * told (or the anchor alone in Mirror mode).  Returns the edge below it.
+ */
+static int
+display_scale(
+	struct se_app *app,
+	struct kl_canvas *canvas,
+	int x,
+	int top,
+	int width)
+{
+	struct se_display *display;
+	const char *subtitle;
+	kl_color ink;
+	unsigned listed;
+	unsigned index;
+	int height;
+	int y;
+
+	/* Which displays are listed. */
+	display = &app->display;
+	listed = 0U;
+	height = DISPLAY_TITLED + DISPLAY_PAD;
+	for (index = 0U; index < display->count; index++) {
+		if (!display_scale_listed(display, index))
+			continue;
+		if (listed > 0U)
+			height += 12;
+		height += display_scale_height(display, index, width);
+		listed++;
+	}
+	if (listed == 0U)
+		return top;
+
+	/* The card. */
+	subtitle = kl_tr("Choose how large text and controls are drawn on each display.");
+	y = se_card_begin(app, canvas, x, top, width, height, kl_tr("Scale"), subtitle);
+	listed = 0U;
+	for (index = 0U; index < display->count; index++) {
+		if (!display_scale_listed(display, index))
+			continue;
+		if (listed > 0U) {
+			struct kl_rect divider;
+
+			divider.x = x + DISPLAY_PAD;
+			divider.y = y + 6;
+			divider.width = width - 2 * DISPLAY_PAD;
+			divider.height = 1;
+			kl_canvas_fill(canvas, &divider, SE_COLOR_CARD_EDGE);
+			y += 12;
+		}
+		y = display_scale_part(app, canvas, index, x, y, width);
+		listed++;
+	}
+
+	/* The last answer, under the card. */
+	y = top + height;
+	if (display->scale_message[0] != '\0') {
+		ink = SE_COLOR_TEXT_SECONDARY;
+		if (display->scale_bad)
+			ink = SE_COLOR_BAD;
+		(void)kl_text_draw_fit(app->text, canvas, x + 2, y + 18, display->scale_message, DISPLAY_TEXT_SMALL, 0, width, ink);
+		y += 30;
+	}
+
+	/* The edge below the card, and the space after it. */
+	return y + DISPLAY_GAP;
+}
+
+/* Tells whether the Scale card lists a display: shown, its scales told, and (in Mirror mode) the anchor. */
+static int
+display_scale_listed(
+	const struct se_display *display,
+	unsigned index)
+{
+	/* A display shown whose scales the desktop told. */
+	if ((display->displays[index].flags & KL_DISPLAY_SHOWN) == 0U)
+		return 0;
+	if (!display->scale_told[index])
+		return 0;
+	if (display->mode == KL_DISPLAYS_MIRROR && (display->displays[index].flags & KL_DISPLAY_ANCHOR) == 0U)
+		return 0;
+
+	/* Listed. */
+	return 1;
+}
+
+/* Reports the height of a display's part of the Scale card. */
+static int
+display_scale_height(
+	const struct se_display *display,
+	unsigned index,
+	int width)
+{
+	const struct kl_display_scale *scale;
+	int columns;
+	int rows;
+	int height;
+
+	/* The label, and a line for a reason if it cannot be changed now. */
+	scale = &display->scale[index];
+	height = DISPLAY_RES_LABEL;
+	if (display_scale_reason(scale->why) != NULL)
+		height += DISPLAY_RES_LINE;
+
+	/* The rows of the scale steps, and Use Recommended. */
+	columns = display_scale_columns(width);
+	rows = ((int)scale->offered_count + columns - 1) / columns;
+	if (rows < 1)
+		rows = 1;
+	height += rows * (DISPLAY_SIZE_HEIGHT + DISPLAY_SIZE_GAP);
+	height += DISPLAY_BUTTONS;
+
+	/* The part's height. */
+	return height;
+}
+
+/* Draws a display's part of the Scale card; returns the edge below it. */
+static int
+display_scale_part(
+	struct se_app *app,
+	struct kl_canvas *canvas,
+	unsigned index,
+	int x,
+	int y,
+	int width)
+{
+	struct se_display *display;
+	const struct kl_display_scale *scale;
+	char shown_text[64];
+	const char *reason;
+	unsigned percent;
+	unsigned slot;
+	int columns;
+	int tile_width;
+	int text_width;
+	int free_now;
+	int enabled;
+	int bx;
+
+	/* The display's label, and the current scale and logical size at the right. */
+	display = &app->display;
+	scale = &display->scale[index];
+	percent = (scale->current * 100U + KL_SCALE_BASE / 2U) / KL_SCALE_BASE;
+	(void)snprintf(shown_text, sizeof(shown_text), "%u%% (%u x %u)", percent, (unsigned)scale->width, (unsigned)scale->height);
+	text_width = kl_text_width(app->text, shown_text, strlen(shown_text), DISPLAY_TEXT_SMALL, 0);
+	(void)kl_text_draw_fit(app->text, canvas, x + DISPLAY_PAD, y + 24, display->displays[index].label, DISPLAY_TEXT_TITLE, 0, width - 2 * DISPLAY_PAD - text_width - 16,
+	    SE_COLOR_TEXT);
+	(void)kl_text_draw_fit(app->text, canvas, x + width - DISPLAY_PAD - text_width, y + 24, shown_text, DISPLAY_TEXT_SMALL, 0, text_width, SE_COLOR_TEXT_SECONDARY);
+	y += DISPLAY_RES_LABEL;
+
+	/* Why none can be chosen now. */
+	reason = display_scale_reason(scale->why);
+	if (reason != NULL) {
+		(void)kl_text_draw_fit(app->text, canvas, x + DISPLAY_PAD, y + 14, reason, DISPLAY_TEXT_SMALL, 0, width - 2 * DISPLAY_PAD, SE_COLOR_TEXT_SECONDARY);
+		y += DISPLAY_RES_LINE;
+	}
+
+	/* Each offered step as a tile. */
+	columns = display_scale_columns(width);
+	tile_width = (width - 2 * DISPLAY_PAD - (columns - 1) * DISPLAY_SIZE_GAP) / columns;
+	for (slot = 0U; slot < scale->offered_count; slot++) {
+		int col = (int)(slot % (unsigned)columns);
+		int row = (int)(slot / (unsigned)columns);
+		display_scale_tile(app, canvas, index, slot, x + DISPLAY_PAD + col * (tile_width + DISPLAY_SIZE_GAP), y + row * (DISPLAY_SIZE_HEIGHT + DISPLAY_SIZE_GAP), tile_width);
+	}
+	y += (((int)scale->offered_count + columns - 1) / columns) * (DISPLAY_SIZE_HEIGHT + DISPLAY_SIZE_GAP);
+
+	/* Use Recommended: resets chosen scale back to automatic. */
+	free_now = display_scale_free(app, index);
+	enabled = free_now && scale->chosen != 0U;
+	bx = x + DISPLAY_PAD;
+	(void)se_button_draw(app, canvas, bx, y + 6, kl_tr("Use Recommended"), 0, enabled, DISPLAY_SCALE_RECOMMENDED + (int)index);
+	y += DISPLAY_BUTTONS;
+
+	/* The edge below the part. */
+	return y;
+}
+
+/* Draws one scale step's tile. */
+static void
+display_scale_tile(
+	struct se_app *app,
+	struct kl_canvas *canvas,
+	unsigned index,
+	unsigned slot,
+	int x,
+	int y,
+	int width)
+{
+	struct se_display *display;
+	const struct kl_display_scale *scale;
+	struct kl_rect hit;
+	char title[32];
+	const char *note;
+	unsigned step;
+	unsigned percent;
+	int stressed;
+	int free_now;
+	int hovered;
+	int control;
+	kl_color ground;
+	kl_color border;
+	kl_color ink;
+	kl_color sub_ink;
+
+	/* The step's percentage and whether it is the current or recommended one. */
+	display = &app->display;
+	scale = &display->scale[index];
+	step = scale->offered[slot];
+	percent = (step * 100U + KL_SCALE_BASE / 2U) / KL_SCALE_BASE;
+	(void)snprintf(title, sizeof(title), "%u%%", percent);
+	stressed = (step == scale->current);
+	free_now = display_scale_free(app, index);
+	control = DISPLAY_SCALES + (int)(index * DISPLAY_STRIDE + slot);
+	hovered = (app->hover_kind == SE_HIT_CONTROL && app->hover_index == control);
+
+	/* Colours, matching the Resolution tiles. */
+	ground = SE_COLOR_TILE;
+	border = SE_COLOR_CARD_EDGE;
+	ink = SE_COLOR_TEXT;
+	sub_ink = SE_COLOR_TEXT_SECONDARY;
+	if (stressed) {
+		ground = SE_COLOR_ACCENT;
+		border = SE_COLOR_ACCENT;
+		ink = SE_COLOR_ACCENT_TEXT;
+		sub_ink = SE_COLOR_ACCENT_TEXT;
+	} else if (hovered && free_now) {
+		ground = SE_COLOR_TILE_HOVER;
+	}
+
+	/* The tile. */
+	kl_canvas_round(canvas, (float)x, (float)y, (float)width, (float)DISPLAY_SIZE_HEIGHT, 8.0f, ground);
+	kl_canvas_round_border(canvas, (float)x, (float)y, (float)width, (float)DISPLAY_SIZE_HEIGHT, 8.0f, 1.0f, border);
+
+	/* Its percentage, and "Recommended" when it is the display's default. */
+	note = NULL;
+	if (step == scale->recommended)
+		note = kl_tr("Recommended");
+	if (note != NULL) {
+		(void)kl_text_draw_fit(app->text, canvas, x + 12, y + 25, title, DISPLAY_TEXT_TITLE, 0, width - 24, ink);
+		(void)kl_text_draw_fit(app->text, canvas, x + 12, y + 44, note, DISPLAY_TEXT_SMALL, 0, width - 24, sub_ink);
+	} else {
+		(void)kl_text_draw_fit(app->text, canvas, x + 12, y + 34, title, DISPLAY_TEXT_TITLE, 0, width - 24, ink);
+	}
+
+	/* Clickable when not already the current scale and free now. */
+	if (stressed || !free_now)
+		return;
+	hit.x = x;
+	hit.y = y;
+	hit.width = width;
+	hit.height = DISPLAY_SIZE_HEIGHT;
+	se_ui_hit(app, &hit, SE_HIT_CONTROL, control);
+}
+
+/* Gives the words of a reason why a display's scale cannot be chosen now, or NULL. */
+static const char *
+display_scale_reason(
+	unsigned why)
+{
+	/* Each reason. */
+	if ((why & KL_DISPLAY_SCALE_WHY_FIXED) != 0U)
+		return kl_tr("This display only supports 100% scale.");
+	if ((why & KL_DISPLAY_SCALE_WHY_ALONE) != 0U)
+		return kl_tr("Scale is controlled by the primary display while mirroring.");
+	if ((why & KL_DISPLAY_SCALE_WHY_BUSY) != 0U)
+		return kl_tr("The scale cannot be changed while a mode change or game is active.");
+	if ((why & KL_DISPLAY_SCALE_WHY_ANCHOR) != 0U)
+		return kl_tr("This display is not currently shown.");
+
+	/* Nothing stands in the way. */
+	return NULL;
+}
+
+/* Reports how many scale tiles fit in a row at its width. */
+static int
+display_scale_columns(
+	int width)
+{
+	int columns;
+
+	/* As many tiles as fit between the margins. */
+	columns = (width - 2 * DISPLAY_PAD + DISPLAY_SIZE_GAP) / (DISPLAY_SCALE_WIDTH + DISPLAY_SIZE_GAP);
+	if (columns < 1)
+		columns = 1;
+
+	/* The columns. */
+	return columns;
+}
+
+/* Tells whether a display's scale can be chosen now. */
+static int
+display_scale_free(
+	const struct se_app *app,
+	unsigned index)
+{
+	const struct se_display *display;
+
+	/* The desktop's reasons and any pending requests. */
+	display = &app->display;
+	if (app->system == NULL)
+		return 0;
+	if (display->scale[index].why != 0U)
+		return 0;
+	if (display->scale_request != 0U || display->resolution_request != 0U || display->trial_request != 0U)
+		return 0;
+	if (display->trial_shown || display->request != 0U)
+		return 0;
+
+	/* Free. */
+	return 1;
+}
+
+/* Takes each display's scale from the desktop; returns 1 when any changed. */
+static int
+display_take_scales(
+	struct se_app *app)
+{
+	struct se_display *display;
+	struct kl_display_scale scale;
+	unsigned told;
+	unsigned index;
+	int changed;
+	int differs;
+	int error;
+
+	/* Each display of the snapshot. */
+	display = &app->display;
+	changed = 0;
+	for (index = 0U; index < display->count; index++) {
+		memset(&scale, 0, sizeof(scale));
+		told = 0U;
+		error = kl_system_displays_scale(app->system, display->displays[index].key, &scale);
+		if (error == 0)
+			told = 1U;
+		differs = memcmp(&scale, &display->scale[index], sizeof(scale));
+		if (told != display->scale_told[index] || differs != 0) {
+			display->scale_told[index] = told;
+			display->scale[index] = scale;
+			changed = 1;
+			if (told)
+				display_scale_log(display, index);
+		}
+	}
+
+	/* Succeeded: whether anything changed. */
+	return changed;
+}
+
+/* Logs a display's scale state. */
+static void
+display_scale_log(
+	const struct se_display *display,
+	unsigned index)
+{
+	const struct kl_display_scale *scale;
+
+	/* Current, chosen, recommended, and offered count. */
+	scale = &display->scale[index];
+	se_log("DISPLAY scale key=%s current=%u chosen=%u recommended=%u offered=%u why=%u", display->displays[index].key, scale->current, scale->chosen, scale->recommended, scale->offered_count,
+	    scale->why);
+}
+
+/* Carries out a press on a display's scale tile or Use Recommended. */
+static void
+display_scale_press(
+	struct se_app *app,
+	int index)
+{
+	struct se_display *display;
+	const struct kl_display_scale *scale;
+	unsigned which;
+	unsigned slot;
+	int free_now;
+
+	/* The display and the control's place. */
+	display = &app->display;
+	if (index >= DISPLAY_SCALE_RECOMMENDED) {
+		which = (unsigned)(index - DISPLAY_SCALE_RECOMMENDED);
+		slot = 0U;
+	} else {
+		which = (unsigned)(index - DISPLAY_SCALES) / DISPLAY_STRIDE;
+		slot = (unsigned)(index - DISPLAY_SCALES) % DISPLAY_STRIDE;
+	}
+	if ((size_t)which >= display->count)
+		return;
+
+	/* Nothing while a change is under way or something stands in its way. */
+	free_now = display_scale_free(app, which);
+	if (!free_now)
+		return;
+	scale = &display->scale[which];
+
+	/* Use Recommended: reset chosen scale to automatic (0). */
+	if (index >= DISPLAY_SCALE_RECOMMENDED) {
+		if (scale->chosen == 0U)
+			return;
+		display_send_scale(app, which, 0U);
+		return;
+	}
+
+	/* One of the offered steps. */
+	if (slot >= scale->offered_count || scale->offered[slot] == scale->current)
+		return;
+	display_send_scale(app, which, scale->offered[slot]);
+}
+
+/* Asks the desktop to set a display's scale (0 for automatic). */
+static void
+display_send_scale(
+	struct se_app *app,
+	unsigned index,
+	unsigned scale96)
+{
+	struct se_display *display;
+	const char *key;
+	int error;
+
+	/* Asked of the desktop. */
+	display = &app->display;
+	key = display->displays[index].key;
+	error = kl_system_displays_set_scale(app->system, key, scale96, &display->scale_request);
+	se_log("DISPLAY scale set key=%s scale=%u error=%d", key, scale96, error);
+	app->dirty = 1;
+	if (error != 0) {
+		display->scale_request = 0U;
+		display_scale_message(display, kl_tr("This desktop cannot change the scale."), 1);
+	}
+}
+
+/* Reports why the desktop refused a scale change. */
+static void
+display_scale_said(
+	struct se_display *display,
+	int error)
+{
+	/* Each errno from kl_system_displays_set_scale. */
+	switch (error) {
+	case EINVAL:
+		display_scale_message(display, kl_tr("That scale cannot be used on this display."), 1);
+		break;
+	case ENOTSUP:
+		display_scale_message(display, kl_tr("This display does not support that scale."), 1);
+		break;
+	case EBUSY:
+		display_scale_message(display, kl_tr("The displays are being changed, or a game is shown. Try again later."), 1);
+		break;
+	case ENODEV:
+		display_scale_message(display, kl_tr("The display is not connected."), 1);
+		break;
+	case EPERM:
+		display_scale_message(display, kl_tr("The displays can be changed only in an unlocked session."), 1);
+		break;
+	default:
+		display_scale_message(display, kl_tr("The scale could not be changed."), 1);
+		break;
+	}
+}
+
+/* Keeps the scales' last message. */
+static void
+display_scale_message(
+	struct se_display *display,
+	const char *text,
+	int bad)
+{
+	/* The text and whether it tells of a failure. */
+	(void)snprintf(display->scale_message, sizeof(display->scale_message), "%s", text);
+	display->scale_bad = bad;
 }

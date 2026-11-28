@@ -159,6 +159,9 @@ struct ph_window {
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
+	uint32_t logical_width;
+	uint32_t logical_height;
+	unsigned scale;
 	struct kl_canvas canvas;
 	int canvas_made;
 	struct kl_text text;
@@ -242,6 +245,10 @@ static int ph_parse(int argc, char **argv, unsigned *width, unsigned *height, un
 static int ph_loop(struct ph_window *phone, unsigned timeout);
 static void ph_input(struct ph_window *phone, const struct kl_window_event *event);
 static int ph_resize(struct ph_window *phone);
+static double ph_units(unsigned scale, double pixels);
+static int ph_pixel(int units, unsigned scale);
+static void ph_logical_size(struct ph_window *phone);
+static void ph_part_pixels(const struct ph_window *phone, const struct kl_rect *logical, unsigned count, struct kl_rect *pixels);
 static void ph_draw(struct ph_window *phone, uint64_t now_us);
 static int ph_wait(const struct ph_window *phone, uint64_t now_us);
 static void ph_store_start(void);
@@ -362,6 +369,15 @@ main(
 		ph_view_release(&phone.view);
 		return 1;
 	}
+
+	/* Follow the compositor's scale. */
+	error = kl_window_follow_scale(phone.window);
+	if (error != 0)
+		ph_log("SCALE follow=refused errno=%d", error);
+	phone.scale = kl_window_scale(phone.window);
+	if (phone.scale == 0U)
+		phone.scale = KL_SCALE_BASE;
+	kl_ui_set_scale(phone.ui, phone.scale);
 
 	/*
 	 * The pointer's motions merged, and each frame drawn once the
@@ -665,7 +681,7 @@ ph_input(
 		 * window; another lit widget only its part (BUG-226); a button held
 		 * over the same widget draws nothing.
 		 */
-		redraw = kl_ui_pointer_motion(phone->ui, event->x, event->y);
+		redraw = kl_ui_pointer_motion(phone->ui, ph_units(phone->scale, event->x), ph_units(phone->scale, event->y));
 		if (redraw && phone->buttons_held != 0U)
 			phone->dirty = 1;
 		else if (redraw)
@@ -687,7 +703,7 @@ ph_input(
 			phone->buttons_held--;
 
 		/* The left button presses the widgets. */
-		(void)kl_ui_pointer_motion(phone->ui, event->x, event->y);
+		(void)kl_ui_pointer_motion(phone->ui, ph_units(phone->scale, event->x), ph_units(phone->scale, event->y));
 		if (event->code == KL_BUTTON_LEFT)
 			(void)kl_ui_pointer_button(phone->ui, event->pressed, event->arrival_us);
 		break;
@@ -699,10 +715,10 @@ ph_input(
 			ph_log("KINETIC fling source=finger");
 		break;
 	case KL_WINDOW_TOUCH_DOWN:
-		(void)kl_ui_touch_down(phone->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_down(phone->ui, event->id, event->time_us, event->arrival_us, ph_units(phone->scale, event->x), ph_units(phone->scale, event->y));
 		break;
 	case KL_WINDOW_TOUCH_MOTION:
-		(void)kl_ui_touch_motion(phone->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_motion(phone->ui, event->id, event->time_us, event->arrival_us, ph_units(phone->scale, event->x), ph_units(phone->scale, event->y));
 		break;
 	case KL_WINDOW_TOUCH_UP:
 		(void)kl_ui_touch_up(phone->ui, event->id, event->time_us, event->arrival_us);
@@ -727,6 +743,17 @@ ph_input(
 		break;
 	case KL_WINDOW_RESIZE:
 		phone->resized = 1;
+		break;
+	case KL_WINDOW_SCALE:
+		phone->scale = kl_window_scale(phone->window);
+		if (phone->scale == 0U)
+			phone->scale = KL_SCALE_BASE;
+		kl_ui_set_scale(phone->ui, phone->scale);
+		if (phone->canvas_made) {
+			kl_canvas_set_scale(&phone->canvas, phone->scale);
+			ph_logical_size(phone);
+		}
+		phone->dirty = 1;
 		break;
 	case KL_WINDOW_CLOSE:
 		phone->view.quit = 1;
@@ -782,6 +809,8 @@ ph_resize(
 	status = kl_canvas_init(&phone->canvas, phone->pixels, (size_t)phone->width, (int)phone->width, (int)phone->height);
 	if (status != 0)
 		return -1;
+	kl_canvas_set_scale(&phone->canvas, phone->scale);
+	ph_logical_size(phone);
 
 	/* Succeeded: drawn again at the new size. */
 	phone->canvas_made = 1;
@@ -847,7 +876,7 @@ ph_draw(
 	phone->dirty = 0;
 	if (part_count == 0U) {
 		kl_ui_begin(phone->ui, now_us);
-		ph_view_draw(&phone->view, phone->ui, &phone->style, (int)phone->width, (int)phone->height, now_us);
+		ph_view_draw(&phone->view, phone->ui, &phone->style, (int)phone->logical_width, (int)phone->logical_height, now_us);
 		phone->moving = kl_ui_end(phone->ui, now_us);
 	}
 
@@ -855,7 +884,7 @@ ph_draw(
 	for (index = 0; index < part_count; index++) {
 		kl_canvas_clip_push(&phone->canvas, &parts[index]);
 		kl_ui_begin(phone->ui, now_us);
-		ph_view_draw(&phone->view, phone->ui, &phone->style, (int)phone->width, (int)phone->height, now_us);
+		ph_view_draw(&phone->view, phone->ui, &phone->style, (int)phone->logical_width, (int)phone->logical_height, now_us);
 		phone->moving = kl_ui_end(phone->ui, now_us);
 		kl_canvas_clip_pop(&phone->canvas);
 	}
@@ -871,7 +900,14 @@ ph_draw(
 
 	/* The glass's panels for the frame; a compositor without glass leaves the window opaque from the next one. */
 	if (phone->view.glass) {
-		count = ph_view_panels(&phone->view, (int)phone->width, (int)phone->height, panels, PH_PANELS_MAX);
+		count = ph_view_panels(&phone->view, (int)phone->logical_width, (int)phone->logical_height, panels, PH_PANELS_MAX);
+		for (index = 0U; index < (unsigned)count; index++) {
+			panels[index].x = ph_pixel(panels[index].x, phone->scale);
+			panels[index].y = ph_pixel(panels[index].y, phone->scale);
+			panels[index].width = ph_pixel(panels[index].width, phone->scale);
+			panels[index].height = ph_pixel(panels[index].height, phone->scale);
+			panels[index].radius = (float)ph_pixel((int)(panels[index].radius + 0.5f), phone->scale);
+		}
 		error = kl_window_set_glass(phone->window, panels, count);
 		if (error != 0) {
 			ph_log("GLASS failed error=%d", error);
@@ -882,7 +918,14 @@ ph_draw(
 	}
 
 	/* The frame shown, by its parts alone when it was drawn so (BUG-221). */
-	status = kl_window_present_parts(phone->window, phone->pixels, (size_t)phone->width, parts, part_count);
+	if (part_count != 0U && phone->scale != KL_SCALE_BASE) {
+		struct kl_rect pixel_parts[KL_FRAME_PARTS_MAX];
+
+		ph_part_pixels(phone, parts, part_count, pixel_parts);
+		status = kl_window_present_parts(phone->window, phone->pixels, (size_t)phone->width, pixel_parts, part_count);
+	} else {
+		status = kl_window_present_parts(phone->window, phone->pixels, (size_t)phone->width, parts, part_count);
+	}
 	if (status == EAGAIN)
 		phone->resized = 1;
 
@@ -2999,5 +3042,84 @@ ph_imports_free(
 		import = phone->imports;
 		phone->imports = import->next;
 		ph_import_free(import);
+	}
+}
+
+/* Turns pixels from the window into logical units at the window's scale. */
+static double
+ph_units(
+	unsigned scale,
+	double pixels)
+{
+	/* At 100 % the pixels are the units. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return pixels;
+	return pixels * (double)KL_SCALE_BASE / (double)scale;
+}
+
+/* Turns a logical length into pixels at the window's scale. */
+static int
+ph_pixel(
+	int units,
+	unsigned scale)
+{
+	/* At 100 % the units are the pixels. */
+	if (scale == 0U || scale == KL_SCALE_BASE)
+		return units;
+	if (units >= 0)
+		return (units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE;
+	return -((-units * (int)scale + (int)KL_SCALE_BASE / 2) / (int)KL_SCALE_BASE);
+}
+
+/* Computes the logical size of the canvas. */
+static void
+ph_logical_size(
+	struct ph_window *phone)
+{
+	struct kl_rect pixels;
+	struct kl_rect units;
+
+	/* Convert pixel canvas size to logical units. */
+	pixels.x = 0;
+	pixels.y = 0;
+	pixels.width = (int)phone->width;
+	pixels.height = (int)phone->height;
+	kl_canvas_logical(&phone->canvas, &pixels, &units);
+	phone->logical_width = (uint32_t)units.width;
+	phone->logical_height = (uint32_t)units.height;
+}
+
+/* Turns logical damage rectangles into pixel rectangles. */
+static void
+ph_part_pixels(
+	const struct ph_window *phone,
+	const struct kl_rect *logical,
+	unsigned count,
+	struct kl_rect *pixels)
+{
+	unsigned index;
+	int left;
+	int top;
+	int right;
+	int bottom;
+
+	/* Each rectangle, rounded outward and clamped to the pixel canvas. */
+	for (index = 0U; index < count; index++) {
+		left = (logical[index].x * (int)phone->scale) / (int)KL_SCALE_BASE;
+		top = (logical[index].y * (int)phone->scale) / (int)KL_SCALE_BASE;
+		right = ((logical[index].x + logical[index].width) * (int)phone->scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		bottom = ((logical[index].y + logical[index].height) * (int)phone->scale + (int)KL_SCALE_BASE - 1) / (int)KL_SCALE_BASE;
+		if (left < 0)
+			left = 0;
+		if (top < 0)
+			top = 0;
+		if (right > (int)phone->width)
+			right = (int)phone->width;
+		if (bottom > (int)phone->height)
+			bottom = (int)phone->height;
+		pixels[index].x = left;
+		pixels[index].y = top;
+		pixels[index].width = right > left ? right - left : 0;
+		pixels[index].height = bottom > top ? bottom - top : 0;
 	}
 }
