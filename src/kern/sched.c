@@ -5453,3 +5453,124 @@ hint_handoff(
 		hal_irq_enable();
 }
 #endif
+
+/*
+ * Maps a POSIX nice value (-20 .. 20) to a scheduler priority level.
+ * Negative nice values run one level above the user default so that
+ * latency-sensitive services (such as the compositor) are not preempted
+ * by equal-priority user threads when the desktop balancer is not built.
+ */
+int
+sched_nice_priority(
+	int nice_value)
+{
+	/* Urgent nice values run one level above the user default. */
+	if (nice_value < 0)
+		return SCHED_PRIORITY_DEFAULT - 1;
+
+	/* Patient nice values run below the user default. */
+	if (nice_value >= 10)
+		return SCHED_PRIORITY_DEFAULT + 2;
+	if (nice_value > 0)
+		return SCHED_PRIORITY_DEFAULT + 1;
+
+	/* Zero keeps the user default. */
+	return SCHED_PRIORITY_DEFAULT;
+}
+
+/*
+ * Updates the scheduler priority of one thread, moving it between run
+ * queues if it is runnable and requesting preemption if it now outranks
+ * the running thread on its CPU.
+ */
+static void
+set_thread_priority(
+	struct thread *thread,
+	int priority)
+{
+	struct sched_cpu *cpu;
+	struct thread *running;
+	unsigned long irq;
+	hal_cpu_id_t id;
+	int notify;
+
+	/* Clamp to valid scheduler priority bounds. */
+	if (priority < SCHED_PRIOR_HIGH)
+		priority = SCHED_PRIOR_HIGH;
+	if (priority > SCHED_PRIOR_LOW)
+		priority = SCHED_PRIOR_LOW;
+
+	/* Lock the CPU currently holding the thread. */
+	for (;;) {
+		id = (hal_cpu_id_t)atomic_raw_load_acquire(
+		    (volatile unsigned *)&thread->sched.cpu);
+		if (id >= scheduler_cpu_count) {
+			thread->sched.priority = priority;
+			return;
+		}
+		cpu = sched_cpu_state(id);
+		irq = spin_lock_irqsave(&cpu->lock);
+		if (id == thread->sched.cpu)
+			break;
+		spin_unlock_irqrestore(&cpu->lock, irq);
+	}
+
+	/* Nothing to do if the priority already matches. */
+	if (thread->sched.priority == priority) {
+		spin_unlock_irqrestore(&cpu->lock, irq);
+		return;
+	}
+
+	notify = 0;
+	if (thread->state == THREAD_RUNNABLE &&
+	    (thread->sched.queue_kind == SCHED_QUEUE_RUN ||
+	     thread->sched.queue_kind == SCHED_QUEUE_WOKEN)) {
+		/* Requeue at the new priority level. */
+		queue_remove_thread(cpu, thread);
+		thread->sched.priority = priority;
+		running = cpu->current;
+		if (running == NULL ||
+		    (running->flags & THREAD_FLAG_IDLE) != 0 ||
+		    priority < running->sched.priority) {
+			queue_append(&cpu->woken[priority], thread,
+			    SCHED_QUEUE_WOKEN);
+			cpu->preempt = 1;
+			notify = 1;
+		} else {
+			queue_append(&cpu->run[priority], thread,
+			    SCHED_QUEUE_RUN);
+		}
+		cpu->need_resched = 1;
+	} else {
+		/* Running, sleeping, or new threads take the new priority directly. */
+		thread->sched.priority = priority;
+	}
+
+	spin_unlock_irqrestore(&cpu->lock, irq);
+
+	if (notify)
+		notify_cpu(id);
+}
+
+/*
+ * Updates the scheduler priority of every thread belonging to a process.
+ */
+void
+sched_set_process_priority(
+	struct process *process,
+	int priority)
+{
+	struct thread *thread;
+	unsigned long irq;
+
+	if (process == NULL)
+		return;
+
+	/* Walk the process thread list; cpu->lock is a leaf under process->lock. */
+	irq = spin_lock_irqsave(&process->lock);
+
+	for (thread = process->threads; thread != NULL; thread = thread->proc_next)
+		set_thread_priority(thread, priority);
+
+	spin_unlock_irqrestore(&process->lock, irq);
+}

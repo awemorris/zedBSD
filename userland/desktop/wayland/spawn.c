@@ -31,6 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <unistd.h>
 
 /* The descriptor number a lent descriptor gets in the program, or the next one when the lent one is it already. */
@@ -461,6 +462,8 @@ spawn_run(
 	job->error = posix_spawn(&job->pid, job->path, &actions, &attributes, job->arguments, job->environment);
 	if (job->error != 0)
 		job->pid = 0;
+	else if (job->pid > 0)
+		(void)setpriority(PRIO_PROCESS, (id_t)job->pid, 0);
 	posix_spawnattr_destroy(&attributes);
 	posix_spawn_file_actions_destroy(&actions);
 

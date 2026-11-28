@@ -86,6 +86,7 @@
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/resource.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
 #include <syslog.h>
@@ -787,6 +788,13 @@ session_child(
 
 	/* The system bar reaches networkd through the group its socket admits. */
 	session_network_group();
+
+	/*
+	 * Give the session compositor urgent scheduling priority so input
+	 * and frame composition are not starved by client threads; apps
+	 * spawned by the compositor reset their own nice value to 0.
+	 */
+	(void)setpriority(PRIO_PROCESS, 0, -10);
 
 	/* The user's ids, which leave root behind. */
 	error = setgid(account->passwd.pw_gid);

@@ -9078,6 +9078,9 @@ sys_setpriority_call(
 			}
 
 			atomic_int_store_relaxed(&target->nice_value, value);
+#if !CONFIG_KERN_DESKTOP_BALANCER
+			sched_set_process_priority(target, sched_nice_priority(value));
+#endif
 		}
 
 		process_release(target);

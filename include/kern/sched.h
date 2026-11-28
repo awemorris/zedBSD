@@ -17,6 +17,7 @@
 #include <kern/types.h>
 #include <stdint.h>
 
+struct process;
 struct thread;
 struct spinlock;
 
@@ -334,5 +335,20 @@ sched_set_cpu(
 	struct thread *thread,
 	kern_cpu_id_t cpu,
 	enum sched_cpu_affinity affinity);
+
+/*
+ * Maps a POSIX nice value (-20 .. 20) to a scheduler priority level.
+ */
+int
+sched_nice_priority(
+	int nice_value);
+
+/*
+ * Updates the scheduler priority of every thread in a process.
+ */
+void
+sched_set_process_priority(
+	struct process *process,
+	int priority);
 
 #endif

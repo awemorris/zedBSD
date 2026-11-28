@@ -101,7 +101,12 @@ thread_create(
 	thread->state = THREAD_NEW;
 	thread->signal_altstack_flags = SS_DISABLE;
 	waitq_init(&thread->join_waitq, "thread join");
+#if !CONFIG_KERN_DESKTOP_BALANCER
+	thread->sched.priority = sched_nice_priority(
+	    atomic_int_load_relaxed(&process->nice_value));
+#else
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
+#endif
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 #if CONFIG_KERN_DESKTOP_BALANCER
 
@@ -192,7 +197,12 @@ thread_fork(
 	thread->state = THREAD_NEW;
 	thread->signal_altstack_flags = SS_DISABLE;
 	waitq_init(&thread->join_waitq, "thread join");
+#if !CONFIG_KERN_DESKTOP_BALANCER
+	thread->sched.priority = sched_nice_priority(
+	    atomic_int_load_relaxed(&process->nice_value));
+#else
 	thread->sched.priority = SCHED_PRIORITY_DEFAULT;
+#endif
 	thread->sched.quantum = SCHED_QUANTUM_TICKS;
 	hal_task_set_private(task, thread);
 #if CONFIG_KERN_DESKTOP_BALANCER
