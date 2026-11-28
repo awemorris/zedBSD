@@ -221,6 +221,11 @@ usb_audio_stream_start(
 
 	stream->running = 1U;
 	thread_start(stream->worker);
+	kern_logf("usb-audio: %s: start %s alt=%u ep=0x%02x attr=0x%02x max=%u int=%u fb=0x%02x rate=%u pkts=%u/s\n",
+	    stream->audio->tag, stream->capture ? "IN" : "OUT",
+	    alt->alternate_setting, alt->ep_address, alt->ep_attributes,
+	    alt->ep_max_packet, alt->ep_interval, alt->sync_ep_address,
+	    stream->format.rate, stream->packets_per_sec);
 
 	/* Succeeded: worker thread and zero-copy URB pipeline active. */
 	return 0;
@@ -495,21 +500,11 @@ usb_audio_alloc_urbs(
 	struct usb_audio_stream *stream)
 {
 	unsigned index;
-	size_t reserve_bytes;
-	int error;
-
-	reserve_bytes = stream->ring_bytes;
-	if (reserve_bytes < stream->urb_bytes)
-		reserve_bytes = stream->urb_bytes;
 
 	for (index = 0U; index < USB_AUDIO_URBS; index++) {
 		stream->urbs[index] = drv_usb_urb_alloc(stream->audio->device, stream->data_ep, stream->packet_count);
 		if (stream->urbs[index] == NULL)
 			return ENOMEM;
-
-		error = drv_usb_urb_reserve_transfer(stream->urbs[index], reserve_bytes);
-		if (error != 0 && error != ENOTSUP && error != EOPNOTSUPP)
-			return error;
 	}
 
 	if (stream->fb_ep != NULL) {
@@ -726,8 +721,11 @@ usb_audio_process_urb(
 		return;
 
 	status = drv_usb_urb_status(urb);
-	if (status != DRV_USB_URB_COMPLETE)
+	if (status != DRV_USB_URB_COMPLETE) {
+		kern_logf("usb-audio: %s: urb %u ended status=%d\n",
+		    stream->audio->tag, index, (int)status);
 		return;
+	}
 
 	if (stream->capture != 0U) {
 		total_actual = 0U;
@@ -867,10 +865,22 @@ usb_audio_submit_urb(
 		0U,
 		usb_audio_urb_cb,
 		stream);
-	if (error == 0)
+	if (error != 0) {
+		kern_logf("usb-audio: %s: setup urb %u err=%d off=%u len=%u\n",
+		    stream->audio->tag, index, error, buf_offset, buf_length);
+	} else {
 		error = drv_usb_urb_setup_isochronous(stream->urbs[index], stream->packets[index], stream->packet_count);
-	if (error == 0)
-		error = drv_usb_urb_submit(stream->urbs[index]);
+		if (error != 0) {
+			kern_logf("usb-audio: %s: iso urb %u err=%d pkts=%u len0=%u\n",
+			    stream->audio->tag, index, error, stream->packet_count, iso_lengths[0]);
+		} else {
+			error = drv_usb_urb_submit(stream->urbs[index]);
+			if (error != 0) {
+				kern_logf("usb-audio: %s: submit urb %u failed err=%d len=%u\n",
+				    stream->audio->tag, index, error, buf_length);
+			}
+		}
+	}
 
 	irq = spin_lock_irqsave(&stream->lock);
 
