@@ -1163,6 +1163,37 @@ struct i915_tc_port_world;
 struct i915_vbt_world;
 struct i915_hpd_world;
 
+/*
+ * The hardware cursor plane state of the resident display.
+ *
+ * Protected by its own mutex so cursor moves never block behind a primary
+ * presentation's vertical-blank wait.  Two 64x64 ARGB8888 scanout buffers
+ * are allocated and pinned on the first cursor_set and freed at display stop.
+ */
+struct i915_display_cursor {
+	struct mutex mutex;
+	int inited;
+	void *lease_owner;
+	uint64_t lease;
+	struct i915_scanout buf[2];
+	unsigned front;
+	int buf_ready;
+	uint32_t staging[64U * 64U];
+	int staging_valid;
+	int has_image;
+	int shown;
+	int32_t x;
+	int32_t y;
+	int pipe_up;
+	unsigned pipe;
+	uint32_t pipe_width;
+	uint32_t pipe_height;
+	struct i915_xd_ddb ddb;
+	struct i915_xd_plane_wm wm;
+	unsigned wm_levels;
+	int wm_written;
+};
+
 struct i915_display {
 	/* The device this display belongs to. */
 	struct i915_device *device;
@@ -1248,6 +1279,9 @@ struct i915_display {
 
 	/* The display lease; its own mutex protects it. */
 	struct i915_resident_display rd;
+
+	/* The hardware cursor plane of the resident display; its own mutex protects it. */
+	struct i915_display_cursor cursor;
 
 	/* The serving thread's side of the display window. */
 	struct i915_present_window window;

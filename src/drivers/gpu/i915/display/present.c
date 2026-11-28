@@ -57,12 +57,15 @@
 #include "resident.h"
 #include "scanout.h"
 #include "control.h"
+#include "display-power.h"
 #include "head.h"
 #include "hpd.h"
 #include "survey.h"
+#include "xd-dbuf.h"
 #include <kern/kcrt.h>
 
 #include "../i915.h"
+#include "../intel/display-regs-xd.h"
 #include "../memory.h"
 #include "../session.h"
 #include "../worker.h"
@@ -139,6 +142,13 @@ static int i915_present_flip(struct i915_display *display, int publish);
 static void i915_present_hold_end(struct i915_display *display);
 static void i915_present_clear_stale(struct i915_display *display, struct i915_scanout *back, uint32_t width, uint32_t height, uint32_t scale);
 static int i915_present_latch(struct i915_device *device);
+static void i915_cursor_init(struct i915_display *display);
+static int i915_cursor_check(struct i915_display *display, void *session, uint64_t lease, uint64_t generation);
+static int i915_cursor_ensure_buffers(struct i915_device *device, struct i915_display_cursor *cursor);
+static void i915_cursor_hw_write(struct i915_display *display, int show);
+static void i915_cursor_pipe_up(struct i915_display *display);
+static void i915_cursor_pipe_down(struct i915_display *display);
+static void i915_cursor_release(struct i915_display *display);
 
 /*
  * Shows a CPU frame on the panel.
@@ -598,6 +608,256 @@ drv_i915_present_display_release(
 
 	/* Succeeded: the lease is free. */
 	return 0;
+}
+
+/*
+ * Copies a cursor image into the next 64x64 ARGB8888 scanout buffer and
+ * updates the hardware cursor if it is currently shown (GPU_DISPLAY_CURSOR_SET).
+ */
+int
+drv_i915_present_cursor_set(
+	void *device,
+	void *session,
+	void *object,
+	const struct gpu_display_cursor_image *request)
+{
+	struct i915_device *owner_device;
+	struct i915_display *display;
+	struct i915_display_cursor *cursor;
+	struct i915_gem_object *storage;
+	struct i915_scanout *back;
+	const uint32_t *src;
+	uint32_t *dst;
+	uint64_t span;
+	uint32_t row;
+	uint32_t col;
+	uint32_t pixel;
+	int error;
+
+	owner_device = device;
+	display = owner_device->display;
+	storage = object;
+	if (display == NULL || storage == NULL)
+		return EINVAL;
+
+	/* Validates image dimensions, format and storage bounds before locking. */
+	if (request->width == 0U || request->height == 0U ||
+	    request->width > GPU_DISPLAY_CURSOR_MAX ||
+	    request->height > GPU_DISPLAY_CURSOR_MAX)
+		return EINVAL;
+	if (request->format != GPU_PIXEL_BGRA8888 && request->format != GPU_PIXEL_RGBA8888)
+		return EINVAL;
+	if (request->stride < request->width * 4U || (request->stride & 3U) != 0U)
+		return EINVAL;
+	span = (uint64_t)request->stride * (request->height - 1U) + (uint64_t)request->width * 4U;
+	if (request->offset > storage->bytes || span > storage->bytes - request->offset)
+		return EINVAL;
+
+	cursor = &display->cursor;
+	i915_cursor_init(display);
+	mutex_lock(&cursor->mutex);
+
+	/* Verifies lease ownership, output generation and connection. */
+	error = i915_cursor_check(display, session, request->lease, request->generation);
+	if (error != 0) {
+		mutex_unlock(&cursor->mutex);
+		return error;
+	}
+
+	/*
+	 * Copies rows into the inactive GGTT buffer if already pinned by the
+	 * worker, or into the staging buffer before the first frame lights the pipe.
+	 */
+	back = NULL;
+	dst = cursor->staging;
+	if (cursor->buf_ready) {
+		back = &cursor->buf[cursor->front ^ 1U];
+		dst = back->cpu;
+	}
+	kern_memset(dst, 0, GPU_DISPLAY_CURSOR_MAX * GPU_DISPLAY_CURSOR_MAX * 4U);
+	for (row = 0U; row < request->height; row++) {
+		src = (const uint32_t *)((const uint8_t *)storage->address + request->offset + (uint64_t)row * request->stride);
+		for (col = 0U; col < request->width; col++) {
+			pixel = src[col];
+			if (request->format == GPU_PIXEL_RGBA8888) {
+				pixel = (pixel & 0xff00ff00U) |
+					((pixel & 0x00ff0000U) >> 16) |
+					((pixel & 0x000000ffU) << 16);
+			}
+			dst[row * GPU_DISPLAY_CURSOR_MAX + col] = pixel;
+		}
+	}
+
+	/* Flushes CPU cache lines when writing directly to the pinned scanout buffer. */
+	if (back != NULL) {
+		drv_i915_scanout_publish(back);
+		cursor->front ^= 1U;
+		cursor->staging_valid = 0;
+	} else {
+		cursor->staging_valid = 1;
+	}
+	cursor->has_image = 1;
+
+	/* Arms the new cursor buffer if the cursor is currently visible on a lit pipe. */
+	if (cursor->pipe_up && cursor->shown && cursor->buf_ready)
+		i915_cursor_hw_write(display, 1);
+
+	mutex_unlock(&cursor->mutex);
+
+	return 0;
+}
+
+/*
+ * Shows or moves the hardware cursor to (x, y) on the leased output
+ * (GPU_DISPLAY_CURSOR_MOVE).
+ */
+int
+drv_i915_present_cursor_move(
+	void *device,
+	void *session,
+	const struct gpu_display_cursor_move *request)
+{
+	struct i915_device *owner_device;
+	struct i915_display *display;
+	struct i915_display_cursor *cursor;
+	int error;
+
+	owner_device = device;
+	display = owner_device->display;
+	if (display == NULL)
+		return EINVAL;
+
+	cursor = &display->cursor;
+	i915_cursor_init(display);
+	mutex_lock(&cursor->mutex);
+
+	/* Verifies lease ownership, output generation and connection. */
+	error = i915_cursor_check(display, session, request->lease, request->generation);
+	if (error != 0) {
+		mutex_unlock(&cursor->mutex);
+		return error;
+	}
+
+	/* A cursor image must be set before it can be shown. */
+	if (!cursor->has_image) {
+		mutex_unlock(&cursor->mutex);
+		return EINVAL;
+	}
+
+	/* Records the new position and arms the hardware cursor if the pipe is lit. */
+	cursor->x = request->x;
+	cursor->y = request->y;
+	cursor->shown = 1;
+	if (cursor->pipe_up && cursor->buf_ready)
+		i915_cursor_hw_write(display, 1);
+
+	mutex_unlock(&cursor->mutex);
+
+	return 0;
+}
+
+/*
+ * Hides the hardware cursor while keeping its image (GPU_DISPLAY_CURSOR_HIDE).
+ */
+int
+drv_i915_present_cursor_hide(
+	void *device,
+	void *session,
+	const struct gpu_display_cursor_hide *request)
+{
+	struct i915_device *owner_device;
+	struct i915_display *display;
+	struct i915_display_cursor *cursor;
+	int error;
+
+	owner_device = device;
+	display = owner_device->display;
+	if (display == NULL)
+		return EINVAL;
+
+	cursor = &display->cursor;
+	i915_cursor_init(display);
+	mutex_lock(&cursor->mutex);
+
+	/* Verifies lease ownership, output generation and connection. */
+	error = i915_cursor_check(display, session, request->lease, request->generation);
+	if (error != 0) {
+		mutex_unlock(&cursor->mutex);
+		return error;
+	}
+
+	/* Hides the hardware cursor if the pipe is lit. */
+	cursor->shown = 0;
+	if (cursor->pipe_up)
+		i915_cursor_hw_write(display, 0);
+
+	mutex_unlock(&cursor->mutex);
+
+	return 0;
+}
+
+/*
+ * Records the new lease owner for lock-free cursor validation against
+ * primary vblank waits.
+ */
+void
+drv_i915_present_cursor_claim(
+	struct i915_display *display,
+	void *session,
+	uint64_t lease)
+{
+	struct i915_display_cursor *cursor;
+
+	if (display == NULL)
+		return;
+
+	cursor = &display->cursor;
+	i915_cursor_init(display);
+	mutex_lock(&cursor->mutex);
+
+	/* Resets cursor visibility for the new lease. */
+	cursor->lease_owner = session;
+	cursor->lease = lease;
+	cursor->has_image = 0;
+	cursor->shown = 0;
+
+	mutex_unlock(&cursor->mutex);
+}
+
+/*
+ * Unpins and frees the hardware cursor buffers when the display stops.
+ */
+void
+drv_i915_present_cursor_fini(
+	struct i915_display *display)
+{
+	struct i915_display_cursor *cursor;
+	unsigned index;
+
+	if (display == NULL)
+		return;
+
+	cursor = &display->cursor;
+	if (!cursor->inited)
+		return;
+
+	mutex_lock(&cursor->mutex);
+
+	/* Unpins and destroys each buffer, or abandons it if the pipe did not stop. */
+	for (index = 0U; index < 2U; index++) {
+		if (cursor->buf[index].state == I915_SCANOUT_NONE)
+			continue;
+		if (cursor->pipe_up) {
+			drv_i915_scanout_abandon(&cursor->buf[index]);
+			continue;
+		}
+		if (cursor->buf[index].state == I915_SCANOUT_PINNED)
+			(void)drv_i915_scanout_unpin(&cursor->buf[index]);
+		(void)drv_i915_scanout_destroy(&cursor->buf[index]);
+	}
+	cursor->buf_ready = 0;
+
+	mutex_unlock(&cursor->mutex);
 }
 
 /*
@@ -1391,6 +1651,7 @@ i915_present_release_locked(
 	/* The panel is free. */
 	rd->owner = NULL;
 	rd->lease = 0U;
+	i915_cursor_release(device->display);
 
 	/* Reports a stop that failed. */
 	if (error != 0)
@@ -1541,6 +1802,7 @@ i915_present_window_serve(
 
 	/* The worker is inside the window while it serves; the pipe's refresh boundaries can be read from now on. */
 	drv_i915_display_refresh_up(display, 1);
+	i915_cursor_pipe_up(display);
 
 	/* Surveys the registers of the first picture, once in a start. */
 	drv_i915_survey_window_open(display);
@@ -1559,6 +1821,7 @@ i915_present_window_serve(
 
 	/* The mappings go first; the window is left. */
 	drv_i915_scanout_unmap_panel(display);
+	i915_cursor_pipe_down(display);
 	drv_i915_display_refresh_up(display, 0);
 
 	/* The window was served. */
@@ -2138,4 +2401,272 @@ i915_present_unplug_take(
 
 	/* Succeeded: whether the run's output was unplugged. */
 	return unplugged;
+}
+
+/* Initializes the cursor plane's mutex once. */
+static void
+i915_cursor_init(
+	struct i915_display *display)
+{
+	struct i915_display_cursor *cursor;
+
+	cursor = &display->cursor;
+	if (cursor->inited)
+		return;
+
+	(void)mutex_init(&cursor->mutex, LOCK_RANK_DEVICE, "i915-cursor");
+	cursor->inited = 1;
+}
+
+/* Verifies that the session owns the active lease and the output is connected at the given generation. */
+static int
+i915_cursor_check(
+	struct i915_display *display,
+	void *session,
+	uint64_t lease,
+	uint64_t generation)
+{
+	struct i915_display_cursor *cursor;
+	uint32_t display_id;
+	uint64_t current_gen;
+	int connected;
+
+	cursor = &display->cursor;
+	if (cursor->lease_owner != session || cursor->lease != lease)
+		return EBUSY;
+
+	(void)drv_i915_display_resident_identity(display, &display_id, &current_gen, &connected);
+	if (generation != current_gen)
+		return ESTALE;
+	if (!connected)
+		return ENXIO;
+
+	return 0;
+}
+
+/* Allocates and pins the two 64x64 ARGB8888 cursor buffers in the GGTT display window. */
+static int
+i915_cursor_ensure_buffers(
+	struct i915_device *device,
+	struct i915_display_cursor *cursor)
+{
+	unsigned index;
+	int error;
+
+	if (cursor->buf_ready)
+		return 0;
+
+	/* Creates and pins both cursor buffers; unwinds on failure. */
+	for (index = 0U; index < 2U; index++) {
+		error = drv_i915_scanout_create(&device->gt.mem,
+						GPU_DISPLAY_CURSOR_MAX,
+						GPU_DISPLAY_CURSOR_MAX,
+						I915_FOURCC_XRGB8888,
+						I915_MOD_LINEAR,
+						&cursor->buf[index]);
+		if (error != 0)
+			goto fail;
+
+		error = drv_i915_scanout_pin(&cursor->buf[index], "cursor");
+		if (error != 0)
+			goto fail;
+	}
+
+	cursor->buf_ready = 1;
+	return 0;
+
+fail:
+	for (index = 0U; index < 2U; index++) {
+		if (cursor->buf[index].state == I915_SCANOUT_PINNED)
+			(void)drv_i915_scanout_unpin(&cursor->buf[index]);
+		if (cursor->buf[index].state != I915_SCANOUT_NONE)
+			(void)drv_i915_scanout_destroy(&cursor->buf[index]);
+	}
+	return ENOMEM;
+}
+
+/* Programs CUR_WM, CUR_BUF_CFG, CUR_CTL, CUR_POS and CUR_BASE (arming write) for the lit pipe. */
+static void
+i915_cursor_hw_write(
+	struct i915_display *display,
+	int show)
+{
+	struct i915_display_cursor *cursor;
+	struct i915_xd_io *io;
+	unsigned pipe;
+	uint32_t pos;
+	uint32_t x_mag;
+	uint32_t y_mag;
+	int dc_ok;
+
+	cursor = &display->cursor;
+	if (!cursor->pipe_up)
+		return;
+
+	pipe = cursor->pipe;
+	io = &display->xd.io;
+
+	/* Hides the cursor when its 64x64 box lies completely outside the active mode. */
+	if (show) {
+		if (cursor->x + (int32_t)GPU_DISPLAY_CURSOR_MAX <= 0 ||
+		    cursor->y + (int32_t)GPU_DISPLAY_CURSOR_MAX <= 0 ||
+		    cursor->x >= (int32_t)cursor->pipe_width ||
+		    cursor->y >= (int32_t)cursor->pipe_height)
+			show = 0;
+	}
+
+	/* Keeps the display out of DC states until the vblank latches CUR_BASE. */
+	dc_ok = (drv_i915_display_power_get(&display->power, I915_XD_POWERS_DC_OFF) == 0);
+
+	if (show) {
+		/* Writes cursor watermarks and DDB allocation once per pipe-up. */
+		if (!cursor->wm_written && display->xd.choice.platform != NULL) {
+			drv_i915_xd_wm_write_cursor(io,
+						    display->xd.choice.platform,
+						    pipe,
+						    cursor->wm_levels,
+						    &cursor->wm,
+						    0,
+						    &cursor->ddb);
+			cursor->wm_written = 1;
+		}
+
+		/* Encodes cursor position in sign-magnitude form. */
+		pos = 0U;
+		if (cursor->x < 0) {
+			x_mag = (uint32_t)(-cursor->x);
+			pos |= I915_XD_CUR_POS_X_SIGN | (x_mag & I915_XD_CUR_POS_COORD_MASK);
+		} else {
+			pos |= (uint32_t)cursor->x & I915_XD_CUR_POS_COORD_MASK;
+		}
+		if (cursor->y < 0) {
+			y_mag = (uint32_t)(-cursor->y);
+			pos |= I915_XD_CUR_POS_Y_SIGN | ((y_mag & I915_XD_CUR_POS_COORD_MASK) << I915_XD_CUR_POS_Y_SHIFT);
+		} else {
+			pos |= ((uint32_t)cursor->y & I915_XD_CUR_POS_COORD_MASK) << I915_XD_CUR_POS_Y_SHIFT;
+		}
+
+		/* Writes control and position, then CUR_BASE to arm the double-buffered update. */
+		drv_i915_xd_io_write(io, I915_XD_CUR_FBC_CTL(pipe), 0U);
+		drv_i915_xd_io_write(io, I915_XD_CUR_CTL(pipe), I915_XD_CUR_CTL_MODE_64_ARGB);
+		drv_i915_xd_io_write(io, I915_XD_CUR_POS(pipe), pos);
+		drv_i915_xd_io_write(io, I915_XD_CUR_BASE(pipe), (uint32_t)cursor->buf[cursor->front].surf);
+		(void)drv_i915_xd_io_posting_read(io, I915_XD_CUR_BASE(pipe));
+	} else {
+		/* Disables the cursor plane; CUR_BASE=0 arms the disable. */
+		drv_i915_xd_io_write(io, I915_XD_CUR_CTL(pipe), 0U);
+		drv_i915_xd_io_write(io, I915_XD_CUR_BASE(pipe), 0U);
+		(void)drv_i915_xd_io_posting_read(io, I915_XD_CUR_BASE(pipe));
+	}
+
+	if (dc_ok)
+		drv_i915_display_power_put_later(&display->power, I915_XD_POWERS_DC_OFF, I915_DISPLAY_POWER_LATER_MS);
+}
+
+/* Records the lit pipe's cursor DDB and watermarks and arms a pending cursor. */
+static void
+i915_cursor_pipe_up(
+	struct i915_display *display)
+{
+	struct i915_display_cursor *cursor;
+	struct i915_xd_picture *pic;
+	struct i915_xd_wm_pipe wm_pipe;
+	struct i915_xd_wm_surface wm_surf;
+	unsigned index;
+
+	cursor = &display->cursor;
+	pic = &display->xd.pictures.screen[I915_XD_PICTURE_RESIDENT];
+
+	i915_cursor_init(display);
+	mutex_lock(&cursor->mutex);
+
+	cursor->pipe_up = 1;
+	cursor->pipe = pic->config.pipe;
+	cursor->pipe_width = pic->config.fb_width;
+	cursor->pipe_height = pic->config.fb_height;
+	cursor->ddb = pic->plan.cursor_ddb;
+	cursor->wm_levels = pic->plan.wm_levels;
+	cursor->wm_written = 0;
+
+	/* Computes watermarks for a 64x64 linear 4-bpp cursor fitted to cursor_ddb. */
+	if (display->xd.choice.platform != NULL) {
+		kern_memset(&wm_pipe, 0, sizeof(wm_pipe));
+		wm_pipe.levels = pic->config.wm_levels;
+		for (index = 0U; index < 8U; index++)
+			wm_pipe.latency_us[index] = pic->config.wm_latency[index];
+		wm_pipe.ipc = pic->config.wm_ipc;
+		wm_pipe.sagv_block_us = pic->config.sagv_block_us;
+		wm_pipe.pixel_rate_khz = pic->plan.pixel_khz;
+		wm_pipe.htotal = (uint32_t)pic->plan.mode.htotal;
+
+		kern_memset(&wm_surf, 0, sizeof(wm_surf));
+		wm_surf.width = GPU_DISPLAY_CURSOR_MAX;
+		wm_surf.cpp = 4U;
+		wm_surf.layout = I915_XD_WM_LINEAR;
+		wm_surf.pixel_rate_khz = pic->plan.pixel_khz;
+
+		drv_i915_xd_wm_plane(display->xd.choice.platform, &wm_pipe, &wm_surf, &cursor->wm);
+		drv_i915_xd_wm_cursor_fit(&cursor->wm, cursor->wm_levels, &cursor->ddb);
+	}
+
+	/* Allocates and pins the two 64x64 cursor buffers on the worker thread. */
+	if (i915_cursor_ensure_buffers(display->device, cursor) == 0 && cursor->staging_valid) {
+		kern_memcpy(cursor->buf[cursor->front].cpu, cursor->staging, cursor->buf[cursor->front].size);
+		drv_i915_scanout_publish(&cursor->buf[cursor->front]);
+		cursor->staging_valid = 0;
+	}
+
+	/* Shows the cursor immediately if it was already set before the first frame. */
+	if (cursor->shown && cursor->has_image && cursor->buf_ready)
+		i915_cursor_hw_write(display, 1);
+
+	mutex_unlock(&cursor->mutex);
+}
+
+/* Hides the hardware cursor before the pipe stops. */
+static void
+i915_cursor_pipe_down(
+	struct i915_display *display)
+{
+	struct i915_display_cursor *cursor;
+
+	cursor = &display->cursor;
+	if (!cursor->inited)
+		return;
+
+	mutex_lock(&cursor->mutex);
+
+	if (cursor->pipe_up) {
+		i915_cursor_hw_write(display, 0);
+		cursor->pipe_up = 0;
+		cursor->wm_written = 0;
+	}
+
+	mutex_unlock(&cursor->mutex);
+}
+
+/* Clears cursor lease ownership and hides the hardware cursor on release or close. */
+static void
+i915_cursor_release(
+	struct i915_display *display)
+{
+	struct i915_display_cursor *cursor;
+
+	if (display == NULL)
+		return;
+
+	cursor = &display->cursor;
+	if (!cursor->inited)
+		return;
+
+	mutex_lock(&cursor->mutex);
+
+	cursor->lease_owner = NULL;
+	cursor->lease = 0U;
+	cursor->has_image = 0;
+	cursor->shown = 0;
+	if (cursor->pipe_up)
+		i915_cursor_hw_write(display, 0);
+
+	mutex_unlock(&cursor->mutex);
 }

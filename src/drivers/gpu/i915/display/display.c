@@ -194,9 +194,9 @@ static const struct drv_gpu_display_ops i915_display_ops = {
 	drv_i915_display_events,
 	i915_display_power,
 	i915_display_refresh,
-	NULL,
-	NULL,
-	NULL,
+	drv_i915_present_cursor_set,
+	drv_i915_present_cursor_move,
+	drv_i915_present_cursor_hide,
 	NULL,
 	0,
 	NULL,
@@ -869,6 +869,9 @@ drv_i915_display_stop(
 
 	/* The boot framebuffer display's staging area and view, once no address space maps them. */
 	drv_i915_bootfb_fini(device);
+
+	/* Releases the hardware cursor plane buffers once the pipes are down. */
+	drv_i915_present_cursor_fini(display);
 }
 
 /*
@@ -2046,8 +2049,8 @@ i915_display_query(
 	if (display->rd.active)
 		request->flags |= GPU_DISPLAY_ACTIVE;
 
-	/* The pipe's frames are its refresh boundaries; the panel's light is its power (not an HDMI display's). */
-	request->flags |= GPU_DISPLAY_REFRESH_COUNTER;
+	/* The pipe's frames are its refresh boundaries; the panel's light is its power (not an HDMI display's), and the cursor plane is on top. */
+	request->flags |= GPU_DISPLAY_REFRESH_COUNTER | GPU_DISPLAY_HAS_CURSOR;
 	if (display->output.kind == I915_OUTPUT_KIND_PANEL && !display->output.none)
 		request->flags |= GPU_DISPLAY_POWER_CONTROL;
 	if (display->rd.power_off)
@@ -2265,6 +2268,9 @@ i915_display_claim(
 	spin_unlock_irqrestore(&owner_device->irq_lock, irq);
 
 	mutex_unlock(&rd->mutex);
+
+	/* Mirrors the lease owner for lock-free cursor validation against primary vblank waits. */
+	drv_i915_present_cursor_claim(owner_device->display, session, request->lease);
 
 	kern_logf("i915: resident display: lease %llu claimed\n", (unsigned long long)request->lease);
 

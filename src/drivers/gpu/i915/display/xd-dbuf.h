@@ -164,6 +164,8 @@ int drv_i915_xd_wm_vblank_level(const struct i915_xd_wm_pipe *pipe, uint32_t clo
 void drv_i915_xd_wm_cut(struct i915_xd_plane_wm *wm, unsigned levels, unsigned deepest, int sagv_too_short);
 int drv_i915_xd_wm_allocate(const struct i915_xd_wm_pipe *pipe, const struct i915_xd_ddb *range, uint16_t cursor_blocks, struct i915_xd_plane_wm *wm, uint64_t data_rate, struct i915_xd_ddb *plane_ddb, struct i915_xd_ddb *cursor_ddb);
 void drv_i915_xd_wm_write_plane(struct i915_xd_io *io, const struct i915_xd_platform *platform, unsigned pipe, unsigned levels, const struct i915_xd_plane_wm *wm, int use_sagv, const struct i915_xd_ddb *ddb);
+void drv_i915_xd_wm_cursor_fit(struct i915_xd_plane_wm *wm, unsigned levels, const struct i915_xd_ddb *ddb);
+void drv_i915_xd_wm_write_cursor(struct i915_xd_io *io, const struct i915_xd_platform *platform, unsigned pipe, unsigned levels, const struct i915_xd_plane_wm *wm, int use_sagv, const struct i915_xd_ddb *ddb);
 uint8_t drv_i915_xd_dbuf_power(struct i915_xd_io *io, const struct i915_xd_platform *platform, uint8_t slices);
 void drv_i915_xd_dbuf_mbus(struct i915_xd_io *io, const struct i915_xd_platform *platform, int joined);
 uint32_t drv_i915_xd_dbuf_dbox_word(const struct i915_xd_platform *platform, int joined);

@@ -669,6 +669,70 @@ drv_i915_xd_wm_write_plane(
 }
 
 /*
+ * Fits a cursor plane's computed watermarks to its display buffer range,
+ * turning off levels that do not fit.
+ */
+void
+drv_i915_xd_wm_cursor_fit(
+	struct i915_xd_plane_wm *wm,
+	unsigned levels,
+	const struct i915_xd_ddb *ddb)
+{
+	unsigned index;
+
+	/* Each level against the cursor's allocation. */
+	for (index = 0U; index < levels && index < I915_XD_WM_LEVELS; index++)
+		i915_xd_wm_fit(&wm->level[index], ddb);
+
+	/* The transition and the SAGV watermarks. */
+	i915_xd_wm_fit(&wm->trans, ddb);
+	i915_xd_wm_fit(&wm->sagv, ddb);
+	i915_xd_wm_fit(&wm->sagv_trans, ddb);
+}
+
+/*
+ * Writes a cursor plane's watermarks and its display buffer range: each
+ * level, the transition, on display 13 the hardware SAGV level and its
+ * transition, then the cursor's buffer range.
+ */
+void
+drv_i915_xd_wm_write_cursor(
+	struct i915_xd_io *io,
+	const struct i915_xd_platform *platform,
+	unsigned pipe,
+	unsigned levels,
+	const struct i915_xd_plane_wm *wm,
+	int use_sagv,
+	const struct i915_xd_ddb *ddb)
+{
+	const struct i915_xd_wm_level *level;
+	unsigned index;
+
+	/* Each level. */
+	for (index = 0U; index < levels && index < I915_XD_WM_LEVELS; index++) {
+		level = &wm->level[index];
+		if (index == 0U && use_sagv)
+			level = &wm->sagv;
+		i915_xd_wm_write_level(io, I915_XD_CUR_WM(pipe, index), level);
+	}
+
+	/* The transition. */
+	level = &wm->trans;
+	if (use_sagv)
+		level = &wm->sagv_trans;
+	i915_xd_wm_write_level(io, I915_XD_CUR_WM_TRANS(pipe), level);
+
+	/* The hardware SAGV levels. */
+	if (platform->hw_sagv_wm) {
+		i915_xd_wm_write_level(io, I915_XD_CUR_WM_SAGV(pipe), &wm->sagv);
+		i915_xd_wm_write_level(io, I915_XD_CUR_WM_SAGV_TRANS(pipe), &wm->sagv_trans);
+	}
+
+	/* The buffer range. */
+	i915_xd_ddb_write(io, I915_XD_CUR_BUF_CFG(pipe), ddb);
+}
+
+/*
  * Writes a display 9 pipe's first plane's eight levels, its transition
  * (unused, 0) and its ranges, the cursor's levels (it stays off) and its
  * range, and the line time.  A plan of zeroes frees the pipe.  The

@@ -30,6 +30,9 @@
 struct i915_device;
 struct i915_display;
 struct i915_worker_present;
+struct gpu_display_cursor_hide;
+struct gpu_display_cursor_image;
+struct gpu_display_cursor_move;
 struct gpu_display_present;
 struct gpu_display_release;
 struct gpu_display_wait;
@@ -48,10 +51,17 @@ int drv_i915_present_release(struct i915_device *device);
 void drv_i915_present_shutdown(struct i915_device *device);
 int drv_i915_present_cut(struct i915_device *device);
 
-/* The present, wait and release operations of the node's display (private data: the device). */
+/* The present, wait, release and cursor operations of the node's display (private data: the device). */
 int drv_i915_present_display_present(void *device, void *session, void *object, struct gpu_display_present *request);
 int drv_i915_present_display_wait(void *device, void *session, struct gpu_display_wait *request);
 int drv_i915_present_display_release(void *device, void *session, const struct gpu_display_release *request);
+int drv_i915_present_cursor_set(void *device, void *session, void *object, const struct gpu_display_cursor_image *request);
+int drv_i915_present_cursor_move(void *device, void *session, const struct gpu_display_cursor_move *request);
+int drv_i915_present_cursor_hide(void *device, void *session, const struct gpu_display_cursor_hide *request);
+
+/* Updates cursor lease ownership on claim and frees cursor buffers on display stop. */
+void drv_i915_present_cursor_claim(struct i915_display *display, void *session, uint64_t lease);
+void drv_i915_present_cursor_fini(struct i915_display *display);
 
 /* Leaves the window to light the resident output again for two pipes, for a second output's first frame (the worker, IRQ lock held). */
 int drv_i915_present_relight_begin(struct i915_device *device);

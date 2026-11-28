@@ -1006,7 +1006,29 @@
 #define I915_XD_PLANE_WM_SAGV(pipe)		(0x70258U + I915_XD_PIPE_STRIDE * (pipe))
 #define I915_XD_PLANE_WM_SAGV_TRANS(pipe)	(0x7025cU + I915_XD_PIPE_STRIDE * (pipe))
 #define I915_XD_CUR_WM(pipe, level)		(0x70140U + I915_XD_PIPE_STRIDE * (pipe) + 4U * (level))
+#define I915_XD_CUR_WM_SAGV(pipe)		(0x70158U + I915_XD_PIPE_STRIDE * (pipe))
+#define I915_XD_CUR_WM_SAGV_TRANS(pipe)		(0x7015cU + I915_XD_PIPE_STRIDE * (pipe))
+#define I915_XD_CUR_WM_TRANS(pipe)		(0x70168U + I915_XD_PIPE_STRIDE * (pipe))
 #define I915_XD_CUR_BUF_CFG(pipe)		(0x7017cU + I915_XD_PIPE_STRIDE * (pipe))
+
+/*
+ * The cursor plane of a pipe: control (64x64 ARGB8888 mode), base address
+ * (whose write arms the update), position (sign-magnitude x and y), and
+ * frame buffer compressor control.
+ *
+ * Values referenced: Linux v6.8.12 drivers/gpu/drm/i915/display/intel_cursor_regs.h
+ * (_CUR_CNTR_A, MCURSOR_MODE_64_ARGB_AX, _CUR_BASE_A, _CUR_POS_A,
+ * CURSOR_POS_X_SIGN, CURSOR_POS_Y_SIGN, _CUR_FBC_CTL_A).
+ */
+#define I915_XD_CUR_CTL(pipe)			(0x70080U + I915_XD_PIPE_STRIDE * (pipe))
+#define I915_XD_CUR_CTL_MODE_64_ARGB		0x27U
+#define I915_XD_CUR_BASE(pipe)			(0x70084U + I915_XD_PIPE_STRIDE * (pipe))
+#define I915_XD_CUR_POS(pipe)			(0x70088U + I915_XD_PIPE_STRIDE * (pipe))
+#define I915_XD_CUR_POS_X_SIGN			0x00008000U
+#define I915_XD_CUR_POS_Y_SIGN			0x80000000U
+#define I915_XD_CUR_POS_COORD_MASK		0x00001fffU
+#define I915_XD_CUR_POS_Y_SHIFT			16U
+#define I915_XD_CUR_FBC_CTL(pipe)		(0x700a0U + I915_XD_PIPE_STRIDE * (pipe))
 #define I915_XD_WM_ENABLE			0x80000000U
 #define I915_XD_WM_IGNORE_LINES			0x40000000U
 #define I915_XD_WM_LINES			0x07ffc000U
